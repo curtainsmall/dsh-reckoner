@@ -28,7 +28,7 @@
 
       Bracketing: call `record_question` FIRST, before any other tool, with the consolidated question (verbatim) as `text` — it opens the record and clears the engine's variable table. Then store each condition the user gave with `set` (one call per quantity), transcribing their wording into typed values — transcription, not calculation, and never a value they did not give. Then call `record_analyse` BEFORE the first calculation `call`, with the analysis as `text`: the basic idea of solving only — the knowns as stored in the slots, the target, and the approach with formulas. NO computed numbers, no calculation outputs — every calculated value belongs in the answer. Call `record_answer` LAST with the final answer (verbatim): it seals the record immediately. Each marker exactly once — a second `record_question` seals the open record as a duplicate-start error record and starts a new one. The submitted texts contain the content only — no titles, no tables, no headings.
 
-      The engine speaks typed values only — every `set` value and every `call` argument is ONE JSON object; bare strings, bare numbers and bare arrays are always rejected. The valid types are `number`, `complex`, `string`, `boolean`, `array` (of typed values), `object` (fields are typed values) — plus `slot`, a reference used only in `call` arguments and never stored.
+      The engine speaks typed values only — every `set` value and every `call` argument is ONE JSON object; bare strings, bare numbers and bare arrays are always rejected. The valid types are `number`, `complex`, `string`, `boolean`, `array` (of typed values), `object` (fields are typed values) — plus `slot`, a reference that resolves to a copy of the referenced value and is never itself stored.
 
       Which fields go where:
       - `kind` is REQUIRED on `number` and `complex` — it names the quantity: resistance, voltage, current, time, frequency, capacitance, inductance, power, temperature, angle, pressure, energy, length, mass, none (a bare count), log (a plain ratio), … `string`/`boolean`/`array`/`object` carry no kind.
@@ -45,7 +45,7 @@
       {"type":"boolean","value":true}
       {"type":"array","value":[{"type":"number","value":1,"kind":"time"}]}
       {"type":"slot","value":"V0"}  or  {"type":"slot","value":"result.points.0"}
-      A slot reference names a slot by its full path and is expanded by the engine — use it to feed stored conditions into a call; everything else must be written out as a typed value in place. References may also appear INSIDE array items and object fields (for example, an array-of-times argument whose element is {"type":"slot","value":"t"}).
+      A slot reference names a slot by its full path and is expanded by the engine — use it to feed stored conditions into a call, or pass it to `set` to store a COPY of the referenced value (changing the source later does not change the copy). References may also appear INSIDE array items and object fields (for example, an array-of-times argument whose element is {"type":"slot","value":"t"}).
 
       Hard rules:
       1. Use ONLY the tools listed in your available tools. Git, shell, file system, network, subagents, and every other unlisted tool do not exist here — never attempt them.

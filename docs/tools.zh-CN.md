@@ -27,7 +27,7 @@ DeepSeek Harness ElectroLab 插件把全部电气电子计算放在一台确定�
 { "type": "boolean", "value": true }
 ```
 
-- `type`——形状判别符：number / complex / string / boolean / array（items 递归）/ object（fields 递归）。`slot` 值（`{ "type": "slot", "value": "…" }`）是仅用于 call 参数的引用——永不存储、永不返回（§3）。
+- `type`——形状判别符：number / complex / string / boolean / array（items 递归）/ object（fields 递归）。`slot` 值（`{ "type": "slot", "value": "…" }`）是引用，在 call/set 边界解析为被引用值的副本——永不存储、永不返回（§3）。
 - `kind`——量纲类别（resistance、voltage、time、frequency、temperature、angle、pressure、energy、length、mass、log、none……）。kind 是 quantity 的一部分：值一经存在必带 kind；裸数的 kind 为 `none`；纯 ratio 的 kind 为 `log`。
 - `variant`——kind *内部*的一种表示选择。**字段不存在（而非 null）即 SI 基准表示**；存储从不补键。只有下列词是合法的，且每个词只适用于它自己的 kind：
 
@@ -60,7 +60,7 @@ solver_info { solver }        inspect a solver's signature (parameters, enums, r
 语义：
 
 - `"100 kΩ"` 永远是字符串；表示 100 kΩ 的电阻，必须给 `{ "type": "number", "value": 100, "kind": "resistance", "prefix": "kilo" }`。
-- 槽引用是一种独立的类型化值：`{ "type": "slot", "value": "name" }`，其中 `value` 是完整槽路径（`"name"` 或 `"name.field"`）。引擎展开引用后，按 solver 签名对它做 kind/形状校验；引用不存在的槽会以 `ENGINE_SLOT_UNDECLARED` 失败。引用也可以嵌在参数的数组元素与对象字段里，先展开为存储值再做校验。槽引用只作为 call 参数存在——永不存入变量表、永不作为结果返回；裸字符串永远是字面量字符串，绝不构成引用。
+- 槽引用是一种独立的类型化值：`{ "type": "slot", "value": "name" }`，其中 `value` 是完整槽路径（`"name"` 或 `"name.field"`）。引擎展开引用后，按 solver 签名对它做 kind/形状校验；引用不存在的槽会以 `ENGINE_SLOT_UNDECLARED` 失败。引用也可以嵌在参数/`set` 值的数组元素与对象字段里，先展开为存储值再做校验——`set` 存入展开后的**副本**，之后改源槽不影响副本。槽引用只存在于 call/set 边界——永不存入变量表、永不作为结果返回；裸字符串永远是字面量字符串，绝不构成引用。
 - **每次调用都返回一张收据**——不存在「异常 vs 正常返回」的分野：
 
 ```

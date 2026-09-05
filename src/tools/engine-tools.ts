@@ -38,7 +38,7 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
       description: `Write one slot in the engine. ${VALUE_GUIDE} Pass value: null to delete the slot (idempotent; re-creating later restarts at rev 1). Writing a slot with a different kind than its pinned kind fails.`,
       parameters: {
         name: { type: 'string', description: NAME_DESC, required: true },
-        value: { type: 'json', description: 'a typed value object, or null to delete the slot (slot references cannot be stored)', required: true },
+        value: { type: 'json', description: 'a typed value object, a slot reference (stores a copy of the referenced slot value), or null to delete the slot', required: true },
       },
       execute: (args) => engine.opSet(args.name as string, args.value) as never,
     }),

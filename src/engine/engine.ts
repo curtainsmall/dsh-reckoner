@@ -140,12 +140,12 @@ export class Engine {
         this.trace({ tool: 'set', ok: true, name, value: null, deleted })
         return { ok: true, name, deleted }
       }
-      if (isSlotValue(value)) {
-        throw new ToolError('set: slot references cannot be stored — resolve them through call arguments', ToolErrorCode.InvalidArgs)
-      }
-      const error = validateValue(value)
+      // Slot references (including nested ones) resolve to a COPY of the
+      // referenced value — references themselves are never stored.
+      const expanded = this.expandSlots(value, `set "${name}"`)
+      const error = validateValue(expanded)
       if (error !== undefined) throw new ToolError(`set: ${error}`, ToolErrorCode.InvalidArgs)
-      const typed = value as TypedValue
+      const typed = expanded as TypedValue
       const slot = this.table.set(name, typed)
       this.trace({ tool: 'set', ok: true, name, value: typed, rev: slot.rev })
       return { ok: true, name, rev: slot.rev }
@@ -257,7 +257,7 @@ export class Engine {
   /** One argument value: a slot reference ({type: 'slot', value: full path}) or a typed-value literal
    *  whose array items / object fields may themselves be slot references (expanded recursively). */
   private resolveValue(raw: unknown, name: string, spec: Spec): TypedValue {
-    const expanded = this.expandSlots(raw, name)
+    const expanded = this.expandSlots(raw, `argument "${name}"`)
     const error = validateValue(expanded)
     if (error !== undefined) {
       const hint = typeof raw === 'string' && raw.startsWith('@')
@@ -275,30 +275,31 @@ export class Engine {
   }
 
   /**
-   * Expand every slot reference in an argument value: a reference at the top
-   * level, or nested as an array item / object field, resolves to the stored
-   * typed value (or the field path inside it). References never survive into
-   * the table, the trace resolved values or kernel arguments.
+   * Expand every slot reference in a value bound for the table or a call: a
+   * reference at the top level, or nested as an array item / object field,
+   * resolves to the stored typed value (or the field path inside it).
+   * References never survive into the table, the trace or kernel arguments.
+   * `ctx` labels the receiver in errors ("argument \"times\"" or "set \"B\"").
    */
-  private expandSlots(raw: unknown, name: string): unknown {
+  private expandSlots(raw: unknown, ctx: string): unknown {
     if (isSlotValue(raw)) {
       const reference = raw.value
       const dot = reference.indexOf('.')
       const slotName = dot === -1 ? reference : reference.slice(0, dot)
       const path = dot === -1 ? undefined : reference.slice(dot + 1)
       const slot = this.table.get(slotName)
-      if (slot === undefined) throw new ToolError(`argument "${name}": slot "${slotName}" is not declared`, ToolErrorCode.SlotUndeclared)
+      if (slot === undefined) throw new ToolError(`${ctx}: slot "${slotName}" is not declared`, ToolErrorCode.SlotUndeclared)
       return refPath(slot.value, path)
     }
     if (typeof raw === 'object' && raw !== null) {
       const box = raw as { type?: unknown; value?: unknown }
       if (box.type === 'array' && Array.isArray(box.value)) {
-        return { ...box, value: (box.value as unknown[]).map((item) => this.expandSlots(item, name)) }
+        return { ...box, value: (box.value as unknown[]).map((item) => this.expandSlots(item, ctx)) }
       }
       if (box.type === 'object' && typeof box.value === 'object' && box.value !== null && !Array.isArray(box.value)) {
         const fields: Record<string, unknown> = {}
         for (const [key, field] of Object.entries(box.value as Record<string, unknown>)) {
-          fields[key] = this.expandSlots(field, name)
+          fields[key] = this.expandSlots(field, ctx)
         }
         return { ...box, value: fields }
       }

@@ -27,7 +27,7 @@ A typed value is a JSON object. `kind` is part of a quantity:
 { "type": "boolean", "value": true }
 ```
 
-- `type` — the shape discriminator: number / complex / string / boolean / array (items recurse) / object (fields recurse). A `slot` value (`{ "type": "slot", "value": "…" }`) is a reference used only in call arguments — it is never stored or returned (§3).
+- `type` — the shape discriminator: number / complex / string / boolean / array (items recurse) / object (fields recurse). A `slot` value (`{ "type": "slot", "value": "…" }`) is a reference resolved at the call/set boundary to a copy of the referenced value — it is never stored or returned (§3).
 - `kind` — the quantity class (resistance, voltage, time, frequency, temperature, angle, pressure, energy, length, mass, log, none, …). Kind is part of a quantity: a value exists with a kind; a bare number has kind `none`; a plain ratio has kind `log`.
 - `variant` — a representation choice *within* a kind. **Field absent (not null) = the SI base representation**; storage never adds keys. Only the following words are valid, and each only on its own kind:
 
@@ -60,7 +60,7 @@ solver_info { solver }        inspect a solver's signature (parameters, enums, r
 Semantics:
 
 - `"100 kΩ"` is always a string; a resistance of 100 kΩ must be given as `{ "type": "number", "value": 100, "kind": "resistance", "prefix": "kilo" }`.
-- A slot reference is its own typed value: `{ "type": "slot", "value": "name" }`, where `value` is the full slot path (`"name"` or `"name.field"`). The engine expands it and kind/shape-checks it against the solver signature; a reference to a missing slot fails with `ENGINE_SLOT_UNDECLARED`. References may also sit inside array items and object fields of an argument, resolving to the stored value before validation. Slot references exist only as call arguments — they are never stored in the table, never returned, and a bare string is always a literal string, never a reference.
+- A slot reference is its own typed value: `{ "type": "slot", "value": "name" }`, where `value` is the full slot path (`"name"` or `"name.field"`). The engine expands it and kind/shape-checks it against the solver signature; a reference to a missing slot fails with `ENGINE_SLOT_UNDECLARED`. References may also sit inside array items and object fields of an argument or set value, resolving to the stored value before validation — `set` stores the resolved COPY, so later changes to the source slot do not affect the copy. Slot references exist only at the call/set boundary — they are never stored in the table, never returned, and a bare string is always a literal string, never a reference.
 - **Every call returns one receipt** — there is no "exception vs normal return" duality:
 
 ```

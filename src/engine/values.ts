@@ -31,7 +31,7 @@ export interface SlotValue {
   value: string
 }
 
-/** Shape guard for slot references (call arguments only). */
+/** Shape guard for slot references (call arguments and set values). */
 export function isSlotValue(raw: unknown): raw is SlotValue {
   return typeof raw === 'object' && raw !== null && (raw as { type?: unknown }).type === 'slot'
     && typeof (raw as { value?: unknown }).value === 'string'

@@ -81,8 +81,18 @@ describe('engine (set/get/call + markers + trace)', () => {
     expect((get as unknown as { value: { prefix: string } }).value.prefix).toBe('kilo')
     const missing = engine.opGet('X')
     expect(missing).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
-    // Slot references cannot be stored into the table
-    expect(engine.opSet('Y', { type: 'slot', value: 'R' })).toMatchObject({ ok: false, code: 'ENGINE_ARGS' })
+    // A slot reference in set stores a COPY of the referenced value (verbatim representation)
+    expect(engine.opSet('Y', { type: 'slot', value: 'R' })).toMatchObject({ ok: true, rev: 1 })
+    const y = engine.opGet('Y')
+    expect((y as unknown as { value: { value: number } }).value.value).toBe(100)
+    expect((y as unknown as { value: { prefix: string } }).value.prefix).toBe('kilo')
+    // Overwriting the source leaves the copy untouched
+    engine.opSet('R', { type: 'number', value: 200, kind: QuantityKind.Resistance, prefix: 'kilo' })
+    const y2 = engine.opGet('Y')
+    expect((y2 as unknown as { value: { value: number } }).value.value).toBe(100)
+    // Copying a missing slot errors with no side effects
+    expect(engine.opSet('Z', { type: 'slot', value: 'missing' })).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+    expect(engine.opGet('Z')).toMatchObject({ ok: false })
     const del = engine.opSet('R', null)
     expect(del).toMatchObject({ ok: true, deleted: true })
     expect(engine.opGet('R')).toMatchObject({ ok: false })

@@ -17,7 +17,7 @@ A typed value is a JSON object. kind is part of a quantity:
 - `{ "type": "complex", "value": { "re": 1, "im": 2 } | { "mag": 3, "ang": 0.5 }, "kind": "voltage" }` (angles in radians)
 - `{ "type": "string", "value": "…" }`, `{ "type": "boolean", "value": true }`
 - `{ "type": "array", "value": [<typed values>] }`, `{ "type": "object", "value": { <field>: <typed value> } }`
-- `{ "type": "slot", "value": "name" }` — a slot reference (call arguments only; never stored or returned)
+- `{ "type": "slot", "value": "name" }` — a slot reference (call arguments and set values; expands to a copy — never stored as a reference)
 
 kind names: time, frequency, resistance, capacitance, inductance, voltage, current, power, temperature, angle, pressure, energy, length, mass, log, none, … A bare number is kind `none`; log is a plain ratio. Omit the variant field for the SI base representation; omit prefix for multiplier 1.
 
@@ -25,7 +25,7 @@ variant words: degC/degF (temperature), deg (angle), bar/psi/atm (pressure), cal
 
 ## Primitives
 
-- `set { name, value }` — write one slot. `value: null` deletes the slot (idempotent). Re-writing with a different kind than the pinned slot kind fails.
+- `set { name, value }` — write one slot. `value: null` deletes the slot (idempotent). Re-writing with a different kind than the pinned slot kind fails. `value` may be a slot reference: the referenced value is stored as a COPY.
 - `get { name }` — read one slot; you receive the value exactly as written.
 - `call { solver, args, target }` — call one registered solver. Every argument is a typed value or a slot reference — `{ "type": "slot", "value": "name" }` with the full slot path (`"name"` or `"name.field"`); references may also sit inside array items and object fields, resolving to the stored value before validation. A value solver requires a named `target` (overwriting bumps the slot revision); a void solver takes `target: null`.
 - `solver_info { solver }` — inspect one registered solver before its first use: the parameter signature (names, quantity kinds, allowed enums, optional flags, nested items) and `returns` (a spec, or null for void), straight from the registry.
