@@ -52,10 +52,10 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
     }),
     defineJsonTool({
       name: 'call',
-      description: `Call one registered solver and store its result into a named slot. Arguments are typed values or slot references — { "type": "slot", "value": "name" } where value is the full slot path ("name" or "name.field"); the engine expands references and kind-checks them against the solver signature. A void solver (declared returns: null) takes target: null; a value solver requires a named target. Overwriting an existing slot replaces its value (rev +1).${solverList}`,
+      description: `Call one registered solver and store its result into a named slot. Every argument must be a TYPED value ({"type": "string", "value": "rc"}, {"type": "number", "value": 100, "kind": "resistance"}, {"type": "array", "value": [...]}) or a slot reference — { "type": "slot", "value": "name" } with the full slot path; bare strings, numbers and arrays are rejected. Slot references may also sit inside array items and object fields — they resolve to the stored value before validation. The engine kind-checks arguments against the solver signature. A void solver (declared returns: null) takes target: null; a value solver requires a named target. Overwriting an existing slot replaces its value (rev +1).${solverList}`,
       parameters: {
         solver: { type: 'string', enum: solverEnum, description: 'the registered solver to call', required: true },
-        args: { type: 'json', description: `solver arguments: object mapping each parameter name to a typed value or a slot reference ({ "type": "slot", "value": "name" })`, required: true },
+        args: { type: 'json', description: `solver arguments: an object mapping each parameter name to a typed value or a slot reference — run solver_info first to see each parameter's expected shape and a ready-to-send example`, required: true },
         target: { type: 'json', description: 'result slot name (string), or null for void solvers', required: true },
       },
       execute: async (args) => engine.opCall(args.solver as string, args.args as Record<string, unknown> | undefined, args.target as string | null) as never,

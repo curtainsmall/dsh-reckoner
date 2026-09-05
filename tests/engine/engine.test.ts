@@ -175,6 +175,37 @@ describe('engine (set/get/call + markers + trace)', () => {
     })
   })
 
+  it('slot references nested inside array/object arguments expand at the call boundary', async () => {
+    const engine = makeEngine()
+    engine.registry.register({
+      id: 'nested_refs',
+      summary: 'nested refs',
+      parameters: {
+        times: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Time } },
+        cfg: { type: 'object', fields: { gain: { type: 'quantity', kind: QuantityKind.None } } },
+      },
+      returns: { type: 'quantity', kind: QuantityKind.None },
+      run: (args) => (args.cfg as { gain: number }).gain,
+    })
+    engine.markerQuestion('q')
+    engine.opSet('t', { type: 'number', value: 1, kind: QuantityKind.Time })
+    engine.opSet('g', { type: 'number', value: 2, kind: QuantityKind.None })
+    // Array items and object fields may be slot references
+    const ok = await engine.opCall('nested_refs', {
+      times: { type: 'array', value: [{ type: 'slot', value: 't' }] },
+      cfg: { type: 'object', value: { gain: { type: 'slot', value: 'g' } } },
+    }, 'D')
+    expect(ok).toMatchObject({ ok: true })
+    const rows = engine.store.readRows(String(engine.openId()))
+    const callRow = rows.find((row) => row.tool === 'call' && row.solver === 'nested_refs')
+    expect((callRow!.resolved as { times: { value: { value: number }[] } }).times.value[0]!.value).toBe(1)
+    // A missing nested slot is a declared-slot failure, not a shape failure
+    await expect(engine.opCall('nested_refs', {
+      times: { type: 'array', value: [{ type: 'slot', value: 'missing' }] },
+      cfg: { type: 'object', value: { gain: { type: 'number', value: 1, kind: QuantityKind.None } } },
+    }, 'D')).resolves.toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+  })
+
   it('solver run throws → ok:false ENGINE_SOLVER_FAILED, no slot is created', async () => {
     const engine = makeEngine()
     engine.registry.register({

@@ -175,7 +175,20 @@ export class Engine {
         parameters: unknown
         returns: unknown
       }
-      return { ok: true, solver: solver.id, summary: solver.summary, parameters: signature.parameters, returns: signature.returns }
+      // Per-parameter usage lines: expected shape plus a ready-to-send typed example.
+      const usage: Record<string, string> = {}
+      for (const [name, spec] of Object.entries(solver.parameters)) {
+        const optional = spec.optional === true ? ' (optional)' : ''
+        usage[name] = `${describeSpec(spec)}${optional} — send ${typedForm(spec)}`
+      }
+      return {
+        ok: true,
+        solver: solver.id,
+        summary: solver.summary,
+        parameters: signature.parameters,
+        returns: signature.returns,
+        signature: usage,
+      }
     } catch (error) {
       return this.failure('solver_info', error)
     }
@@ -241,8 +254,33 @@ export class Engine {
     return { resolved, native }
   }
 
-  /** One argument value: a slot reference ({type: 'slot', value: full path}) or a typed-value literal. */
+  /** One argument value: a slot reference ({type: 'slot', value: full path}) or a typed-value literal
+   *  whose array items / object fields may themselves be slot references (expanded recursively). */
   private resolveValue(raw: unknown, name: string, spec: Spec): TypedValue {
+    const expanded = this.expandSlots(raw, name)
+    const error = validateValue(expanded)
+    if (error !== undefined) {
+      const hint = typeof raw === 'string' && raw.startsWith('@')
+        ? ' — "@name" strings are no longer references: pass { "type": "slot", "value": "name" }'
+        : ''
+      const arrayHint = spec.type === 'array'
+        ? ' (or pass a slot reference to a slot that already holds the array)'
+        : ''
+      throw new ToolError(
+        `argument "${name}": ${error}; expected ${describeSpec(spec)} — send a typed value like ${typedForm(spec)}${arrayHint}${hint}`,
+        ToolErrorCode.InvalidArgs,
+      )
+    }
+    return expanded as TypedValue
+  }
+
+  /**
+   * Expand every slot reference in an argument value: a reference at the top
+   * level, or nested as an array item / object field, resolves to the stored
+   * typed value (or the field path inside it). References never survive into
+   * the table, the trace resolved values or kernel arguments.
+   */
+  private expandSlots(raw: unknown, name: string): unknown {
     if (isSlotValue(raw)) {
       const reference = raw.value
       const dot = reference.indexOf('.')
@@ -252,14 +290,20 @@ export class Engine {
       if (slot === undefined) throw new ToolError(`argument "${name}": slot "${slotName}" is not declared`, ToolErrorCode.SlotUndeclared)
       return refPath(slot.value, path)
     }
-    const error = validateValue(raw)
-    if (error !== undefined) {
-      const hint = typeof raw === 'string' && raw.startsWith('@')
-        ? ' — "@name" strings are no longer references: pass { "type": "slot", "value": "name" }'
-        : ''
-      throw new ToolError(`argument "${name}": ${error}; expected ${describeSpec(spec)}${hint}`, ToolErrorCode.InvalidArgs)
+    if (typeof raw === 'object' && raw !== null) {
+      const box = raw as { type?: unknown; value?: unknown }
+      if (box.type === 'array' && Array.isArray(box.value)) {
+        return { ...box, value: (box.value as unknown[]).map((item) => this.expandSlots(item, name)) }
+      }
+      if (box.type === 'object' && typeof box.value === 'object' && box.value !== null && !Array.isArray(box.value)) {
+        const fields: Record<string, unknown> = {}
+        for (const [key, field] of Object.entries(box.value as Record<string, unknown>)) {
+          fields[key] = this.expandSlots(field, name)
+        }
+        return { ...box, value: fields }
+      }
     }
-    return raw as TypedValue
+    return raw
   }
 
   /** Run a non-void solver (local run or external transport); shape the result per its returns spec. */
@@ -315,6 +359,30 @@ function describeSpec(spec: Spec): string {
     case 'object':
       return `object with fields {${Object.keys(spec.fields).join(', ')}}`
   }
+}
+
+/** A ready-to-send typed-value example for a spec (enum strings take their first allowed value). */
+function exampleTypedValue(spec: Spec): unknown {
+  switch (spec.type) {
+    case 'quantity':
+      return { type: 'number', value: 1, kind: spec.kind }
+    case 'string':
+      return { type: 'string', value: spec.enum?.[0] ?? '…' }
+    case 'boolean':
+      return { type: 'boolean', value: true }
+    case 'array':
+      return { type: 'array', value: [exampleTypedValue(spec.items)] }
+    case 'object': {
+      const value: Record<string, unknown> = {}
+      for (const [key, fieldSpec] of Object.entries(spec.fields)) value[key] = exampleTypedValue(fieldSpec)
+      return { type: 'object', value }
+    }
+  }
+}
+
+/** The typed form a caller should send for this spec, as compact JSON text. */
+function typedForm(spec: Spec): string {
+  return JSON.stringify(exampleTypedValue(spec))
 }
 
 /** resolved typed value → kernel-native JS (quantity reals become number, complex per the declared form; the rest recurse). */

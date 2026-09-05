@@ -27,7 +27,7 @@ variant words: degC/degF (temperature), deg (angle), bar/psi/atm (pressure), cal
 
 - `set { name, value }` — write one slot. `value: null` deletes the slot (idempotent). Re-writing with a different kind than the pinned slot kind fails.
 - `get { name }` — read one slot; you receive the value exactly as written.
-- `call { solver, args, target }` — call one registered solver. Every argument is a typed value or a slot reference — `{ "type": "slot", "value": "name" }` with the full slot path (`"name"` or `"name.field"`). A value solver requires a named `target` (overwriting bumps the slot revision); a void solver takes `target: null`.
+- `call { solver, args, target }` — call one registered solver. Every argument is a typed value or a slot reference — `{ "type": "slot", "value": "name" }` with the full slot path (`"name"` or `"name.field"`); references may also sit inside array items and object fields, resolving to the stored value before validation. A value solver requires a named `target` (overwriting bumps the slot revision); a void solver takes `target: null`.
 - `solver_info { solver }` — inspect one registered solver before its first use: the parameter signature (names, quantity kinds, allowed enums, optional flags, nested items) and `returns` (a spec, or null for void), straight from the registry.
 
 Every call returns a receipt: `{ ok: true, … }` or `{ ok: false, code, error }`. Failed calls have no side effects; read values only through `get`. Read `solver_info` before the first call of a solver you have not used — guessing parameters from the one-line catalog is how retries happen.
@@ -87,4 +87,5 @@ Conditions from the question are stored with `set` as typed values (translate th
 
 - Numbers in an answer ⇔ slot values produced by `call` results (or conditions stored by `set`).
 - Transcription of user wording into typed values is yours; every numerical rule application (prefix, variant, complex conversion) happens inside the engine at the call boundary — never convert in prose or in arguments by hand.
+- `call` arguments are typed values exactly like `set` values — an enum string is `{ "type": "string", "value": "rc" }`, a number is `{ "type": "number", "value": 100, "kind": "resistance" }`, an array is `{ "type": "array", "value": [...] }` (or a slot reference to a slot holding it). Run `solver_info` first: its `signature` field lists every parameter with a ready-to-send example.
 - A failed receipt (`ok: false`) leaves no state behind: read the code, fix the call, retry.

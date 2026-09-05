@@ -60,7 +60,7 @@ solver_info { solver }        inspect a solver's signature (parameters, enums, r
 Semantics:
 
 - `"100 kΩ"` is always a string; a resistance of 100 kΩ must be given as `{ "type": "number", "value": 100, "kind": "resistance", "prefix": "kilo" }`.
-- A slot reference is its own typed value: `{ "type": "slot", "value": "name" }`, where `value` is the full slot path (`"name"` or `"name.field"`). The engine expands it and kind/shape-checks it against the solver signature; a reference to a missing slot fails with `ENGINE_SLOT_UNDECLARED`. Slot references exist only as call arguments — they are never stored in the table, never returned, and a bare string is always a literal string, never a reference.
+- A slot reference is its own typed value: `{ "type": "slot", "value": "name" }`, where `value` is the full slot path (`"name"` or `"name.field"`). The engine expands it and kind/shape-checks it against the solver signature; a reference to a missing slot fails with `ENGINE_SLOT_UNDECLARED`. References may also sit inside array items and object fields of an argument, resolving to the stored value before validation. Slot references exist only as call arguments — they are never stored in the table, never returned, and a bare string is always a literal string, never a reference.
 - **Every call returns one receipt** — there is no "exception vs normal return" duality:
 
 ```
