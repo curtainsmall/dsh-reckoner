@@ -33,7 +33,7 @@ declare module 'cordis' {
 /** Minimal structural shape of the web-server route registry. */
 interface WebServerLike {
   register(route: {
-    kind: 'exact'
+    kind: 'exact' | 'prefix'
     path: string
     handler(req: unknown, res: {
       statusCode?: number
@@ -55,6 +55,8 @@ const recordsHome = process.env.DSH_ELECTRO_LAB_HOME ?? join(homedir(), '.dsh-el
 export const engine = new Engine(recordsHome)
 
 const RECORDS_INDEX_PATH = '/api/dsh-electro-lab/records-index'
+// WebRoute paths carry no trailing slash; requests are /records/<id>.
+const RECORDS_BODY_PREFIX = '/api/dsh-electro-lab/records'
 const EXTERNAL_PATH = '/api/dsh-electro-lab/external-solvers'
 
 export function apply(ctx: Context): void {
@@ -110,6 +112,42 @@ export function apply(ctx: Context): void {
         }
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ rows: engine.indexRows() }))
+      },
+    }))
+
+    // Record body: GET /api/dsh-electro-lab/records/<id> — one record's trace
+    // rows plus its index meta (question/openedAt/sealedAt). Read-only.
+    disposers.push(ctx.webServer.register({
+      kind: 'prefix',
+      path: RECORDS_BODY_PREFIX,
+      handler: (req, res) => {
+        const request = req as RequestLike
+        res.setHeader('content-type', 'application/json')
+        if ((request.method ?? 'GET') !== 'GET') {
+          res.statusCode = 405
+          res.end('method not allowed')
+          return
+        }
+        const path = request.url === undefined ? '' : request.url.split('?')[0] ?? ''
+        const id = path.startsWith(`${RECORDS_BODY_PREFIX}/`) ? path.slice(RECORDS_BODY_PREFIX.length + 1) : ''
+        if (id.length === 0) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: 'a record id is required' }))
+          return
+        }
+        const meta = engine.indexRows().find((row) => row.id === id)
+        if (meta === undefined || !engine.store.hasRecord(id)) {
+          res.statusCode = 404
+          res.end(JSON.stringify({ error: `no record "${id}"` }))
+          return
+        }
+        res.end(JSON.stringify({
+          id,
+          openedAt: meta.openedAt,
+          sealedAt: meta.sealedAt,
+          question: meta.question,
+          rows: engine.store.readRows(id),
+        }))
       },
     }))
 

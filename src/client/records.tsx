@@ -1,10 +1,11 @@
 /**
  * ElectroLab record list page + shared UI components.
- * The list reads the host's /records-index (a projection of record-index.jsonl); a record body is a process
- * (timeline), whose review form is left for later design — the list does not open bodies.
+ * The list reads the host's /records-index (a projection of record-index.jsonl);
+ * clicking a row opens the record's trace timeline (record-detail.tsx).
  */
 import { useEffect, useState, type ReactNode } from 'react'
 import { t, useAppLocale } from './locales.ts'
+import { RecordDetail } from './record-detail.tsx'
 
 /* ── Shared dialog shell + buttons ───────────────────────────────────────── */
 
@@ -161,8 +162,10 @@ export function RecordsTab(): React.JSX.Element {
   useAppLocale()
   const [rows, setRows] = useState<IndexRow[] | null>(null)
   const [failed, setFailed] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   useEffect(() => {
+    if (selectedId !== null) return
     let alive = true
     const load = async (): Promise<void> => {
       try {
@@ -182,7 +185,11 @@ export function RecordsTab(): React.JSX.Element {
       alive = false
       clearInterval(timer)
     }
-  }, [])
+  }, [selectedId])
+
+  if (selectedId !== null) {
+    return <RecordDetail id={selectedId} onBack={() => setSelectedId(null)} />
+  }
 
   if (failed && rows === null) {
     return (
@@ -192,7 +199,8 @@ export function RecordsTab(): React.JSX.Element {
     )
   }
 
-  const items = rows ?? []
+  // Newest first: the index is append-ordered, the list shows recency order.
+  const items = [...(rows ?? [])].sort((a, b) => b.openedAt - a.openedAt)
   if (items.length === 0) {
     return (
       <div style={rowStyle}>
@@ -204,7 +212,20 @@ export function RecordsTab(): React.JSX.Element {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {items.map((row) => (
-        <div key={row.id} style={rowStyle}>
+        <button
+          key={row.id}
+          type="button"
+          onClick={() => setSelectedId(row.id)}
+          style={{
+            ...rowStyle,
+            textAlign: 'left',
+            cursor: 'pointer',
+            background: 'none',
+            width: '100%',
+            font: 'inherit',
+            color: 'inherit',
+          }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
             <span style={{
               color: 'var(--dsw-alias-label-primary)',
@@ -236,7 +257,7 @@ export function RecordsTab(): React.JSX.Element {
           <div style={{ marginTop: 4, color: 'var(--dsw-alias-label-secondary)', fontSize: 12 }}>
             {formatTime(row.openedAt)}
           </div>
-        </div>
+        </button>
       ))}
     </div>
   )

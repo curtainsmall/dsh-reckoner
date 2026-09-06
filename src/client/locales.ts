@@ -71,6 +71,21 @@ const zh = {
   cancel: '取消',
   delete: '删除',
   incomplete: '未完成',
+  backToRecords: '返回记录',
+  rowsCount: '{n} 行',
+  failedCount: '{n} 次失败',
+  recordUnreachable: '记录详情不可用——端点未响应；若刚更新插件，宿主可能需要重启。',
+  conditionsGroup: '条件（{n}）',
+  failuresGroup: '失败尝试（{n}）',
+  deleted: '（已删除）',
+  callTarget: '写入槽',
+  jumpToSet: '跳到槽 {name} 的定义',
+  rawJson: '原始 JSON（轨迹行）',
+  markerQuestion: '问题',
+  markerAnalyse: '分析',
+  markerAnswer: '答案',
+  markerDuplicateStart: '重复开启（已按错误记录结算）',
+  markerDuplicateEnd: '无记录时结算（错误记录）',
 } as const
 
 const en: Record<keyof typeof zh, string> = {
@@ -135,6 +150,21 @@ const en: Record<keyof typeof zh, string> = {
   cancel: 'Cancel',
   delete: 'Delete',
   incomplete: 'incomplete',
+  backToRecords: 'Back to records',
+  rowsCount: '{n} row(s)',
+  failedCount: '{n} failure(s)',
+  recordUnreachable: 'Record detail unavailable — the endpoint is not responding; if you just updated the plugin, the host may need a restart.',
+  conditionsGroup: 'Conditions ({n})',
+  failuresGroup: 'Failed attempts ({n})',
+  deleted: '(deleted)',
+  callTarget: 'into slot',
+  jumpToSet: 'Jump to slot {name}',
+  rawJson: 'Raw JSON (trace row)',
+  markerQuestion: 'Question',
+  markerAnalyse: 'Analysis',
+  markerAnswer: 'Answer',
+  markerDuplicateStart: 'Duplicate open (settled as an error record)',
+  markerDuplicateEnd: 'Settled with no open record (error record)',
 }
 
 export type LocaleKey = keyof typeof zh
