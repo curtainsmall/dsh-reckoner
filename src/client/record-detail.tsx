@@ -381,55 +381,77 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
   const failedCount = visibleRows.filter((row) => !row.ok).length
   const items = groupRows(visibleRows)
 
+  // Content area = page width minus the actions column layout on the right:
+  // column 44 + two 12px gaps + 1px separator = 69px. The toolbar (and the
+  // checkbox inside it) right-aligns to that content edge.
+  const CONTENT_RIGHT_OFFSET = 69
   return (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-      {/* The timeline column */}
-      <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <button
-            type="button"
-            aria-label={t('backToRecords')}
-            onClick={onBack}
-            onMouseEnter={() => setBackHover(true)}
-            onMouseLeave={() => setBackHover(false)}
-            style={{
-              ...backButtonBase,
-              background: backHover ? 'var(--dsw-alias-interactive-bg-hover)' : 'none',
-              borderColor: backHover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
-            }}
-          >
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}><IconChevronLeft size={16} /></span>
-            <span style={{ lineHeight: 1 }}>{t('backToRecords')}</span>
-          </button>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={showAll}
-              onChange={(event) => setShowAll(event.target.checked)}
-              style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }}
-            />
-            {t('displayAll')}
-          </label>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
+      {/* Toolbar row: fixed, never scrolls; back at the left, show-all at the content edge. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginRight: CONTENT_RIGHT_OFFSET, flex: 'none' }}>
+        <button
+          type="button"
+          aria-label={t('backToRecords')}
+          onClick={onBack}
+          onMouseEnter={() => setBackHover(true)}
+          onMouseLeave={() => setBackHover(false)}
+          style={{
+            ...backButtonBase,
+            background: backHover ? 'var(--dsw-alias-interactive-bg-hover)' : 'none',
+            borderColor: backHover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
+          }}
+        >
+          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}><IconChevronLeft size={16} /></span>
+          <span style={{ lineHeight: 1 }}>{t('backToRecords')}</span>
+        </button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showAll}
+            onChange={(event) => setShowAll(event.target.checked)}
+            style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }}
+          />
+          {t('displayAll')}
+        </label>
+      </div>
 
-        {/* Header: question + meta */}
-        <div style={rowStyle}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{record.question || record.id}</div>
-          <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
-            <span>{t('rowsCount', { n: visibleRows.length })}</span>
-            {failedCount > 0 && <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{t('failedCount', { n: failedCount })}</span>}
-            {record.sealedAt === null
-              ? <span style={{ padding: '1px 7px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' }}>{t('incomplete')}</span>
-              : <span>{formatTime(record.sealedAt)}</span>}
+      {/* Body: the title card tops the left column, so the separator and the
+          actions column start at the title card's top edge. Only the timeline
+          below the card scrolls. */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flex: '1 1 auto', minHeight: 0, marginTop: 10 }}>
+        <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Header: record id — the question already lives in the timeline's question card. */}
+          <div style={rowStyle}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-all', ...codeFont }}>{record.id}</div>
+            <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
+              <span>{t('rowsCount', { n: visibleRows.length })}</span>
+              {failedCount > 0 && <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{t('failedCount', { n: failedCount })}</span>}
+              {record.sealedAt === null
+                ? <span style={{ padding: '1px 7px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' }}>{t('incomplete')}</span>
+                : <span>{formatTime(record.sealedAt)}</span>}
+            </div>
+          </div>
+
+          {/* Scrollable timeline (only this area scrolls). */}
+          <div style={{
+            flex: '1 1 auto',
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            overflowY: 'auto',
+            paddingRight: 4,
+          }}>
+            {items.map((item) => <TimelineItem key={itemKey(item)} item={item} />)}
           </div>
         </div>
 
-        {/* The timeline */}
-        {items.map((item) => <TimelineItem key={itemKey(item)} item={item} />)}
-      </div>
+        {/* Separator between the timeline and the article actions column: tops at the title card edge. */}
+        <div aria-hidden="true" style={{ flex: 'none', width: 1, alignSelf: 'stretch', background: 'var(--dsw-alias-border-l2)' }} />
 
-      {/* Article generation column: UI shell only — no generation logic yet. */}
-      <ArticleActions />
+        {/* Article generation column: UI shell only — no generation logic yet. */}
+        <ArticleActions />
+      </div>
     </div>
   )
 }
@@ -463,10 +485,7 @@ function ArticleActions(): React.JSX.Element {
     </button>
   )
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 'none', position: 'sticky', top: 14 }}>
-      <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4, paddingLeft: 2 }}>
-        {t('articleTitle')}
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 'none' }}>
       {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={24} />)}
       {action('articleGenerateTex', t('articleGenerateTex'), <IconTex size={28} />)}
     </div>
