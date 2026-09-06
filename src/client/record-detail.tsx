@@ -437,7 +437,7 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
 /** Right-hand column of the record detail: article generation actions (UI only for now). */
 function ArticleActions(): React.JSX.Element {
   const [hovered, setHovered] = useState<string | null>(null)
-  const action = (key: string, label: string, icon: React.ReactNode, tex = false): React.JSX.Element => (
+  const action = (key: string, label: string, icon: React.ReactNode): React.JSX.Element => (
     <button
       key={key}
       type="button"
@@ -457,8 +457,6 @@ function ArticleActions(): React.JSX.Element {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        // The √ glyph is optically smaller: give the TeX button's icon extra size.
-        ...(tex ? { paddingBottom: 2 } : {}),
       }}
     >
       {icon}
@@ -469,8 +467,8 @@ function ArticleActions(): React.JSX.Element {
       <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4, paddingLeft: 2 }}>
         {t('articleTitle')}
       </div>
-      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={16} />)}
-      {action('articleGenerateTex', t('articleGenerateTex'), <IconTex size={20} />, true)}
+      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={24} />)}
+      {action('articleGenerateTex', t('articleGenerateTex'), <IconTex size={28} />)}
     </div>
   )
 }
