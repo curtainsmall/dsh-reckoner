@@ -131,6 +131,151 @@ function referencedSlots(value: unknown, into: string[]): void {
   }
 }
 
+/* ── JSON tree display ────────────────────────────────────────────────────── */
+
+/** Containers (typed or plain arrays/objects) render as a tree; scalars as text. */
+function isExpandable(value: unknown): boolean {
+  if (Array.isArray(value)) return true
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  if (v.type === undefined) return true // plain JSON object
+  return v.type === 'array' || v.type === 'object'
+}
+
+/** Compact one-line summary of a container (used in collapsed summaries). */
+function containerSummary(value: unknown): string {
+  if (Array.isArray(value)) return `array · ${value.length}`
+  if (typeof value !== 'object' || value === null) return String(value)
+  const v = value as Record<string, unknown>
+  if (v.type === 'array' && Array.isArray(v.value)) return `array · ${v.value.length}`
+  if (v.type === 'object' && typeof v.value === 'object' && v.value !== null) {
+    return `object · {${Object.keys(v.value as Record<string, unknown>).join(', ')}}`
+  }
+  if (v.type !== undefined) return String(v.type)
+  const keys = Object.keys(v)
+  return keys.length === 0 ? '{}' : `{${keys.join(', ')}}`
+}
+
+/** A short text that summarizes any argument value for a collapsed call row. */
+function summaryText(value: unknown): string {
+  return isExpandable(value) ? containerSummary(value) : displayValue(value)
+}
+
+/** Container kind used by the tree (objects show {…}, arrays show […]). */
+type TreeKind = 'object' | 'array' | null
+
+function containerKind(value: unknown): TreeKind {
+  if (Array.isArray(value)) return 'array'
+  if (typeof value !== 'object' || value === null) return null
+  const v = value as Record<string, unknown>
+  if (v.type === 'array' && Array.isArray(v.value)) return 'array'
+  if (v.type === 'object' && typeof v.value === 'object' && v.value !== null) return 'object'
+  if (v.type === undefined) return 'object'
+  return null
+}
+
+const TREE_INDENT = 18
+const TRIANGLE_W = 16
+
+/** Child rows of a container (typed or plain): objects key their entries, arrays index their items. */
+function childrenOf(value: unknown): Array<{ label?: string; value: unknown }> {
+  const children: Array<{ label?: string; value: unknown }> = []
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => children.push({ label: String(index), value: item }))
+    return children
+  }
+  const v = value as Record<string, unknown>
+  if (v.type === 'array' && Array.isArray(v.value)) {
+    ;(v.value as unknown[]).forEach((item, index) => children.push({ label: String(index), value: item }))
+    return children
+  }
+  if (v.type === 'object' && typeof v.value === 'object' && v.value !== null) {
+    for (const [key, field] of Object.entries(v.value as Record<string, unknown>)) children.push({ label: key, value: field })
+    return children
+  }
+  for (const [key, field] of Object.entries(v)) children.push({ label: key, value: field })
+  return children
+}
+
+/**
+ * JSON tree row: a disclosure triangle at the start of the row, then the
+ * indented key and the value. Container values collapse to a placeholder
+ * ({ … } / [ … ]) until expanded. An UNLABELED root object is stripped —
+ * its fields become the top-level rows (no wrapper row).
+ */
+function RowNode({ label, value }: { label?: string; value: unknown }): React.JSX.Element {
+  if (label === undefined && containerKind(value) === 'object') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box' }}>
+        {childrenOf(value).map((child, index) => (
+          <RowNodeImpl key={child.label ?? index} label={child.label} value={child.value} depth={0} />
+        ))}
+      </div>
+    )
+  }
+  return <RowNodeImpl label={label} value={value} depth={0} />
+}
+
+function RowNodeImpl({ label, value, depth }: { label?: string; value: unknown; depth: number }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const kind = containerKind(value)
+  const keyEl = label !== undefined
+    ? <span style={{ color: 'var(--dsw-alias-label-tertiary)', ...codeFont, fontSize: 13, minWidth: 8 }}>{label}</span>
+    : null
+  const leafPad = depth * TREE_INDENT + TRIANGLE_W + 8
+  if (kind === null) {
+    return (
+      <div style={{
+        display: 'flex',
+        gap: 8,
+        alignItems: 'baseline',
+        fontSize: 13.5,
+        paddingLeft: leafPad,
+        width: '100%',
+        boxSizing: 'border-box',
+      }}>
+        {keyEl}
+        <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(value)}</span>
+      </div>
+    )
+  }
+  const children = childrenOf(value)
+  const placeholder = kind === 'object' ? '{ … }' : '[ … ]'
+  return (
+    <div style={{ width: '100%', boxSizing: 'border-box' }}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen(!open) } }}
+        style={{
+          display: 'flex',
+          gap: 8,
+          alignItems: 'baseline',
+          fontSize: 13.5,
+          cursor: 'pointer',
+          paddingLeft: depth * TREE_INDENT,
+          width: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
+        <span aria-hidden="true" style={{ display: 'inline-block', width: TRIANGLE_W, textAlign: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)', flex: 'none' }}>
+          {open ? '▾' : '▸'}
+        </span>
+        {keyEl}
+        <span style={{ color: 'var(--dsw-alias-label-tertiary)', ...codeFont, fontSize: 13.5 }}>{placeholder}</span>
+      </div>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box' }}>
+          {children.map((child, index) => (
+            <RowNodeImpl key={child.label ?? index} label={child.label} value={child.value} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Timeline grouping ────────────────────────────────────────────────────── */
 
 type Item =
@@ -158,7 +303,13 @@ function groupRows(rows: TraceRow[]): Item[] {
     const sameRun = run.length > 0
       && ((run[0]!.tool === 'set' && row.ok && row.tool === 'set') || (!run[0]!.ok && !row.ok))
     if (groupable && sameRun) run.push(row)
-    else { flush(); if (groupable) run.push(row); else if (row.tool === 'marker') items.push({ kind: 'marker', row }); else items.push({ kind: 'event', row }) }
+    else {
+      flush()
+      if (groupable) run.push(row)
+      else if (row.tool === 'marker') items.push({ kind: 'marker', row })
+      else if (row.tool === 'call' && row.ok) items.push({ kind: 'call', row })
+      else items.push({ kind: 'event', row })
+    }
   }
   flush()
   return items
@@ -335,15 +486,21 @@ function ConditionsGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
     <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
       <CollapseHeader label={t('conditionsGroup', { n: rows.length })} defaultOpen>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {rows.map((row) => (
-            <div key={row.seq} id={`set-${String(row.name)}`} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12.5 }}>
-              <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64 }}>{String(row.name)}</span>
-              <span style={codeFont}>
-                {row.deleted === true ? <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{t('deleted')}</span> : displayValue(row.value)}
-              </span>
-              {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>rev {row.rev}</span>}
-            </div>
-          ))}
+          {rows.map((row) => {
+            const name = String(row.name)
+            const expandable = !row.deleted && isExpandable(row.value)
+            return (
+              <div key={row.seq} id={`set-${name}`} style={{ display: 'flex', alignItems: expandable ? 'flex-start' : 'baseline', gap: 8, fontSize: 12.5 }}>
+                {!expandable && <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, ...codeFont }}>{name}</span>}
+                {row.deleted === true
+                  ? <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{t('deleted')}</span>
+                  : expandable
+                    ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} /></div>
+                    : <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(row.value)}</span>}
+                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>rev {row.rev}</span>}
+              </div>
+            )
+          })}
         </div>
       </CollapseHeader>
     </div>
@@ -377,51 +534,55 @@ function FailuresGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
   )
 }
 
-/* ── Call row ─────────────────────────────────────────────────────────────── */
+/* ── Call row: a collapse in the style of the set/conditions group ────────── */
 
 function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
+  const args = (row.args ?? {}) as Record<string, unknown>
   const refs: string[] = []
   referencedSlots(row.args, refs)
+  const argsText = Object.entries(args).map(([name, value]) => `${name} = ${summaryText(value)}`).join(' · ')
   return (
     <div style={{ ...rowStyle, borderLeft: '3px solid var(--dsw-alias-state-success-primary)', paddingLeft: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ ...codeFont, fontWeight: 600 }}>{String(row.solver)}</span>
-        {typeof row.target === 'string' && (
-          <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('callTarget')} <code style={codeFont}>{row.target}</code></span>
-        )}
-        {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>rev {row.rev}</span>}
-      </div>
-      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {Object.entries((row.args ?? {}) as Record<string, unknown>).map(([name, value]) => (
-          <div key={name} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12.5 }}>
-            <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 72 }}>{name}</span>
-            <span style={{ color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-word' }}>{displayValue(value)}</span>
-          </div>
-        ))}
-      </div>
-      {refs.length > 0 && (
-        <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {refs.map((name) => (
-            <button
-              key={name}
-              type="button"
-              title={t('jumpToSet', { name })}
-              onClick={() => document.getElementById(`set-${name}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-              style={{ ...codeFont, padding: '1px 8px', borderRadius: 999, border: '1px solid var(--dsw-alias-label-tertiary)', background: 'none', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 11 }}
-            >
-              @{name}
-            </button>
+      <CollapseHeader
+        defaultOpen
+        label={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginRight: 4 }}>
+            <span style={{ ...codeFont }}>{String(row.solver)}</span>
+            <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{argsText}</span>
+            {typeof row.target === 'string' && (
+              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{t('callTarget')} <code style={codeFont}>{row.target}</code></span>
+            )}
+            {typeof row.rev === 'number' && <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>rev {row.rev}</span>}
+          </span>
+        }
+      >
+        <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {Object.entries(args).map(([name, value]) => (
+            <RowNode key={name} label={name} value={value} />
           ))}
+          {refs.length > 0 && (
+            <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {refs.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  title={t('jumpToSet', { name })}
+                  onClick={() => document.getElementById(`set-${name}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  style={{ ...codeFont, padding: '1px 8px', borderRadius: 999, border: '1px solid var(--dsw-alias-label-tertiary)', background: 'none', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 11 }}
+                >
+                  @{name}
+                </button>
+              ))}
+            </div>
+          )}
+          {row.result !== undefined && row.result !== null && (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{t('callResult')}</span>
+              <RowNode value={row.result} />
+            </div>
+          )}
         </div>
-      )}
-      {row.result !== undefined && row.result !== null && (
-        <details style={{ marginTop: 6 }}>
-          <summary style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' }}>{t('rawJson')}</summary>
-          <pre style={{ ...codeFont, margin: '6px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--dsw-alias-label-secondary)' }}>
-            {JSON.stringify(row.result, null, 2)}
-          </pre>
-        </details>
-      )}
+      </CollapseHeader>
     </div>
   )
 }
@@ -429,19 +590,27 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
 /* ── Other events (get, set-delete, …) ───────────────────────────────────── */
 
 function EventRow({ row }: { row: TraceRow }): React.JSX.Element {
+  const label = `${row.tool}${typeof row.name === 'string' ? ` ${row.name}` : ''}`
+  const hasValue = row.value !== undefined && row.value !== null
+  if (hasValue && isExpandable(row.value)) {
+    return (
+      <div style={{ ...rowStyle, padding: '6px 12px' }}>
+        <RowNode label={label} value={row.value} />
+      </div>
+    )
+  }
   return (
     <div style={{ ...rowStyle, padding: '6px 12px' }}>
       <span style={{ ...codeFont, color: 'var(--dsw-alias-label-secondary)', fontSize: 12 }}>
-        {row.tool}{typeof row.name === 'string' ? ` ${row.name}` : ''}
-        {row.value !== undefined && row.value !== null ? ` = ${displayValue(row.value)}` : ''}
+        {label}{hasValue ? ` = ${displayValue(row.value)}` : ''}
       </span>
     </div>
   )
 }
 
-/* ── Collapsible section ──────────────────────────────────────────────────── */
+/* ── Collapsible section (shared by set/conditions, failures and call) ────── */
 
-function CollapseHeader({ label, children, defaultOpen = false }: { label: string; children: React.ReactNode; defaultOpen?: boolean }): React.JSX.Element {
+function CollapseHeader({ label, children, defaultOpen = false }: { label: React.ReactNode; children: React.ReactNode; defaultOpen?: boolean }): React.JSX.Element {
   return (
     <details open={defaultOpen} style={{ fontSize: 12.5 }}>
       <summary style={{ cursor: 'pointer', color: 'var(--dsw-alias-label-primary)', fontWeight: 600, marginBottom: 6 }}>{label}</summary>
