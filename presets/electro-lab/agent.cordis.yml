@@ -44,6 +44,7 @@
       {"type":"string","value":"rc"}
       {"type":"boolean","value":true}
       {"type":"array","value":[{"type":"number","value":1,"kind":"time"}]}
+      {"type":"object","value":{"r":{"type":"number","value":100,"kind":"resistance"},"note":{"type":"string","value":"input"}}}
       {"type":"slot","value":"V0"}  or  {"type":"slot","value":"result.points.0"}
       A slot reference names a slot by its full path and is expanded by the engine — use it to feed stored conditions into a call, or pass it to `set` to store a COPY of the referenced value (changing the source later does not change the copy). References may also appear INSIDE array items and object fields (for example, an array-of-times argument whose element is {"type":"slot","value":"t"}).
 
