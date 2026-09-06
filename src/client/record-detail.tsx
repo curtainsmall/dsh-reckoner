@@ -496,24 +496,28 @@ function WritesGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {rows.map((row, index) => {
             const name = String(row.name)
-            const expandable = !row.deleted && isExpandable(row.value)
+            if (row.deleted === true) {
+              return (
+                <div key={row.seq} id={`set-${name}`} style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 8,
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  ...(isZebra(index) ? zebraRow : {}),
+                }}>
+                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', ...codeFont, fontSize: 14 }}>{name}</span>
+                  <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{t('deleted')}</span>
+                  {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12.5 }}>rev {row.rev}</span>}
+                </div>
+              )
+            }
             return (
-              <div key={row.seq} id={`set-${name}`} style={{
-                display: 'flex',
-                alignItems: expandable ? 'flex-start' : 'baseline',
-                gap: 8,
-                fontSize: 14,
-                width: '100%',
-                boxSizing: 'border-box',
-                ...(!expandable && isZebra(index) ? zebraRow : {}),
-              }}>
-                {!expandable && <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, ...codeFont, fontSize: 13.5 }}>{name}</span>}
-                {row.deleted === true
-                  ? <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{t('deleted')}</span>
-                  : expandable
-                    ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} banded={isZebra(index)} /></div>
-                    : <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(row.value)}</span>}
-                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12.5 }}>rev {row.rev}</span>}
+              <div key={row.seq} id={`set-${name}`} style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+                <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                  <RowNode label={name} value={row.value} banded={isZebra(index)} />
+                </div>
+                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12.5, flex: 'none' }}>rev {row.rev}</span>}
               </div>
             )
           })}
@@ -532,21 +536,11 @@ function ReadsGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {rows.map((row, index) => {
             const name = String(row.name)
-            const expandable = isExpandable(row.value)
             return (
-              <div key={row.seq} style={{
-                display: 'flex',
-                alignItems: expandable ? 'flex-start' : 'baseline',
-                gap: 8,
-                fontSize: 14,
-                width: '100%',
-                boxSizing: 'border-box',
-                ...(!expandable && isZebra(index) ? zebraRow : {}),
-              }}>
-                {!expandable && <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, ...codeFont, fontSize: 13.5 }}>{name}</span>}
-                {expandable
-                  ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} banded={isZebra(index)} /></div>
-                  : <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(row.value)}</span>}
+              <div key={row.seq} style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+                <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                  <RowNode label={name} value={row.value} banded={isZebra(index)} />
+                </div>
               </div>
             )
           })}
