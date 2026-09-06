@@ -69,6 +69,21 @@ describe('engine (set/get/call + markers + trace)', () => {
     engine.markerAnswer('final')
   })
 
+  it('a new question clears the table and resets slot revisions', () => {
+    const engine = makeEngine()
+    engine.markerQuestion('q1')
+    engine.opSet('test', { type: 'string', value: 'old' })
+    engine.opSet('R', { type: 'number', value: 100, kind: QuantityKind.Resistance })
+    expect(engine.opSet('R', { type: 'number', value: 220, kind: QuantityKind.Resistance })).toMatchObject({ ok: true, rev: 2 })
+    engine.markerAnswer('done')
+    // The next question starts from an empty table: old slots are gone, rev restarts at 1.
+    engine.markerQuestion('q2')
+    expect(engine.opGet('test')).toMatchObject({ ok: false })
+    expect(engine.opGet('R')).toMatchObject({ ok: false })
+    expect(engine.opSet('R', { type: 'number', value: 5, kind: QuantityKind.Resistance })).toMatchObject({ ok: true, rev: 1 })
+    engine.markerAnswer('done again')
+  })
+
   it('set/get round-trip and delete; get on an undeclared slot errors with no side effects', () => {
     const engine = makeEngine()
     engine.markerQuestion('q')

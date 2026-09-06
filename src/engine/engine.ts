@@ -90,9 +90,10 @@ export class Engine {
 
   /* ── markers (lifecycle) ─────────────────────────────────────────────── */
 
-  /** record_question: if open exists, seal it (duplicate-start) then open a new one. */
+  /** record_question: if open exists, seal it (duplicate-start) then open a new one; the variable table is cleared. */
   markerQuestion(text: string): Receipt {
     if (this.open !== null) this.sealDuplicateStart()
+    this.table.clear()
     const created = this.store.createRecord(text)
     this.open = { id: created.id, seq: 0, question: text, openedAt: created.openedAt }
     this.trace({ tool: 'marker', kind: 'question', ok: true, text })
