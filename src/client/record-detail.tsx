@@ -546,53 +546,80 @@ function FailuresGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
   )
 }
 
-/* ── Call row: a collapse in the style of the set/conditions group ────────── */
+/* ── Call card: title in the get/set style, solver/target meta on open ────── */
 
+/**
+ * A successful call renders as its own card titled like the writes/reads
+ * groups. Collapsed, the summary shows the localized "call" title followed by
+ * the solver name; expanded, the body opens with two meta lines — the solver
+ * and the target slot — and then the arguments and result.
+ */
 function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
+  const [open, setOpen] = useState(true)
   const args = (row.args ?? {}) as Record<string, unknown>
   const refs: string[] = []
   referencedSlots(row.args, refs)
+  const solver = typeof row.solver === 'string' ? row.solver : row.tool
   return (
     <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
-      <CollapseHeader
-        defaultOpen
-        label={
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginRight: 4 }}>
-            <span style={{ ...codeFont }}>{String(row.solver)}</span>
-            {typeof row.target === 'string' && (
-              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{t('callTarget')} <code style={codeFont}>{row.target}</code></span>
+      <details open={open} style={{ fontSize: 12.5 }}>
+        <summary
+          onClick={(event) => { event.preventDefault(); setOpen(!open) }}
+          style={{ cursor: 'pointer', color: 'var(--dsw-alias-label-primary)', fontWeight: 600, marginBottom: 6 }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span>{t('callLabel')}</span>
+            {!open && (
+              <span style={{ fontWeight: 400, color: 'var(--dsw-alias-label-secondary)', ...codeFont }}>{solver}</span>
             )}
-            {typeof row.rev === 'number' && <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>rev {row.rev}</span>}
           </span>
-        }
-      >
-        <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {Object.entries(args).map(([name, value]) => (
-            <RowNode key={name} label={name} value={value} />
-          ))}
-          {refs.length > 0 && (
-            <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {refs.map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  title={t('jumpToSet', { name })}
-                  onClick={() => document.getElementById(`set-${name}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                  style={{ ...codeFont, padding: '1px 8px', borderRadius: 999, border: '1px solid var(--dsw-alias-label-tertiary)', background: 'none', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 11 }}
-                >
-                  @{name}
-                </button>
-              ))}
-            </div>
-          )}
-          {row.result !== undefined && row.result !== null && (
-            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{t('callResult')}</span>
-              <RowNode value={row.result} />
-            </div>
-          )}
-        </div>
-      </CollapseHeader>
+        </summary>
+        {open && (
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <MetaLine label={t('callSolver')} value={solver} />
+            {typeof row.target === 'string' && (
+              <MetaLine label={t('callTarget')} value={row.target}>
+                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>rev {row.rev}</span>}
+              </MetaLine>
+            )}
+            {Object.entries(args).map(([name, value]) => (
+              <RowNode key={name} label={name} value={value} />
+            ))}
+            {refs.length > 0 && (
+              <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {refs.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    title={t('jumpToSet', { name })}
+                    onClick={() => document.getElementById(`set-${name}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                    style={{ ...codeFont, padding: '1px 8px', borderRadius: 999, border: '1px solid var(--dsw-alias-label-tertiary)', background: 'none', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 11 }}
+                  >
+                    @{name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {row.result !== undefined && row.result !== null && (
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{t('callResult')}</span>
+                <RowNode value={row.result} />
+              </div>
+            )}
+          </div>
+        )}
+      </details>
+    </div>
+  )
+}
+
+/** One label/value line used for the solver and target rows of a call card. */
+function MetaLine({ label, value, children }: { label: string; value: string; children?: React.ReactNode }): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5 }}>
+      <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64 }}>{label}</span>
+      <span style={{ color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-word', ...codeFont }}>{value}</span>
+      {children}
     </div>
   )
 }
