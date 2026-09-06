@@ -51,6 +51,15 @@ interface RequestLike {
 /** The records home: records/ + record-index.jsonl live here. */
 const recordsHome = process.env.DSH_ELECTRO_LAB_HOME ?? join(homedir(), '.dsh-electro-lab')
 
+/**
+ * External solver gate. When false, external solver functionality is
+ * disabled: declarations are never compiled into the registry, the manager
+ * tools (external_solver_add/update/delete) are not registered, and the
+ * archive endpoint is not mounted. All code stays in place — flip this to
+ * true to re-enable the feature.
+ */
+const EXTERNAL_SOLVERS_ENABLED = false
+
 /** Global single engine: one engine per process; any session's markers act on it. */
 export const engine = new Engine(recordsHome)
 
@@ -68,25 +77,29 @@ export function apply(ctx: Context): void {
     for (const solver of registerKernelSolvers()) {
       if (engine.registry.get(solver.id) === undefined) engine.registry.register(solver)
     }
-    for (const declaration of readDeclarations(recordsHome)) {
-      if (declaration.enabled === false) continue
-      try {
-        const solver = compileExternalSolver(declaration)
-        if (solver !== null && engine.registry.get(solver.id) === undefined) engine.registry.register(solver)
-      } catch (error) {
-        ctx.logger?.warn(`[dsh-electro-lab] failed to register declaration solver "${declaration.name}": ${error instanceof Error ? error.message : String(error)}`)
+    if (EXTERNAL_SOLVERS_ENABLED) {
+      for (const declaration of readDeclarations(recordsHome)) {
+        if (declaration.enabled === false) continue
+        try {
+          const solver = compileExternalSolver(declaration)
+          if (solver !== null && engine.registry.get(solver.id) === undefined) engine.registry.register(solver)
+        } catch (error) {
+          ctx.logger?.warn(`[dsh-electro-lab] failed to register declaration solver "${declaration.name}": ${error instanceof Error ? error.message : String(error)}`)
+        }
       }
+      // Declarations have just been registered: clear the restart dirty bit.
+      clearRestartRequired(recordsHome)
     }
-    // Declarations have just been registered: clear the restart dirty bit.
-    clearRestartRequired(recordsHome)
 
     // LLM tool surface: engine primitives + markers.
     for (const tool of createEngineTools(engine)) {
       disposers.push(ctx.tools.register(tool))
     }
     // Declaration management tools (the management surface lives outside the engine).
-    for (const tool of createDeclarationTools(recordsHome)) {
-      disposers.push(ctx.tools.register(tool))
+    if (EXTERNAL_SOLVERS_ENABLED) {
+      for (const tool of createDeclarationTools(recordsHome)) {
+        disposers.push(ctx.tools.register(tool))
+      }
     }
 
     return () => {
@@ -171,52 +184,54 @@ export function apply(ctx: Context): void {
 
     // External solver archive management: GET lists + dirty bit; PUT overwrites/adds (base64 JSON query parameter);
     // DELETE ?name= removes. Every write sets the dirty bit (registered via compileExternalSolver after a restart).
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: EXTERNAL_PATH,
-      handler: (req, res) => {
-        const request = req as RequestLike
-        const method = request.method ?? 'GET'
-        res.setHeader('content-type', 'application/json')
-        if (method === 'PUT') {
-          const encoded = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('config')
-          if (encoded === null) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: 'config parameter is required (base64 JSON)' }))
+    if (EXTERNAL_SOLVERS_ENABLED) {
+      disposers.push(ctx.webServer.register({
+        kind: 'exact',
+        path: EXTERNAL_PATH,
+        handler: (req, res) => {
+          const request = req as RequestLike
+          const method = request.method ?? 'GET'
+          res.setHeader('content-type', 'application/json')
+          if (method === 'PUT') {
+            const encoded = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('config')
+            if (encoded === null) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'config parameter is required (base64 JSON)' }))
+              return
+            }
+            let config: unknown
+            try {
+              config = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+            } catch {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'config is not valid base64 JSON' }))
+              return
+            }
+            const errors = validateDeclaration(config)
+            if (errors.length > 0) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: errors.join('; ') }))
+              return
+            }
+            upsertDeclaration(recordsHome, config as never)
+            res.end(JSON.stringify({ saved: true, restartRequired: true }))
             return
           }
-          let config: unknown
-          try {
-            config = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
-          } catch {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: 'config is not valid base64 JSON' }))
+          if (method === 'DELETE') {
+            const name = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('name')
+            const deleted = name !== null && deleteDeclaration(recordsHome, name)
+            res.end(JSON.stringify({ deleted, restartRequired: restartRequired(recordsHome) }))
             return
           }
-          const errors = validateDeclaration(config)
-          if (errors.length > 0) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: errors.join('; ') }))
+          if (method !== 'GET') {
+            res.statusCode = 405
+            res.end('method not allowed')
             return
           }
-          upsertDeclaration(recordsHome, config as never)
-          res.end(JSON.stringify({ saved: true, restartRequired: true }))
-          return
-        }
-        if (method === 'DELETE') {
-          const name = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('name')
-          const deleted = name !== null && deleteDeclaration(recordsHome, name)
-          res.end(JSON.stringify({ deleted, restartRequired: restartRequired(recordsHome) }))
-          return
-        }
-        if (method !== 'GET') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        res.end(JSON.stringify({ solvers: readDeclarations(recordsHome), restartRequired: restartRequired(recordsHome) }))
-      },
-    }))
+          res.end(JSON.stringify({ solvers: readDeclarations(recordsHome), restartRequired: restartRequired(recordsHome) }))
+        },
+      }))
+    }
 
     return () => {
       for (const off of disposers) off()

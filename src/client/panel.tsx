@@ -328,6 +328,13 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
   )
 }
 
+/**
+ * External solver tab gate. When false the "External solvers" tab is not
+ * rendered (the panel opens straight on the records view) and the feature is
+ * disabled. All code stays in place — flip this to true to bring the tab back.
+ */
+const EXTERNAL_TAB_ENABLED = false
+
 /** The panel body: title bar with a back-to-session button, tabs, content. */
 export function ElectroLabPanel(): React.JSX.Element | null {
   useAppLocale() // Re-render when the active language changes.
@@ -366,12 +373,14 @@ export function ElectroLabPanel(): React.JSX.Element | null {
         </button>
         <h2 style={{ margin: 0, fontSize: 15 }}>ElectroLab</h2>
       </div>
-      <div role="tablist" style={tabBarStyle} data-dsh-part="tab-bar">
-        <TabButton active={tab === 'records'} label={t('tabRecords')} onClick={() => setTab('records')} />
-        <TabButton active={tab === 'external'} label={t('tabExternal')} onClick={() => setTab('external')} />
-      </div>
+      {EXTERNAL_TAB_ENABLED && (
+        <div role="tablist" style={tabBarStyle} data-dsh-part="tab-bar">
+          <TabButton active={tab === 'records'} label={t('tabRecords')} onClick={() => setTab('records')} />
+          <TabButton active={tab === 'external'} label={t('tabExternal')} onClick={() => setTab('external')} />
+        </div>
+      )}
       <div style={{ flex: 1, overflow: 'auto', padding: 14 }}>
-        {tab === 'records' ? <RecordsTab /> : <ExternalSolversTab />}
+        {EXTERNAL_TAB_ENABLED ? (tab === 'records' ? <RecordsTab /> : <ExternalSolversTab />) : <RecordsTab />}
       </div>
     </div>
   )
