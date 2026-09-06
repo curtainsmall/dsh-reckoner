@@ -31,7 +31,7 @@ export function IconChevronLeft({ size = 16 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faChevronLeft} style={sized(size)} />
 }
 
-/** ↓ export / download. */
+/** ↓ download / export. */
 export function IconDownload({ size = 16 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faDownload} style={sized(size)} />
 }
@@ -41,12 +41,12 @@ export function IconArrowUp({ size = 14 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faArrowUp} style={sized(size)} />
 }
 
-/** 📁 folder. */
+/** folder glyph (directory tree). */
 export function IconFolder({ size = 14 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faFolder} style={sized(size)} />
 }
 
-/** 📄 file. */
+/** file glyph (directory tree). */
 export function IconFile({ size = 14 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faFile} style={sized(size)} />
 }
@@ -56,12 +56,12 @@ export function IconMinus({ size = 14 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faMinus} style={sized(size)} />
 }
 
-/** Official Markdown brand logo (Font Awesome brands). */
+/** Markdown brand glyph. */
 export function IconMarkdown({ size = 16 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faMarkdown} style={sized(size)} />
 }
 
-/** Official TeX brand logo (Font Awesome brands, free tier). */
-export function IconLatex({ size = 16 }: IconProps): React.JSX.Element {
+/** TeX brand glyph; optically smaller, so it defaults larger than normal. */
+export function IconTex({ size = 18 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faTex} style={sized(size)} />
 }

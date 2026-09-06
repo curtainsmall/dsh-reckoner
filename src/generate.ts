@@ -10,7 +10,32 @@
  * the bracketed record-section labels (question/analysis/tool calls/results/
  * answer), which would steer the model toward a sectioned five-part output.
  */
-import type { Record } from './records.ts'
+
+/** One successful call row of the trace, flattened for the prompt. */
+export interface GenerationCall {
+  callId: string
+  name: string
+  arguments: string
+}
+
+/** One successful result row of the trace, flattened for the prompt. */
+export interface GenerationResult {
+  callId: string
+  content: string
+  error?: { name: string; code: string }
+}
+
+/** The record facts the generation prompt is built from (engine trace → this shape). */
+export interface Record {
+  id: string
+  startedAt?: number
+  settledAt?: number
+  question: string
+  analyse: string
+  answer: string
+  calls: GenerationCall[]
+  results: GenerationResult[]
+}
 
 /** System + user prompt pair for one record. */
 export interface GeneratePrompt {
@@ -102,11 +127,11 @@ function renderRecord(record: Record): string {
   lines.push(`- The question to solve: ${record.question}`)
   if (record.analyse.length > 0) lines.push(`- Approach notes: ${record.analyse}`)
   for (const call of record.calls) {
-    lines.push(`- Tool call ${call.name}: ${call.arguments.length > 0 ? call.arguments : '(no arguments)'}`)
+    lines.push(`- Calculation step ${call.name}: ${call.arguments.length > 0 ? call.arguments : '(no arguments)'}`)
   }
   for (const result of record.results) {
     const content = result.content.trim()
-    if (content.length > 0) lines.push(`- Tool output: ${content}`)
+    if (content.length > 0) lines.push(`- Step result: ${content}`)
   }
   lines.push(`- Final answer: ${record.answer}`)
   return lines.join('\n')
@@ -114,8 +139,9 @@ function renderRecord(record: Record): string {
 
 const MARKDOWN_SHARED_RULES = [
   "Restate the question clearly at the start, in the user's own words. Remove any meta or filler text that was added while merging multiple inputs into one question.",
-  'Every number must come from the provided tool outputs and the final answer — never invent or recompute values.',
+  'Every number must come from the provided step results and the final answer — never invent or recompute values.',
   'Never include record ids or timestamps anywhere in the article.',
+  "Never mention ElectroLab, DeepSeek Harness, the harness, solvers, calculation steps, records or the generation process in the article — present the work as if you carried out the calculation yourself, from the problem statement to the final result. The only allowed occurrences of the name are the document's fixed title 'DeepSeek Harness ElectroLab Solution' and the author line 'DeepSeek Harness ElectroLab'.",
 ]
 
 /**
@@ -135,7 +161,7 @@ export function buildArticlePrompt(record: Record, language: ArticleLanguage = A
           'You are the article writer for DeepSeek Harness ElectroLab.',
           'Write ONE self-contained LaTeX article body that solves the calculation question described in the record information. The article must read like a proper technical article, not a chat reply and not a thinking transcript.',
           'The host wraps your output in the document shell — the preamble, \\title{DeepSeek Harness ElectroLab Solution}, \\author{DeepSeek Harness ElectroLab}, \\maketitle and the document environment are ALREADY in place. Output ONLY the body: start directly with the first section heading. Do NOT output \\documentclass, any \\usepackage, \\title, \\author, \\date, \\maketitle, \\begin{document} or \\end{document} — no preamble and no environment commands.',
-          'Structure the body with \\section headings for the question, the approach, the calculations and the conclusion — choose headings that fit the content; do NOT reproduce the record\'s internal labels (question/analysis/tool calls/results/answer) as headings.',
+          'Structure the body with \\section headings for the question, the approach, the calculations and the conclusion — choose headings that fit the content; do NOT reproduce the record\'s internal step labels as headings.',
           'Put formulas and calculations on their OWN lines: display math (\\[...\\]) or the align* environment for equations, inline math ($...$) for symbols inside prose, and state the computed result in prose right after the calculation.',
           'Write values with units as \\SI{<number>}{<unit>} using siunitx macros (\\volt, \\ohm, \\farad, \\henry, \\ampere, \\second, \\hertz, \\watt) — otherwise write plain numbers.',
           ...MARKDOWN_SHARED_RULES,
@@ -149,7 +175,7 @@ export function buildArticlePrompt(record: Record, language: ArticleLanguage = A
         system: [
           'You are the article writer for DeepSeek Harness ElectroLab.',
           'Write ONE self-contained Markdown article that solves the calculation question described in the record information. The article must read like a proper technical article, not a chat reply and not a thinking transcript.',
-          'Structure it with headings: the H1 title must be exactly: DeepSeek Harness ElectroLab Solution, followed by an author line with exactly: DeepSeek Harness ElectroLab. Then use clear H2 section headings for the question, the approach, the calculations and the conclusion — choose headings that fit the content; do NOT reproduce the record\'s internal labels (question/analysis/tool calls/results/answer) as headings.',
+          'Structure it with headings: the H1 title must be exactly: DeepSeek Harness ElectroLab Solution, followed by an author line with exactly: DeepSeek Harness ElectroLab. Then use clear H2 section headings for the question, the approach, the calculations and the conclusion — choose headings that fit the content; do NOT reproduce the record\'s internal step labels as headings.',
           'Put formulas and calculations on their OWN lines in a clean format: each equation on a separate line (e.g. `τ = R·C = 100 Ω × 0.1 F = 10 s`), intermediate steps as separate lines, and the computed result stated in prose right after the calculation. Use Markdown formatting — headings, lists, and fenced or inline code for equations — so formulas and calculations are visually distinct from the surrounding prose.',
           ...MARKDOWN_SHARED_RULES,
           articleLanguageInstruction(language),

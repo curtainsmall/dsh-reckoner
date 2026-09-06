@@ -12,7 +12,9 @@
  */
 import { useState, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
-import { RecordsTab, GenerationOverlay } from './records.tsx'
+import { RecordsTab } from './records.tsx'
+import { ExternalSolversTab } from './external-solvers.tsx'
+import { GenerationOverlay } from './generation-ui.tsx'
 import { t, useAppLocale } from './locales.ts'
 import { IconChevronLeft } from './icons.tsx'
 
@@ -60,13 +62,13 @@ export function mountElectroLabPanel(): () => void {
   // container and its display toggle) so the progress dialog and minimized
   // pill stay visible across the records list, the session chat, and every
   // other page. The shell defines the theme tokens on <body>, so the overlay
-  // inherits them; pointer-events are re-enabled on the dialog/pill themselves.
+  // inherits them; pointer-events are re-enabled on the dialog/pill itself.
   const overlayContainer = document.createElement('div')
   overlayContainer.style.cssText = 'position: fixed; inset: 0; z-index: 95; pointer-events: none;'
   document.body.appendChild(overlayContainer)
-  let overlayRoot: ReturnType<typeof createRoot> | undefined
-  overlayRoot ??= createRoot(overlayContainer)
+  const overlayRoot = createRoot(overlayContainer)
   overlayRoot.render(<GenerationOverlay />)
+
   const style = document.createElement('style')
   style.textContent = `
     [data-pane="conversation"], [class*="centerCol"] { position: relative; }
@@ -175,7 +177,7 @@ export function mountElectroLabPanel(): () => void {
     style.remove()
     root?.unmount()
     container.remove()
-    overlayRoot?.unmount()
+    overlayRoot.unmount()
     overlayContainer.remove()
   }
 }
@@ -310,28 +312,57 @@ const tabBarStyle: React.CSSProperties = {
   borderBottom: '1px solid var(--dsw-alias-border-l1)',
 }
 
-/** Active tab button, styled exactly like the dsh-ssh panel tabs (panel.module.css .tab + .tab[data-active]). */
-function tabButtonStyle(hovered: boolean): React.CSSProperties {
+/** Active tab button, styled exactly like the dsh-ssh panel tabs (panel.module.css .tab + .tab[data-active]);
+ *  only the selected tab carries the accent underline. */
+function tabButtonStyle(hovered: boolean, active: boolean): React.CSSProperties {
   return {
     padding: '7px 14px',
     fontSize: 13,
-    color: 'var(--dsw-alias-label-primary)',
-    fontWeight: 600,
+    color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
+    fontWeight: active ? 600 : 400,
     background: hovered ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
     border: 'none',
-    borderBottom: '2px solid var(--dsw-alias-state-business-primary)',
+    borderBottom: '2px solid',
+    borderBottomColor: active ? 'var(--dsw-alias-state-business-primary)' : 'transparent',
     borderRadius: '6px 6px 0 0',
     cursor: 'pointer',
     whiteSpace: 'nowrap',
   }
 }
 
+/** One tab button: active styling plus a self-managed hover state. */
+function TabButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }): React.JSX.Element {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      data-active={active ? '' : undefined}
+      data-dsh-part="tab"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={tabButtonStyle(hovered, active)}
+    >
+      {label}
+    </button>
+  )
+}
+
+/**
+ * External solver tab gate. When false the "External solvers" tab is not
+ * rendered (the panel opens straight on the records view) and the feature is
+ * disabled. All code stays in place — flip this to true to bring the tab back.
+ */
+const EXTERNAL_TAB_ENABLED = false
+
 /** The panel body: title bar with a back-to-session button, tabs, content. */
 export function ElectroLabPanel(): React.JSX.Element | null {
   useAppLocale() // Re-render when the active language changes.
   const open = useSyncExternalStore(panelStore.subscribe, () => panelStore.open)
   const [backHover, setBackHover] = useState(false)
-  const [tabHover, setTabHover] = useState(false)
+  const [tab, setTab] = useState<'records' | 'external'>('records')
 
   if (!open) return null
 
@@ -364,22 +395,14 @@ export function ElectroLabPanel(): React.JSX.Element | null {
         </button>
         <h2 style={{ margin: 0, fontSize: 15 }}>ElectroLab</h2>
       </div>
-      <div role="tablist" style={tabBarStyle} data-dsh-part="tab-bar">
-        <button
-          type="button"
-          role="tab"
-          aria-selected="true"
-          data-active=""
-          data-dsh-part="tab"
-          onMouseEnter={() => setTabHover(true)}
-          onMouseLeave={() => setTabHover(false)}
-          style={tabButtonStyle(tabHover)}
-        >
-          {t('tabRecords')}
-        </button>
-      </div>
+      {EXTERNAL_TAB_ENABLED && (
+        <div role="tablist" style={tabBarStyle} data-dsh-part="tab-bar">
+          <TabButton active={tab === 'records'} label={t('tabRecords')} onClick={() => setTab('records')} />
+          <TabButton active={tab === 'external'} label={t('tabExternal')} onClick={() => setTab('external')} />
+        </div>
+      )}
       <div style={{ flex: 1, overflow: 'auto', padding: 14 }}>
-        <RecordsTab />
+        {EXTERNAL_TAB_ENABLED ? (tab === 'records' ? <RecordsTab /> : <ExternalSolversTab />) : <RecordsTab />}
       </div>
     </div>
   )

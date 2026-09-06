@@ -10,7 +10,7 @@ import {
   resolveTemplateLanguage,
   sanitizeLatexBody,
 } from '../src/generate.ts'
-import type { Record } from '../src/records.ts'
+import type { Record } from '../src/generate.ts'
 
 const sample: Record = {
   id: 'rec-12345678',

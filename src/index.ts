@@ -1,17 +1,24 @@
 /**
- * Host half of dsh-electro-lab.
+ * Host half of dsh-electro-lab (engine era).
+ *
+ * One process-wide global engine (Engine): variable table + solver registry + record storage.
+ * apply assembly: registers the kernel and external solvers, registers the LLM tool surface (set/get/call +
+ * markers) and the declaration management tools (external_solver_add/update/delete), and mounts two
+ * endpoints (record index, external solver archive management).
  */
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Context } from 'cordis'
-import { registerTools } from './tools/index.ts'
+import { Engine } from './engine/engine.ts'
+import { createEngineTools } from './tools/engine-tools.ts'
+import { createDeclarationTools } from './tools/declaration-tools.ts'
+import { compileExternalSolver } from './engine/external-solvers.ts'
+import { registerKernelSolvers } from './engine/solvers/index.ts'
+import type { GenerationCall, GenerationResult, Record } from './generate.ts'
+import { clearRestartRequired, deleteDeclaration, readDeclarations, restartRequired, upsertDeclaration, validateDeclaration } from './tool.ts'
+import { registerGenerateEndpoints } from './generate-server.ts'
 import { registerSkills } from './skill.ts'
 import { installPresets } from './preset.ts'
-import { RecordManager, readRecordArchive, deleteRecordFromArchive, type Record, type RecordEvent } from './records.ts'
-import { ArticleFormat, ArticleLanguage, GenerationPhase, TemplateLanguage, buildArticlePrompt, buildLatexDocument, normalizeFileName, resolveTemplateLanguage, templateLanguageToArticleLanguage } from './generate.ts'
 
 /** Plugin identity for cordis.yml rows. */
 export const name = 'dsh-electro-lab'
@@ -20,40 +27,15 @@ export const name = 'dsh-electro-lab'
 export const inject = ['tools', 'webServer']
 
 declare module 'cordis' {
-  interface Events {
-    /** Post-commit append feed (dsh-session's own declaration; mirrored loosely here). */
-    'session/event'(session: unknown, event: unknown): void
-  }
   interface Context {
-    /** The web server the records endpoint registers on (same pattern as dsh-remote-web-ui). */
+    /** The web server the endpoints register on. */
     webServer: WebServerLike
-    /** The host LLM runtime (dsh-llm), optional — generation needs it. */
-    llm?: {
-      stream(options: {
-        provider: string
-        model: string
-        messages: Array<{ role: string; content: Array<{ type: string; text: string }> }>
-        system?: string
-        maxTokens?: number
-        signal?: AbortSignal
-      }): AsyncIterable<unknown>
-    }
-    /** The deployment's default model selection (dsh-agent-default-model), optional. */
-    agentDefaultModel?: {
-      currentSelection(): { provider: string; model: string; reasoningEffort?: string }
-    }
   }
 }
-
-/** Minimal structural shape of a session (id only — the log is never read). */
-interface SessionLike {
-  id?: string
-}
-
 /** Minimal structural shape of the web-server route registry. */
 interface WebServerLike {
   register(route: {
-    kind: 'exact'
+    kind: 'exact' | 'prefix'
     path: string
     handler(req: unknown, res: {
       statusCode?: number
@@ -63,564 +45,170 @@ interface WebServerLike {
   }): () => void
 }
 
-/** Minimal request shape the endpoint reads (method + url for query parsing). */
 interface RequestLike {
   method?: string
   url?: string
 }
 
-/** The records page endpoint (same origin as the web app; the client polls it). */
-const RECORDS_PATH = '/api/dsh-electro-lab/records'
-
-/** Article generation: POST ?recordId=&format=&directory=&fileName=&language= starts a job and returns its id. */
-const GENERATE_PATH = '/api/dsh-electro-lab/generate'
-
-/** Article generation progress: GET ?jobId= returns the job snapshot. */
-const GENERATE_PROGRESS_PATH = '/api/dsh-electro-lab/generate-progress'
-
-/** Cancel a running generation: POST ?jobId= aborts the job. */
-const GENERATE_CANCEL_PATH = '/api/dsh-electro-lab/generate-cancel'
-
-/** Reveal a generated file or directory in the OS file manager: POST ?path=. */
-const REVEAL_PATH = '/api/dsh-electro-lab/reveal'
-
-/**
- * Host-driven directory browsing: GET ?path= lists the directory's
- * subdirectories plus its parent. Pure HTTP — works locally and remotely
- * (no OS dialog), and every path returned is absolute.
- */
-const LIST_DIRS_PATH = '/api/dsh-electro-lab/list-dirs'
-
-/** Tree roots for the directory browser: drive roots on Windows, the home otherwise. */
-const LIST_ROOTS_PATH = '/api/dsh-electro-lab/list-roots'
-
-/** The vendored directory-tree stylesheet (assets/directory-tree.css), served for the client to inject. */
-const DIRECTORY_TREE_CSS_PATH = '/api/dsh-electro-lab/directory-tree.css'
-
-/** Remembered generation state — output directory and article language (GET), persistence (PUT ?dir=&language=). */
-const GENERATE_DIR_PATH = '/api/dsh-electro-lab/generate-dir'
-
-/**
- * Non-config serialized state lives in one JSON file under the records home;
- * config.json is reserved for future configuration and is never touched here.
- */
-const STATE_FILE = 'state.json'
-/** Legacy plain-text location of the remembered directory (migrated on read). */
-const LEGACY_GENERATE_DIR_FILE = 'generate-dir.txt'
-
-// Module-level record state, shared by EVERY mount of the plugin (the global
-// bundle row AND a session preset row can both apply it): one manager per
-// session, one disk archive, one snapshot file. Records live under the
-// user's home — `~/.dsh-electro-lab/`, deliberately OUTSIDE $DSH_HOME so
-// they survive session deletion, restarts and even a full DSH uninstall.
+/** The records home: records/ + record-index.jsonl live here. */
 const recordsHome = process.env.DSH_ELECTRO_LAB_HOME ?? join(homedir(), '.dsh-electro-lab')
-const managers = new Map<string, RecordManager>()
-
-/** Get (or lazily create) the session's record manager. */
-function getOrCreateManager(sessionId: string): RecordManager {
-  let manager = managers.get(sessionId)
-  if (manager === undefined) {
-    manager = new RecordManager(
-      sessionId,
-      join(recordsHome, 'records.jsonl'),
-      join(recordsHome, 'open-record.json'),
-    )
-    managers.set(sessionId, manager)
-  }
-  return manager
-}
-
-/** Non-config serialized state: the remembered generation output directory, article language, format and PDF-compile toggle. */
-interface GenerateState {
-  generateDir?: string
-  generateLanguage?: string
-  generateFormat?: string
-  generateCompile?: boolean
-}
-
-/** Raw state.json contents (never throws — missing or corrupt file reads as {}). */
-function readStoredState(): Partial<GenerateState> {
-  try {
-    const parsed = JSON.parse(readFileSync(join(recordsHome, STATE_FILE), 'utf8'))
-    return typeof parsed === 'object' && parsed !== null ? (parsed as Partial<GenerateState>) : {}
-  } catch {
-    return {}
-  }
-}
-
-/** Membership guards for the query-string values (string enums travel as raw strings over HTTP). */
-function isArticleFormat(value: unknown): value is ArticleFormat {
-  switch (value) {
-    case ArticleFormat.Markdown:
-    case ArticleFormat.Latex:
-      return true
-    default:
-      return false
-  }
-}
-
-function isArticleLanguage(value: unknown): value is ArticleLanguage {
-  switch (value) {
-    case ArticleLanguage.Auto:
-    case ArticleLanguage.ZhCN:
-    case ArticleLanguage.En:
-      return true
-    default:
-      return false
-  }
-}
-
-/** The remembered generation state, with a one-time migration from the legacy plain-text file. */
-function readGenerateState(): GenerateState {
-  const stored = readStoredState()
-  const state: GenerateState = {
-    generateDir: typeof stored.generateDir === 'string' && stored.generateDir.trim().length > 0 ? stored.generateDir.trim() : undefined,
-    generateLanguage: typeof stored.generateLanguage === 'string' && stored.generateLanguage.length > 0 ? stored.generateLanguage : undefined,
-    generateFormat: isArticleFormat(stored.generateFormat) ? stored.generateFormat : undefined,
-    generateCompile: typeof stored.generateCompile === 'boolean' ? stored.generateCompile : undefined,
-  }
-  if (state.generateDir === undefined) {
-    try {
-      const legacy = readFileSync(join(recordsHome, LEGACY_GENERATE_DIR_FILE), 'utf8').trim()
-      if (legacy.length > 0) state.generateDir = legacy
-    } catch {
-      // no legacy file — nothing to migrate
-    }
-  }
-  return state
-}
-
-/** Persist the generation state; undefined fields keep their stored values. */
-function writeGenerateState(state: GenerateState): void {
-  mkdirSync(recordsHome, { recursive: true })
-  const merged: Partial<GenerateState> = { ...readStoredState(), ...state }
-  if (merged.generateDir === undefined || merged.generateDir.trim().length === 0) delete merged.generateDir
-  if (merged.generateLanguage === undefined || merged.generateLanguage.length === 0) delete merged.generateLanguage
-  if (merged.generateFormat === undefined || !isArticleFormat(merged.generateFormat)) delete merged.generateFormat
-  if (merged.generateCompile === undefined || typeof merged.generateCompile !== 'boolean') delete merged.generateCompile
-  writeFileSync(join(recordsHome, STATE_FILE), JSON.stringify(merged), 'utf8')
-  try {
-    rmSync(join(recordsHome, LEGACY_GENERATE_DIR_FILE), { force: true })
-  } catch {
-    // best effort: the legacy file may not exist
-  }
-}
-
-/** Existing drive roots on Windows (empty elsewhere) — the way out of one drive. */
-function listDriveRoots(): string[] {
-  if (process.platform !== 'win32') return []
-  const roots: string[] = []
-  for (let code = 65; code <= 90; code++) {
-    const root = `${String.fromCharCode(code)}:\\`
-    try {
-      if (existsSync(root)) roots.push(root)
-    } catch {
-      // skip unreadable drives
-    }
-  }
-  return roots
-}
-
-/** List one directory: its absolute path, parent, sorted subdirectory names, file names, and drive roots. */
-function listDirectories(inputPath: string): { path: string; parent: string; entries: string[]; files: string[]; roots: string[] } {
-  const requested = inputPath.trim()
-  const resolved = requested.length > 0 && existsSync(requested) && statSync(requested).isDirectory()
-    ? requested
-    : homedir()
-  const names = readdirSync(resolved, { withFileTypes: true })
-  const entries = names.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort((a, b) => a.localeCompare(b))
-  const files = names.filter((entry) => entry.isFile()).map((entry) => entry.name).sort((a, b) => a.localeCompare(b))
-  const parent = join(resolved, '..')
-  return { path: resolved, parent, entries, files, roots: parent === resolved ? listDriveRoots() : [] }
-}
-
-/** The vendored directory-tree stylesheet (MIT, from @aiquants/directory-tree's standalone build). */
-function readDirectoryTreeCss(): string {
-  try {
-    return readFileSync(new URL('../assets/directory-tree.css', import.meta.url), 'utf8')
-  } catch {
-    return ''
-  }
-}
-
-/** Reveal a generated file (select it) or directory in the OS file manager. */
-function revealPath(target: string): Promise<string> {
-  return launchInOs(target, 'reveal')
-}
-
-/** Open a generated file with its default application. */
-function openFilePath(target: string): Promise<string> {
-  return launchInOs(target, 'open')
-}
-
-/** One platform's "open in the OS" recipe: candidate commands plus the argv builder. */
-interface OpenRecipe {
-  /** Candidate commands tried in order (the first that spawns wins). */
-  commands: string[]
-  /** Build the argv for open/reveal from the target and whether it is a directory. */
-  args: (target: string, mode: 'open' | 'reveal', isDir: boolean) => string[]
-}
-
-function openRecipe(): OpenRecipe {
-  switch (process.platform) {
-    case 'darwin':
-      // open <file> uses the default app; open -R <file> reveals it in Finder.
-      return {
-        commands: ['/usr/bin/open'],
-        args: (target, mode, isDir) => mode === 'open' || isDir ? [target] : ['-R', target],
-      }
-    case 'win32':
-      // explorer.exe opens with the shell; /select,<file> reveals the file.
-      // explorer exits with code 1 when an Explorer instance already runs (it
-      // hands the request over) — that is success, not failure. windowsHide:
-      // true (CREATE_NO_WINDOW) and stdio:'ignore' each silently suppress the
-      // Explorer window (verified empirically) — detached only, never wait.
-      return {
-        commands: ['explorer.exe'],
-        args: (target, mode, isDir) => mode === 'open' ? [target] : [isDir ? target : `/select,${target}`],
-      }
-    default:
-      // xdg-open has no reveal/select — revealing a file opens its folder.
-      return {
-        commands: ['xdg-open', '/usr/bin/xdg-open'],
-        args: (target, mode, isDir) => [mode === 'open' || isDir ? target : dirname(target)],
-      }
-  }
-}
-
-/** Spawn one launcher detached and report spawn success/failure (ENOENT included). */
-function spawnDetached(command: string, args: string[]): Promise<{ ok: boolean; code?: string; message: string }> {
-  return new Promise((resolve) => {
-    try {
-      const child = spawn(command, args, { detached: true })
-      const timer = setTimeout(() => resolve({ ok: true, message: 'ok' }), 10_000)
-      child.once('spawn', () => {
-        clearTimeout(timer)
-        resolve({ ok: true, message: 'ok' })
-      })
-      child.once('error', (error) => {
-        clearTimeout(timer)
-        resolve({ ok: false, code: (error as NodeJS.ErrnoException).code, message: error.message })
-      })
-      child.unref()
-    } catch (error) {
-      resolve({ ok: false, code: 'THROW', message: error instanceof Error ? error.message : String(error) })
-    }
-  })
-}
-
-/** Open/reveal a path through the OS file manager or the default application. */
-async function launchInOs(target: string, mode: 'open' | 'reveal'): Promise<string> {
-  if (!existsSync(target)) return `failed: no such file or directory: ${target}`
-  const isDir = statSync(target).isDirectory()
-  const recipe = openRecipe()
-  const args = recipe.args(target, mode, isDir)
-  for (const command of recipe.commands) {
-    const outcome = await spawnDetached(command, args)
-    if (outcome.ok) return 'ok'
-    // A missing command (e.g. xdg-open not on PATH) falls through to the next
-    // candidate; any other spawn failure is reported as-is.
-    if (outcome.code !== 'ENOENT') return `failed: ${outcome.message}`
-  }
-  return 'failed: no suitable opener found'
-}
 
 /**
- * Generate the solution article for one record through the host LLM. For
- * Markdown the model's text IS the article; for LaTeX the model writes only
- * the body, which is sanitized and wrapped in the document shell here.
+ * External solver gate. When false, external solver functionality is
+ * disabled: declarations are never compiled into the registry, the manager
+ * tools (external_solver_add/update/delete) are not registered, and the
+ * archive endpoint is not mounted. All code stays in place — flip this to
+ * true to re-enable the feature.
  */
-async function generateArticle(ctx: Context, record: Record, signal: AbortSignal, language: ArticleLanguage, format: ArticleFormat, onProgress?: (percent: number) => void): Promise<string> {
-  const llm = ctx.get('llm')
-  if (llm === undefined) throw new Error('the LLM service is unavailable in this deployment')
-  const defaults = ctx.get('agentDefaultModel')
-  const route = defaults?.currentSelection()
-  if (route === undefined || route.provider === undefined || route.model === undefined) {
-    throw new Error('no default model is configured — pick one in Settings first')
-  }
-  // LaTeX needs the document class fixed BEFORE generation: resolve the
-  // template language (auto → probe the question text) and pin the prompt to
-  // it. Markdown keeps the raw selection (auto follows the question).
-  let templateLanguage: TemplateLanguage | undefined
-  switch (format) {
-    case ArticleFormat.Latex:
-      templateLanguage = resolveTemplateLanguage(language, record.question)
-      break
-    case ArticleFormat.Markdown:
-      break
-  }
-  const promptLanguage: ArticleLanguage = templateLanguage === undefined
-    ? language
-    : templateLanguageToArticleLanguage(templateLanguage)
-  const { system, user } = buildArticlePrompt(record, promptLanguage, format)
-  const startedAt = Date.now()
-  let text = ''
-  for await (const raw of llm.stream({
-    provider: route.provider,
-    model: route.model,
-    messages: [{ role: 'user', content: [{ type: 'text', text: user }] }],
-    system,
-    maxTokens: 4096,
-    signal,
-  })) {
-    const chunk = raw as { type?: string; text?: string; reason?: string }
-    if (chunk.type === 'text-delta') {
-      text += chunk.text ?? ''
-    } else if (chunk.type === 'tool-call-delta') {
-      throw new Error('the generation model unexpectedly requested a tool')
-    } else if (chunk.type === 'finish' && chunk.reason === 'aborted') {
-      throw new Error('article generation was aborted')
-    }
-    // Progress within the model phase: ramp from 10% toward 90% by elapsed time.
-    if (onProgress !== undefined) {
-      onProgress(Math.min(90, 10 + ((Date.now() - startedAt) / 30_000) * 80))
-    }
-  }
-  const trimmed = text.trim()
-  if (trimmed.length === 0) throw new Error('the model produced no article text')
-  if (templateLanguage === undefined) return trimmed
-  const document = buildLatexDocument(trimmed, templateLanguage)
-  if (!document.ok) throw new Error(`LaTeX validation failed: ${document.error}`)
-  return document.text
-}
+const EXTERNAL_SOLVERS_ENABLED = false
 
-/** One in-memory generation job (never persisted — no generation log). */
-interface GenerateJob {
-  status: 'running' | 'done' | 'error'
-  percent: number
-  phase: GenerationPhase
-  path?: string
-  /** Present when the LaTeX source compiled successfully. */
-  pdfPath?: string
-  /** Present when compilation was requested but failed (the .tex is still written). */
-  compileError?: string
-  error?: string
-  abort: () => void
-}
+/** Global single engine: one engine per process; any session's markers act on it. */
+export const engine = new Engine(recordsHome)
 
-const generateJobs = new Map<string, GenerateJob>()
-
-/** Run one command and collect its output tail; kills on timeout. */
-function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<{ ok: boolean; code: number | null; output: string }> {
-  return new Promise((resolve) => {
-    try {
-      const child = spawn(command, args, { cwd })
-      let output = ''
-      const timer = setTimeout(() => { child.kill() }, timeoutMs)
-      child.stdout?.on('data', (chunk: Buffer) => { output += String(chunk) })
-      child.stderr?.on('data', (chunk: Buffer) => { output += String(chunk) })
-      child.on('error', (error) => {
-        clearTimeout(timer)
-        resolve({ ok: false, code: null, output: error.message })
-      })
-      child.on('close', (code) => {
-        clearTimeout(timer)
-        resolve({ ok: code === 0, code, output: output.slice(-4000) })
-      })
-    } catch (error) {
-      resolve({ ok: false, code: null, output: error instanceof Error ? error.message : String(error) })
-    }
-  })
-}
-
-/** Candidate xelatex commands: PATH first, then known MiKTeX install locations on Windows. */
-function xelatexCandidates(): string[] {
-  const candidates = ['xelatex']
-  if (process.platform === 'win32') {
-    for (const root of listDriveRoots()) {
-      candidates.push(join(root, 'MiKTeX', 'miktex', 'bin', 'x64', 'xelatex.exe'))
-    }
-    const local = process.env.LOCALAPPDATA
-    if (local !== undefined) candidates.push(join(local, 'Programs', 'MiKTeX', 'miktex', 'bin', 'x64', 'xelatex.exe'))
-    candidates.push('C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\xelatex.exe')
-    candidates.push('C:\\Program Files (x86)\\MiKTeX\\miktex\\bin\\x64\\xelatex.exe')
-  }
-  return candidates
-}
-
-/** Candidate pandoc commands: PATH first, then the usual Windows install location. */
-function pandocCandidates(): string[] {
-  const candidates = ['pandoc']
-  if (process.platform === 'win32') {
-    candidates.push('C:\\Program Files\\Pandoc\\pandoc.exe')
-    const local = process.env.LOCALAPPDATA
-    if (local !== undefined) candidates.push(join(local, 'Pandoc', 'pandoc.exe'))
-  }
-  return candidates
-}
-
-/** The CJK fallback font pandoc passes to xelatex for Chinese Markdown articles (per-OS default). */
-function cjkMainFont(): string {
-  switch (process.platform) {
-    case 'darwin': return 'PingFang SC'
-    case 'win32': return 'Microsoft YaHei'
-    default: return 'Noto Sans CJK SC'
-  }
-}
+const RECORDS_INDEX_PATH = '/api/dsh-electro-lab/records-index'
+// WebRoute paths carry no trailing slash; requests are /records/<id>.
+const RECORDS_BODY_PREFIX = '/api/dsh-electro-lab/records'
+const EXTERNAL_PATH = '/api/dsh-electro-lab/external-solvers'
 
 /**
- * Compile a generated Markdown article to PDF through pandoc + xelatex (the
- * engine the LaTeX path already probes). pandoc needs to be installed; when it
- * is missing the error tells the user exactly that. The .md stays the primary
- * artifact — a failure never fails the job.
+ * Flatten one stored engine record into the article-generation facts: the
+ * question, established conditions, analysis notes, successful solver steps
+ * with their resolved arguments and results, and the final answer. Failed
+ * attempts and introspection rows are skipped.
  */
-async function compileMarkdownToPdf(directory: string, fileName: string): Promise<{ ok: true; pdfPath: string } | { ok: false; error: string }> {
-  const pdfName = fileName.replace(/\.(md)$/i, '.pdf')
-  const pdfPath = join(directory, pdfName)
-  const args = [fileName, '-o', pdfName, '--pdf-engine=xelatex', '-V', `CJKmainfont=${cjkMainFont()}`]
-  if (process.platform === 'win32') args.push('--pdf-engine-opt=--enable-installer')
-  let firstFailure: string | undefined
-  for (const command of pandocCandidates()) {
-    const result = await runCommand(command, args, directory, 150_000)
-    if (!result.ok) {
-      if (result.code !== null || !result.output.includes('ENOENT')) {
-        firstFailure = `pandoc failed: ${result.output.trim()}`
-      }
+function loadGenerationRecord(id: string): Record | undefined {
+  const meta = engine.indexRows().find((row) => row.id === id)
+  if (meta === undefined) return undefined
+  const conditions: string[] = []
+  const notes: string[] = []
+  const calls: GenerationCall[] = []
+  const results: GenerationResult[] = []
+  let answer = ''
+  for (const row of engine.store.readRows(id)) {
+    if (row.ok !== true) continue
+    if (row.tool === 'marker') {
+      const text = typeof row.text === 'string' ? row.text.trim() : ''
+      if (text.length === 0) continue
+      if (row.kind === 'analyse') notes.push(text)
+      else if (row.kind === 'answer') answer = text
       continue
     }
-    if (!existsSync(pdfPath)) return { ok: false, error: 'pandoc finished but produced no PDF' }
-    return { ok: true, pdfPath }
-  }
-  return { ok: false, error: firstFailure ?? 'pandoc was not found — install it (e.g. winget install JohnMacFarlane.Pandoc) to compile Markdown to PDF' }
-}
-
-/**
- * Compile a generated LaTeX source to PDF with xelatex (two passes so any
- * \label/\ref resolves). The .tex stays the primary artifact: a failure here
- * never fails the job — it is reported as compileError on the done snapshot.
- * --enable-installer (Windows/MiKTeX only) auto-installs missing packages
- * instead of showing an interactive prompt that would hang the job.
- */
-async function compileLatexToPdf(directory: string, fileName: string): Promise<{ ok: true; pdfPath: string } | { ok: false; error: string }> {
-  const pdfPath = join(directory, fileName.replace(/\.(tex)$/i, '.pdf'))
-  const args = ['-interaction=nonstopmode', '-halt-on-error', '-synctex=1']
-  if (process.platform === 'win32') args.push('--enable-installer')
-  // Pass the file NAME only, with cwd = the output directory: xelatex (MiKTeX)
-  // exits with code 1 when given an absolute Windows path as the file argument.
-  args.push(fileName)
-  let firstFailure: string | undefined
-  for (const command of xelatexCandidates()) {
-    const first = await runCommand(command, args, directory, 100_000)
-    if (!first.ok) {
-      // ENOENT: command missing — try the next candidate; anything else is a real compile failure.
-      if (first.code !== null || !first.output.includes('ENOENT')) {
-        firstFailure = `xelatex failed: ${first.output.trim()}`
-      }
+    if (row.tool === 'set') {
+      const name = typeof row.name === 'string' ? row.name : ''
+      if (row.deleted === true) conditions.push(`${name}: removed`)
+      else conditions.push(`${name}: ${JSON.stringify(row.value)}`)
       continue
     }
-    // Second pass resolves references; ignore its failure (the PDF already exists).
-    await runCommand(command, args, directory, 100_000)
-    if (!existsSync(pdfPath)) return { ok: false, error: 'xelatex finished but produced no PDF' }
-    return { ok: true, pdfPath }
-  }
-  return { ok: false, error: firstFailure ?? 'xelatex was not found on this machine' }
-}
-
-/** Start a background generation job and return its id; progress is polled via GET /generate-progress. */
-function startGenerateJob(ctx: Context, record: Record, directory: string, fileName: string, language: ArticleLanguage, format: ArticleFormat, compile: boolean): string {
-  const jobId = randomUUID()
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 300_000)
-  const job: GenerateJob = { status: 'running', percent: 5, phase: GenerationPhase.Prepare, abort: () => controller.abort() }
-  generateJobs.set(jobId, job)
-  void (async () => {
-    try {
-      job.percent = 10
-      job.phase = GenerationPhase.Generate
-      const article = await generateArticle(ctx, record, controller.signal, language, format, (percent) => { job.percent = percent })
-      job.phase = GenerationPhase.Write
-      job.percent = 92
-      // LaTeX generations own a folder named after the file (the setup dialog's
-      // output name = folder name = .tex name): every artifact — source, PDF and
-      // the compiler's .aux/.log/.synctex.gz — stays inside it, keeping the
-      // chosen output directory clean. Markdown stays a flat single file.
-      const isLatex = format === ArticleFormat.Latex
-      const targetDir = isLatex ? join(directory, fileName.replace(/\.tex$/i, '')) : directory
-      mkdirSync(targetDir, { recursive: true })
-      const target = join(targetDir, fileName)
-      writeFileSync(target, article, 'utf8')
-      if (compile) {
-        job.phase = GenerationPhase.Compile
-        job.percent = 96
-        const compiled = isLatex
-          ? await compileLatexToPdf(targetDir, fileName)
-          : await compileMarkdownToPdf(directory, fileName)
-        if (compiled.ok) job.pdfPath = compiled.pdfPath
-        else job.compileError = compiled.error
+    if (row.tool === 'call' && typeof row.solver === 'string') {
+      const callId = String(row.seq)
+      calls.push({
+        callId,
+        name: row.solver,
+        arguments: JSON.stringify(row.resolved ?? row.args ?? {}),
+      })
+      if (row.result !== null && row.result !== undefined) {
+        results.push({ callId, content: JSON.stringify(row.result) })
       }
-      job.status = 'done'
-      job.percent = 100
-      job.path = target
-    } catch (error) {
-      job.status = 'error'
-      job.error = error instanceof Error ? error.message : String(error)
-    } finally {
-      clearTimeout(timeout)
-      // The job is only kept long enough for the client to poll it.
-      setTimeout(() => { generateJobs.delete(jobId) }, 60_000)
     }
-  })()
-  return jobId
-}
-
-/** Validate the generation request and start the job; throws on bad input. */
-function beginGenerate(ctx: Context, url: string): { jobId: string } {
-  const params = new URL(url, 'http://dsh.local').searchParams
-  const recordId = params.get('recordId') ?? ''
-  const formatParam = params.get('format') ?? ArticleFormat.Markdown
-  if (!isArticleFormat(formatParam)) throw new Error(`unsupported format "${formatParam}"`)
-  const languageParam = params.get('language') ?? ArticleLanguage.Auto
-  if (!isArticleLanguage(languageParam)) throw new Error(`unsupported language "${languageParam}"`)
-  const directory = (params.get('directory') ?? '').trim()
-  if (directory.length === 0) throw new Error('output directory is required')
-  const record = readRecordArchive(join(recordsHome, 'records.jsonl')).find((item) => item.id === recordId)
-  if (record === undefined) throw new Error(`record "${recordId}" not found`)
-
-  const rawName = (params.get('fileName') ?? '').trim()
-  const fileName = rawName.length === 0
-    ? normalizeFileName(`electro-lab-${record.id.slice(0, 8)}`, formatParam)
-    : normalizeFileName(rawName, formatParam)
-
-  const compile = params.get('compile') === 'true'
-
-  return { jobId: startGenerateJob(ctx, record, directory, fileName, languageParam, formatParam, compile) }
+  }
+  const analyse = [
+    conditions.length > 0 ? `Established conditions:\n${conditions.map((line) => `- ${line}`).join('\n')}` : '',
+    ...notes,
+  ].filter((line) => line.length > 0).join('\n\n')
+  return { id, question: meta.question, analyse, answer, calls, results }
 }
 
 export function apply(ctx: Context): void {
-  ctx.effect(() => registerTools(ctx), 'dsh-electro-lab: tools')
+  ctx.effect(() => {
+    const disposers: Array<() => void> = []
+
+    // Engine wiring: recover the open record (clear orphans + rebuild the table), register all kernel and external solvers.
+    engine.start()
+    for (const solver of registerKernelSolvers()) {
+      if (engine.registry.get(solver.id) === undefined) engine.registry.register(solver)
+    }
+    if (EXTERNAL_SOLVERS_ENABLED) {
+      for (const declaration of readDeclarations(recordsHome)) {
+        if (declaration.enabled === false) continue
+        try {
+          const solver = compileExternalSolver(declaration)
+          if (solver !== null && engine.registry.get(solver.id) === undefined) engine.registry.register(solver)
+        } catch (error) {
+          ctx.logger?.warn(`[dsh-electro-lab] failed to register declaration solver "${declaration.name}": ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+      // Declarations have just been registered: clear the restart dirty bit.
+      clearRestartRequired(recordsHome)
+    }
+
+    // LLM tool surface: engine primitives + markers.
+    for (const tool of createEngineTools(engine)) {
+      disposers.push(ctx.tools.register(tool))
+    }
+    // Declaration management tools (the management surface lives outside the engine).
+    if (EXTERNAL_SOLVERS_ENABLED) {
+      for (const tool of createDeclarationTools(recordsHome)) {
+        disposers.push(ctx.tools.register(tool))
+      }
+    }
+
+    return () => {
+      for (const off of disposers) off()
+    }
+  }, 'dsh-electro-lab: engine')
+
   ctx.effect(() => registerSkills(ctx), 'dsh-electro-lab: skills')
 
   ctx.effect(() => {
     const disposers: Array<() => void> = []
 
-    // Session trace: feed every committed event into the session's record
-    // manager, which owns ALL record state — the JSONL archive
-    // (records.jsonl: a settled record is appended the moment it settles)
-    // and the interrupted-open snapshot (open-record.json: persisted after
-    // every event, restored by the constructor on the first event after a
-    // restart). Nothing is ever rebuilt from the session log — no fold, the
-    // log is never re-read.
-    disposers.push(ctx.on('session/event', (session, event) => {
-      const s = session as SessionLike
-      const sessionId = s.id
-      if (sessionId === undefined) return
-      getOrCreateManager(sessionId).feed(event as RecordEvent)
-    }))
-
-    // The records page: all stored records plus any live open records, newest
-    // first. The same path serves DELETE ?id= to remove one settled record.
-    // webServer is an inject edge, so it is guaranteed ready here.
+    // Record list: read record-index.jsonl (the list page's only data source).
     disposers.push(ctx.webServer.register({
       kind: 'exact',
-      path: RECORDS_PATH,
+      path: RECORDS_INDEX_PATH,
+      handler: (req, res) => {
+        const request = req as RequestLike
+        if ((request.method ?? 'GET') !== 'GET') {
+          res.statusCode = 405
+          res.end('method not allowed')
+          return
+        }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ rows: engine.indexRows() }))
+      },
+    }))
+
+    // Record body: GET /api/dsh-electro-lab/records/<id> — one record's trace
+    // rows plus its index meta (question/openedAt/sealedAt); DELETE removes a
+    // record (body + index row). The currently open record cannot be deleted.
+    disposers.push(ctx.webServer.register({
+      kind: 'prefix',
+      path: RECORDS_BODY_PREFIX,
       handler: (req, res) => {
         const request = req as RequestLike
         const method = request.method ?? 'GET'
+        res.setHeader('content-type', 'application/json')
+        const path = request.url === undefined ? '' : request.url.split('?')[0] ?? ''
+        const id = path.startsWith(`${RECORDS_BODY_PREFIX}/`) ? path.slice(RECORDS_BODY_PREFIX.length + 1) : ''
+        if (id.length === 0) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: 'a record id is required' }))
+          return
+        }
         if (method === 'DELETE') {
-          const id = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('id')
-          const deleted = id !== null && deleteRecordFromArchive(join(recordsHome, 'records.jsonl'), id)
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ deleted }))
+          if (engine.openId() === id) {
+            res.statusCode = 409
+            res.end(JSON.stringify({ error: `record "${id}" is open — finish or settle it first` }))
+            return
+          }
+          const meta = engine.indexRows().find((row) => row.id === id)
+          if (meta === undefined) {
+            res.statusCode = 404
+            res.end(JSON.stringify({ error: `no record "${id}"` }))
+            return
+          }
+          engine.store.deleteRecord(id)
+          res.end(JSON.stringify({ deleted: true }))
           return
         }
         if (method !== 'GET') {
@@ -628,229 +216,83 @@ export function apply(ctx: Context): void {
           res.end('method not allowed')
           return
         }
-        const open: Array<unknown> = []
-        for (const manager of managers.values()) {
-          const record = manager.view()
-          if (record !== null) open.push(record)
-        }
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({
-          records: [...readRecordArchive(join(recordsHome, 'records.jsonl'))].reverse(),
-          open,
-        }))
-      },
-    }))
-
-    // Article generation: the client submits the record id, format, directory
-    // and file name; a background job produces the article through the host
-    // LLM and writes it to disk. The POST answers immediately with the job id;
-    // progress is polled through /generate-progress.
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: GENERATE_PATH,
-      handler: (req, res) => {
-        const request = req as RequestLike
-        if ((request.method ?? 'GET') !== 'POST') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        try {
-          const { jobId } = beginGenerate(ctx, request.url ?? '')
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ jobId }))
-        } catch (error) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
-        }
-      },
-    }))
-
-    // Host-driven directory browsing: the client navigates the filesystem
-    // through this endpoint, so the picked directory is a true absolute path
-    // and works identically for local and remote deployments.
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: LIST_DIRS_PATH,
-      handler: (req, res) => {
-        const request = req as RequestLike
-        if ((request.method ?? 'GET') !== 'GET') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        const path = request.url === undefined ? '' : new URL(request.url, 'http://dsh.local').searchParams.get('path') ?? ''
-        try {
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify(listDirectories(path)))
-        } catch (error) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
-        }
-      },
-    }))
-
-    // Tree roots for the directory browser: the client expands directories
-    // lazily through list-dirs.
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: LIST_ROOTS_PATH,
-      handler: (req, res) => {
-        const request = req as RequestLike
-        if ((request.method ?? 'GET') !== 'GET') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        const drives = listDriveRoots()
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ roots: drives.length > 0 ? drives : [homedir()] }))
-      },
-    }))
-
-    // The directory-tree stylesheet: the client fetches it once and injects
-    // it, so the bundle never has to inline the CSS.
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: DIRECTORY_TREE_CSS_PATH,
-      handler: (req, res) => {
-        const request = req as RequestLike
-        if ((request.method ?? 'GET') !== 'GET') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        res.setHeader('content-type', 'text/css')
-        res.end(readDirectoryTreeCss())
-      },
-    }))
-
-    // Cancel a running generation job: the client's cancel button calls this.
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: GENERATE_CANCEL_PATH,
-      handler: (req, res) => {
-        const request = req as RequestLike
-        if ((request.method ?? 'GET') !== 'POST') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        const jobId = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('jobId')
-        const job = jobId === null ? undefined : generateJobs.get(jobId)
-        if (job !== undefined && job.status === 'running') job.abort()
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ cancelled: job !== undefined && job.status === 'running' }))
-      },
-    }))
-
-    // Reveal a generated file or directory in the OS file manager (or open it
-    // with the default application): POST ?path=&action=open|reveal. The
-    // launcher is per-platform (explorer / open / xdg-open), so it works on
-    // every OS the host runs on.
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: REVEAL_PATH,
-      handler: async (req, res) => {
-        const request = req as RequestLike
-        if ((request.method ?? 'GET') !== 'POST') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        const url = new URL(request.url ?? '', 'http://dsh.local')
-        const target = url.searchParams.get('path') ?? ''
-        if (target.length === 0) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ error: 'path is required' }))
-          return
-        }
-        const action = url.searchParams.get('action') === 'open' ? 'open' : 'reveal'
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ result: await (action === 'open' ? openFilePath(target) : revealPath(target)) }))
-      },
-    }))
-
-    // Generation progress: the client polls this while the job runs.
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: GENERATE_PROGRESS_PATH,
-      handler: (req, res) => {
-        const request = req as RequestLike
-        if ((request.method ?? 'GET') !== 'GET') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        const jobId = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('jobId')
-        const job = jobId === null ? undefined : generateJobs.get(jobId)
-        if (job === undefined) {
+        const meta = engine.indexRows().find((row) => row.id === id)
+        if (meta === undefined || !engine.store.hasRecord(id)) {
           res.statusCode = 404
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ error: 'generation job not found' }))
+          res.end(JSON.stringify({ error: `no record "${id}"` }))
           return
         }
-        res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({
-          status: job.status,
-          percent: job.percent,
-          phase: job.phase,
-          ...(job.path === undefined ? {} : { path: job.path }),
-          ...(job.pdfPath === undefined ? {} : { pdfPath: job.pdfPath }),
-          ...(job.compileError === undefined ? {} : { compileError: job.compileError }),
-          ...(job.error === undefined ? {} : { error: job.error }),
+          id,
+          openedAt: meta.openedAt,
+          sealedAt: meta.sealedAt,
+          question: meta.question,
+          rows: engine.store.readRows(id),
         }))
       },
     }))
 
-    // The remembered generation state (output directory + article language):
-    // GET reads it back, PUT ?dir=&language= saves either field (query params,
-    // so no body parsing is needed on the request).
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: GENERATE_DIR_PATH,
-      handler: (req, res) => {
-        const request = req as RequestLike
-        const method = request.method ?? 'GET'
-        if (method === 'PUT') {
-          const url = new URL(request.url ?? '', 'http://dsh.local')
-          const dir = url.searchParams.get('dir')
-          const language = url.searchParams.get('language')
-          const format = url.searchParams.get('format')
-          const compileParam = url.searchParams.get('compile')
-          const state: GenerateState = {}
-          if (dir !== null) state.generateDir = dir
-          if (language !== null) state.generateLanguage = language
-          if (format !== null) state.generateFormat = format
-          if (compileParam === 'true' || compileParam === 'false') state.generateCompile = compileParam === 'true'
-          writeGenerateState(state)
+    // External solver archive management: GET lists + dirty bit; PUT overwrites/adds (base64 JSON query parameter);
+    // DELETE ?name= removes. Every write sets the dirty bit (registered via compileExternalSolver after a restart).
+    if (EXTERNAL_SOLVERS_ENABLED) {
+      disposers.push(ctx.webServer.register({
+        kind: 'exact',
+        path: EXTERNAL_PATH,
+        handler: (req, res) => {
+          const request = req as RequestLike
+          const method = request.method ?? 'GET'
           res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ saved: true }))
-          return
-        }
-        if (method !== 'GET') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        const state = readGenerateState()
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({
-          directory: state.generateDir ?? '',
-          language: state.generateLanguage ?? 'auto',
-          format: state.generateFormat ?? 'markdown',
-          compile: state.generateCompile ?? false,
-        }))
-      },
+          if (method === 'PUT') {
+            const encoded = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('config')
+            if (encoded === null) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'config parameter is required (base64 JSON)' }))
+              return
+            }
+            let config: unknown
+            try {
+              config = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+            } catch {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'config is not valid base64 JSON' }))
+              return
+            }
+            const errors = validateDeclaration(config)
+            if (errors.length > 0) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: errors.join('; ') }))
+              return
+            }
+            upsertDeclaration(recordsHome, config as never)
+            res.end(JSON.stringify({ saved: true, restartRequired: true }))
+            return
+          }
+          if (method === 'DELETE') {
+            const name = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('name')
+            const deleted = name !== null && deleteDeclaration(recordsHome, name)
+            res.end(JSON.stringify({ deleted, restartRequired: restartRequired(recordsHome) }))
+            return
+          }
+          if (method !== 'GET') {
+            res.statusCode = 405
+            res.end('method not allowed')
+            return
+          }
+          res.end(JSON.stringify({ solvers: readDeclarations(recordsHome), restartRequired: restartRequired(recordsHome) }))
+        },
+      }))
+    }
+
+    // Article generation subsystem (LLM jobs, file writing, compile, browsing).
+    disposers.push(registerGenerateEndpoints(ctx as never, {
+      home: recordsHome,
+      loadRecord: loadGenerationRecord,
     }))
 
     return () => {
       for (const off of disposers) off()
     }
-  }, 'dsh-electro-lab: records')
+  }, 'dsh-electro-lab: web')
 
   try {
     const synced = installPresets()
