@@ -9,6 +9,8 @@
  */
 import { FontAwesomeIcon, type CSSVariables } from '@fortawesome/react-fontawesome'
 import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft'
+import { faMarkdown } from '@fortawesome/free-brands-svg-icons/faMarkdown'
+import { faSquareRootVariable } from '@fortawesome/free-solid-svg-icons/faSquareRootVariable'
 
 interface IconProps {
   size?: number
@@ -22,4 +24,14 @@ function sized(size: number): React.CSSProperties & CSSVariables {
 /** ‹ back / collapse. */
 export function IconChevronLeft({ size = 16 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faChevronLeft} style={sized(size)} />
+}
+
+/** Markdown brand glyph. */
+export function IconMarkdown({ size = 16 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faMarkdown} style={sized(size)} />
+}
+
+/** √ root glyph used for TeX/LaTeX; optically smaller, so it defaults larger than normal. */
+export function IconTex({ size = 18 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faSquareRootVariable} style={sized(size)} />
 }

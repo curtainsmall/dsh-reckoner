@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from 'react'
 import { t, useAppLocale } from './locales.ts'
-import { IconChevronLeft } from './icons.tsx'
+import { IconChevronLeft, IconMarkdown, IconTex } from './icons.tsx'
 
 const BODY_ENDPOINT = '/api/dsh-electro-lab/records/'
 const POLL_MS = 5000
@@ -382,48 +382,95 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
   const items = groupRows(visibleRows)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <button
-          type="button"
-          aria-label={t('backToRecords')}
-          onClick={onBack}
-          onMouseEnter={() => setBackHover(true)}
-          onMouseLeave={() => setBackHover(false)}
-          style={{
-            ...backButtonBase,
-            background: backHover ? 'var(--dsw-alias-interactive-bg-hover)' : 'none',
-            borderColor: backHover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
-          }}
-        >
-          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}><IconChevronLeft size={16} /></span>
-          <span style={{ lineHeight: 1 }}>{t('backToRecords')}</span>
-        </button>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={showAll}
-            onChange={(event) => setShowAll(event.target.checked)}
-            style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }}
-          />
-          {t('displayAll')}
-        </label>
-      </div>
-
-      {/* Header: question + meta */}
-      <div style={rowStyle}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{record.question || record.id}</div>
-        <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
-          <span>{t('rowsCount', { n: visibleRows.length })}</span>
-          {failedCount > 0 && <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{t('failedCount', { n: failedCount })}</span>}
-          {record.sealedAt === null
-            ? <span style={{ padding: '1px 7px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' }}>{t('incomplete')}</span>
-            : <span>{formatTime(record.sealedAt)}</span>}
+    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+      {/* The timeline column */}
+      <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <button
+            type="button"
+            aria-label={t('backToRecords')}
+            onClick={onBack}
+            onMouseEnter={() => setBackHover(true)}
+            onMouseLeave={() => setBackHover(false)}
+            style={{
+              ...backButtonBase,
+              background: backHover ? 'var(--dsw-alias-interactive-bg-hover)' : 'none',
+              borderColor: backHover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
+            }}
+          >
+            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}><IconChevronLeft size={16} /></span>
+            <span style={{ lineHeight: 1 }}>{t('backToRecords')}</span>
+          </button>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={showAll}
+              onChange={(event) => setShowAll(event.target.checked)}
+              style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }}
+            />
+            {t('displayAll')}
+          </label>
         </div>
+
+        {/* Header: question + meta */}
+        <div style={rowStyle}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{record.question || record.id}</div>
+          <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
+            <span>{t('rowsCount', { n: visibleRows.length })}</span>
+            {failedCount > 0 && <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{t('failedCount', { n: failedCount })}</span>}
+            {record.sealedAt === null
+              ? <span style={{ padding: '1px 7px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' }}>{t('incomplete')}</span>
+              : <span>{formatTime(record.sealedAt)}</span>}
+          </div>
+        </div>
+
+        {/* The timeline */}
+        {items.map((item) => <TimelineItem key={itemKey(item)} item={item} />)}
       </div>
 
-      {/* The timeline */}
-      {items.map((item) => <TimelineItem key={itemKey(item)} item={item} />)}
+      {/* Article generation column: UI shell only — no generation logic yet. */}
+      <ArticleActions />
+    </div>
+  )
+}
+
+/** Right-hand column of the record detail: article generation actions (UI only for now). */
+function ArticleActions(): React.JSX.Element {
+  const [hovered, setHovered] = useState<string | null>(null)
+  const action = (key: string, label: string, icon: React.ReactNode, tex = false): React.JSX.Element => (
+    <button
+      key={key}
+      type="button"
+      aria-disabled="true"
+      title={`${label} — ${t('articleComingSoon')}`}
+      onMouseEnter={() => setHovered(key)}
+      onMouseLeave={() => setHovered(null)}
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: 8,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: hovered === key ? 'var(--dsw-alias-interactive-bg-hover)' : 'none',
+        color: 'var(--dsw-alias-label-primary)',
+        cursor: 'default',
+        opacity: hovered === key ? 0.8 : 0.55,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        // The √ glyph is optically smaller: give the TeX button's icon extra size.
+        ...(tex ? { paddingBottom: 2 } : {}),
+      }}
+    >
+      {icon}
+    </button>
+  )
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 'none', position: 'sticky', top: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4, paddingLeft: 2 }}>
+        {t('articleTitle')}
+      </div>
+      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={16} />)}
+      {action('articleGenerateTex', t('articleGenerateTex'), <IconTex size={20} />, true)}
     </div>
   )
 }
