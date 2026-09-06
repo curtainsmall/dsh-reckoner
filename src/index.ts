@@ -116,23 +116,41 @@ export function apply(ctx: Context): void {
     }))
 
     // Record body: GET /api/dsh-electro-lab/records/<id> — one record's trace
-    // rows plus its index meta (question/openedAt/sealedAt). Read-only.
+    // rows plus its index meta (question/openedAt/sealedAt); DELETE removes a
+    // record (body + index row). The currently open record cannot be deleted.
     disposers.push(ctx.webServer.register({
       kind: 'prefix',
       path: RECORDS_BODY_PREFIX,
       handler: (req, res) => {
         const request = req as RequestLike
+        const method = request.method ?? 'GET'
         res.setHeader('content-type', 'application/json')
-        if ((request.method ?? 'GET') !== 'GET') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
         const path = request.url === undefined ? '' : request.url.split('?')[0] ?? ''
         const id = path.startsWith(`${RECORDS_BODY_PREFIX}/`) ? path.slice(RECORDS_BODY_PREFIX.length + 1) : ''
         if (id.length === 0) {
           res.statusCode = 400
           res.end(JSON.stringify({ error: 'a record id is required' }))
+          return
+        }
+        if (method === 'DELETE') {
+          if (engine.openId() === id) {
+            res.statusCode = 409
+            res.end(JSON.stringify({ error: `record "${id}" is open — finish or settle it first` }))
+            return
+          }
+          const meta = engine.indexRows().find((row) => row.id === id)
+          if (meta === undefined) {
+            res.statusCode = 404
+            res.end(JSON.stringify({ error: `no record "${id}"` }))
+            return
+          }
+          engine.store.deleteRecord(id)
+          res.end(JSON.stringify({ deleted: true }))
+          return
+        }
+        if (method !== 'GET') {
+          res.statusCode = 405
+          res.end('method not allowed')
           return
         }
         const meta = engine.indexRows().find((row) => row.id === id)
