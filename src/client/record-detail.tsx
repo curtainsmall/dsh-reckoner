@@ -11,6 +11,8 @@
 import { useEffect, useState } from 'react'
 import { t, useAppLocale } from './locales.ts'
 import { IconChevronLeft, IconMarkdown, IconTex } from './icons.tsx'
+import { displayValue, Dialog, GhostButton } from './ui.tsx'
+import { buildMarkdownArticle } from './article-md.ts'
 
 const BODY_ENDPOINT = '/api/dsh-electro-lab/records/'
 const POLL_MS = 5000
@@ -43,74 +45,6 @@ interface RecordBody {
   sealedAt: number | null
   question: string
   rows: TraceRow[]
-}
-
-/* ── Typed-value display ─────────────────────────────────────────────────── */
-
-const UNIT_BY_KIND: Record<string, string> = {
-  resistance: 'Ω', capacitance: 'F', inductance: 'H', voltage: 'V', current: 'A',
-  power: 'W', time: 's', frequency: 'Hz', temperature: 'K', angle: 'rad',
-  pressure: 'Pa', energy: 'J', length: 'm', mass: 'kg', log: 'dB', none: '',
-}
-
-const PREFIX_SYMBOL: Record<string, string> = {
-  pico: 'p', nano: 'n', micro: 'µ', milli: 'm', kilo: 'k', mega: 'M', giga: 'G', tera: 'T',
-}
-
-const VARIANT_DISPLAY: Record<string, string> = {
-  degC: '°C', degF: '°F', deg: '°', bar: 'bar', psi: 'psi', atm: 'atm',
-  cal: 'cal', Wh: 'Wh', hp: 'hp', inch: 'in', foot: 'ft', yard: 'yd',
-  mile: 'mi', lb: 'lb', oz: 'oz',
-}
-
-function fmt(n: number): string {
-  if (!Number.isFinite(n)) return String(n)
-  const abs = Math.abs(n)
-  if (abs !== 0 && (abs >= 1e6 || abs < 1e-3)) return n.toExponential(4).replace(/\.?0+e/, 'e')
-  return String(Math.round(n * 10000) / 10000)
-}
-
-/** Render one typed value as human text. Slot values are returned as "@name" markers for chip styling. */
-export function displayValue(value: unknown): string {
-  if (value === null || value === undefined) return 'null'
-  if (typeof value !== 'object') return String(value)
-  const v = value as Record<string, unknown>
-  switch (v.type) {
-    case 'number': {
-      const kind = String(v.kind ?? 'none')
-      const unit = UNIT_BY_KIND[kind] ?? ''
-      if (v.variant !== undefined) {
-        const variantName = String(v.variant)
-        return `${fmt(Number(v.value))} ${VARIANT_DISPLAY[variantName] ?? variantName}`
-      }
-      const prefix = v.prefix === undefined ? '' : PREFIX_SYMBOL[String(v.prefix)] ?? String(v.prefix)
-      return `${fmt(Number(v.value))} ${prefix}${unit}`.trim()
-    }
-    case 'complex': {
-      const box = v.value as { re?: number; im?: number; mag?: number; ang?: number }
-      const kind = String(v.kind ?? 'none')
-      const unit = UNIT_BY_KIND[kind] ?? ''
-      if (box.mag !== undefined && box.ang !== undefined) {
-        return `${fmt(box.mag)} ∠ ${fmt(box.ang)} rad ${unit}`.trim()
-      }
-      const re = box.re ?? 0
-      const im = box.im ?? 0
-      const sign = im < 0 ? '−' : '+'
-      return `${fmt(re)} ${sign} j${fmt(Math.abs(im))} ${unit}`.trim()
-    }
-    case 'string':
-      return String(v.value)
-    case 'boolean':
-      return String(v.value)
-    case 'slot':
-      return `@${String(v.value)}`
-    case 'array':
-      return `[ ${(v.value as unknown[]).map((item) => displayValue(item)).join(', ')} ]`
-    case 'object':
-      return JSON.stringify(v.value)
-    default:
-      return JSON.stringify(value)
-  }
 }
 
 /** Collect the distinct slot names referenced anywhere inside an argument value. */
@@ -449,17 +383,44 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
         {/* Separator between the timeline and the article actions column: tops at the title card edge. */}
         <div aria-hidden="true" style={{ flex: 'none', width: 1, alignSelf: 'stretch', background: 'var(--dsw-alias-border-l2)' }} />
 
-        {/* Article generation column: UI shell only — no generation logic yet. */}
-        <ArticleActions />
+        {/* Article generation column. */}
+        <ArticleActions body={record} />
       </div>
     </div>
   )
 }
 
-/** Right-hand column of the record detail: article generation actions (UI only for now). */
-function ArticleActions(): React.JSX.Element {
+/** Right-hand column of the record detail: article generation actions. Markdown generation is live; LaTeX is a placeholder. */
+function ArticleActions({ body }: { body: RecordBody }): React.JSX.Element {
   const [hovered, setHovered] = useState<string | null>(null)
-  const action = (key: string, label: string, icon: React.ReactNode): React.JSX.Element => (
+  const [preview, setPreview] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const copyArticle = (): void => {
+    if (preview === null) return
+    const text = preview
+    const done = (): void => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    }
+    if (navigator.clipboard !== undefined) {
+      void navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done))
+    } else {
+      fallbackCopy(text, done)
+    }
+  }
+  const downloadArticle = (): void => {
+    if (preview === null) return
+    const blob = new Blob([preview], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `electrolab-${body.id}.md`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const placeholder = (key: string, label: string, icon: React.ReactNode): React.JSX.Element => (
     <button
       key={key}
       type="button"
@@ -484,12 +445,79 @@ function ArticleActions(): React.JSX.Element {
       {icon}
     </button>
   )
+  const action = (key: string, label: string, icon: React.ReactNode, onClick: () => void): React.JSX.Element => (
+    <button
+      key={key}
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      onMouseEnter={() => setHovered(key)}
+      onMouseLeave={() => setHovered(null)}
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: 8,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: hovered === key ? 'var(--dsw-alias-interactive-bg-hover)' : 'none',
+        color: 'var(--dsw-alias-label-primary)',
+        cursor: 'pointer',
+        opacity: 1,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {icon}
+    </button>
+  )
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 'none' }}>
-      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={24} />)}
-      {action('articleGenerateTex', t('articleGenerateTex'), <IconTex size={28} />)}
+      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={24} />, () => setPreview(buildMarkdownArticle(body)))}
+      {placeholder('articleGenerateTex', t('articleGenerateTex'), <IconTex size={28} />)}
+      <Dialog
+        open={preview !== null}
+        title={t('articlePreview')}
+        width={680}
+        height={480}
+        onClose={() => setPreview(null)}
+        footer={[
+          <GhostButton key="copy" onClick={copyArticle}>{copied ? t('articleCopied') : t('articleCopy')}</GhostButton>,
+          <GhostButton key="download" onClick={downloadArticle}>{t('articleDownload')}</GhostButton>,
+          <GhostButton key="close" onClick={() => setPreview(null)}>{t('backToRecords')}</GhostButton>,
+        ]}
+      >
+        {preview !== null && (
+          <pre style={{
+            margin: 0,
+            fontSize: 12.5,
+            lineHeight: 1.6,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            color: 'var(--dsw-alias-label-primary)',
+            font: '12.5px/1.6 ui-monospace, monospace',
+          }}>{preview}</pre>
+        )}
+      </Dialog>
     </div>
   )
+}
+
+/** Fallback copy for environments without the async clipboard API. */
+function fallbackCopy(text: string, done: () => void): void {
+  const area = document.createElement('textarea')
+  area.value = text
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  try {
+    document.execCommand('copy')
+  } catch {
+    // ignore — nothing else to try
+  }
+  document.body.removeChild(area)
+  done()
 }
 
 function itemKey(item: Item): string {
