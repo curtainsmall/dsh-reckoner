@@ -139,13 +139,13 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   /** Default file name placeholder of the dialog. */
   const defaultFileName = `electro-lab-${recordId.slice(0, 8)}.${formatExtension(format)}`
 
-  /** Persist the directory, language and PDF-compile toggle so the next dialog auto-fills them. */
+  /** Persist the directory and language, and — LaTeX only — the PDF-compile toggle. */
   const saveGenState = (): void => {
     const dir = genDir.trim()
     const params = new URLSearchParams()
     if (dir.length > 0) params.set('dir', dir)
     params.set('language', genLanguage)
-    params.set('compile', String(genCompile))
+    if (format === ArticleFormat.Latex) params.set('compile', String(genCompile))
     void fetch(`${GENERATE_DIR_ENDPOINT}?${params.toString()}`, { method: 'PUT' }).catch(() => {})
   }
 
@@ -171,7 +171,8 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
       language: genLanguage,
       directory: dir,
       fileName: genFile.trim(),
-      compile: genCompile,
+      // PDF compilation is LaTeX-only: Markdown never asks the host to compile.
+      compile: format === ArticleFormat.Latex && genCompile,
     })
   }
 

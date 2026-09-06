@@ -1,6 +1,6 @@
 /**
  * Host article generation subsystem: LLM article jobs, file writing, optional
- * PDF compilation (pandoc/xelatex), OS reveal/open, host-driven directory
+ * PDF compilation for LaTeX (xelatex), OS reveal/open, host-driven directory
  * browsing and the remembered generation settings. Ported from the v0.9.0
  * generation feature and wired to the engine record store through the
  * `loadRecord` dependency — this module has no Cordis imports; `register`
@@ -366,47 +366,6 @@ function xelatexCandidates(): string[] {
   return candidates
 }
 
-/** Candidate pandoc commands: PATH first, then the usual Windows install location. */
-function pandocCandidates(): string[] {
-  const candidates = ['pandoc']
-  if (process.platform === 'win32') {
-    candidates.push('C:\\Program Files\\Pandoc\\pandoc.exe')
-    const local = process.env.LOCALAPPDATA
-    if (local !== undefined) candidates.push(join(local, 'Pandoc', 'pandoc.exe'))
-  }
-  return candidates
-}
-
-/** The CJK fallback font pandoc passes to xelatex for Chinese Markdown articles (per-OS default). */
-function cjkMainFont(): string {
-  switch (process.platform) {
-    case 'darwin': return 'PingFang SC'
-    case 'win32': return 'Microsoft YaHei'
-    default: return 'Noto Sans CJK SC'
-  }
-}
-
-/** Compile a generated Markdown article to PDF through pandoc + xelatex (the .md stays the primary artifact). */
-async function compileMarkdownToPdf(directory: string, fileName: string): Promise<{ ok: true; pdfPath: string } | { ok: false; error: string }> {
-  const pdfName = fileName.replace(/\.(md)$/i, '.pdf')
-  const pdfPath = join(directory, pdfName)
-  const args = [fileName, '-o', pdfName, '--pdf-engine=xelatex', '-V', `CJKmainfont=${cjkMainFont()}`]
-  if (process.platform === 'win32') args.push('--pdf-engine-opt=--enable-installer')
-  let firstFailure: string | undefined
-  for (const command of pandocCandidates()) {
-    const result = await runCommand(command, args, directory, 150_000)
-    if (!result.ok) {
-      if (result.code !== null || !result.output.includes('ENOENT')) {
-        firstFailure = `pandoc failed: ${result.output.trim()}`
-      }
-      continue
-    }
-    if (!existsSync(pdfPath)) return { ok: false, error: 'pandoc finished but produced no PDF' }
-    return { ok: true, pdfPath }
-  }
-  return { ok: false, error: firstFailure ?? 'pandoc was not found — install it (e.g. winget install JohnMacFarlane.Pandoc) to compile Markdown to PDF' }
-}
-
 /** Compile a generated LaTeX source to PDF with xelatex (two passes so \label/\ref resolve). */
 async function compileLatexToPdf(directory: string, fileName: string): Promise<{ ok: true; pdfPath: string } | { ok: false; error: string }> {
   const pdfPath = join(directory, fileName.replace(/\.(tex)$/i, '.pdf'))
@@ -454,17 +413,16 @@ function startGenerateJob(
       job.percent = 92
       // LaTeX generations own a folder named after the file: every artifact —
       // source, PDF and the compiler's .aux/.log/.synctex.gz — stays inside it.
+      // Markdown is written flat and is never compiled (PDF is LaTeX-only).
       const isLatex = format === ArticleFormat.Latex
       const targetDir = isLatex ? join(directory, fileName.replace(/\.tex$/i, '')) : directory
       mkdirSync(targetDir, { recursive: true })
       const target = join(targetDir, fileName)
       writeFileSync(target, article, 'utf8')
-      if (compile) {
+      if (compile && isLatex) {
         job.phase = GenerationPhase.Compile
         job.percent = 96
-        const compiled = isLatex
-          ? await compileLatexToPdf(targetDir, fileName)
-          : await compileMarkdownToPdf(directory, fileName)
+        const compiled = await compileLatexToPdf(targetDir, fileName)
         if (compiled.ok) job.pdfPath = compiled.pdfPath
         else job.compileError = compiled.error
       }
