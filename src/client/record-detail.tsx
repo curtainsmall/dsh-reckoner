@@ -182,26 +182,29 @@ function childrenOf(value: unknown): Array<{ label?: string; value: unknown }> {
  * JSON tree row: a disclosure triangle at the start of the row, then the
  * indented key and the value. Container values collapse to a placeholder
  * ({ … } / [ … ]) until expanded. An UNLABELED root object is stripped —
- * its fields become the top-level rows (no wrapper row).
+ * its fields become the top-level rows (no wrapper row). Each visible row
+ * carries a zebra band that alternates with its siblings, continuing
+ * opposite below any expanded container.
  */
-function RowNode({ label, value }: { label?: string; value: unknown }): React.JSX.Element {
+function RowNode({ label, value, banded = false }: { label?: string; value: unknown; banded?: boolean }): React.JSX.Element {
   if (label === undefined && containerKind(value) === 'object') {
+    // Stripped root: no container row, its fields become top-level rows with a fresh zebra.
     return (
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box' }}>
         {childrenOf(value).map((child, index) => (
-          <RowNodeImpl key={child.label ?? index} label={child.label} value={child.value} depth={0} />
+          <RowNodeImpl key={child.label ?? index} label={child.label} value={child.value} depth={0} banded={isZebra(index)} />
         ))}
       </div>
     )
   }
-  return <RowNodeImpl label={label} value={value} depth={0} />
+  return <RowNodeImpl label={label} value={value} depth={0} banded={banded} />
 }
 
-function RowNodeImpl({ label, value, depth }: { label?: string; value: unknown; depth: number }): React.JSX.Element {
+function RowNodeImpl({ label, value, depth, banded }: { label?: string; value: unknown; depth: number; banded: boolean }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const kind = containerKind(value)
   const keyEl = label !== undefined
-    ? <span style={{ color: 'var(--dsw-alias-label-tertiary)', ...codeFont, fontSize: 13, minWidth: 8 }}>{label}</span>
+    ? <span style={{ color: 'var(--dsw-alias-label-tertiary)', ...codeFont, fontSize: 14, minWidth: 8 }}>{label}</span>
     : null
   const leafPad = depth * TREE_INDENT + TRIANGLE_W + 8
   if (kind === null) {
@@ -210,10 +213,11 @@ function RowNodeImpl({ label, value, depth }: { label?: string; value: unknown; 
         display: 'flex',
         gap: 8,
         alignItems: 'baseline',
-        fontSize: 13.5,
+        fontSize: 15,
         paddingLeft: leafPad,
         width: '100%',
         boxSizing: 'border-box',
+        ...(banded ? zebraRow : {}),
       }}>
         {keyEl}
         <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(value)}</span>
@@ -233,23 +237,24 @@ function RowNodeImpl({ label, value, depth }: { label?: string; value: unknown; 
           display: 'flex',
           gap: 8,
           alignItems: 'baseline',
-          fontSize: 13.5,
+          fontSize: 15,
           cursor: 'pointer',
           paddingLeft: depth * TREE_INDENT,
           width: '100%',
           boxSizing: 'border-box',
+          ...(banded ? zebraRow : {}),
         }}
       >
-        <span aria-hidden="true" style={{ display: 'inline-block', width: TRIANGLE_W, textAlign: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)', flex: 'none' }}>
+        <span aria-hidden="true" style={{ display: 'inline-block', width: TRIANGLE_W, textAlign: 'center', fontSize: 13, color: 'var(--dsw-alias-label-secondary)', flex: 'none' }}>
           {open ? '▾' : '▸'}
         </span>
         {keyEl}
-        <span style={{ color: 'var(--dsw-alias-label-tertiary)', ...codeFont, fontSize: 13.5 }}>{placeholder}</span>
+        <span style={{ color: 'var(--dsw-alias-label-tertiary)', ...codeFont, fontSize: 14.5 }}>{placeholder}</span>
       </div>
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box' }}>
           {children.map((child, index) => (
-            <RowNodeImpl key={child.label ?? index} label={child.label} value={child.value} depth={depth + 1} />
+            <RowNodeImpl key={child.label ?? index} label={child.label} value={child.value} depth={depth + 1} banded={childZebra(index, banded)} />
           ))}
         </div>
       )}
@@ -309,7 +314,23 @@ const rowStyle: React.CSSProperties = {
 }
 
 const codeFont: React.CSSProperties = {
-  font: '11px ui-monospace, monospace',
+  font: '12.5px ui-monospace, monospace',
+}
+
+/** Zebra stripe: alternating rows get a soft theme-aware band. */
+const zebraRow: React.CSSProperties = {
+  background: 'var(--dsw-alias-interactive-bg-hover)',
+  borderRadius: 4,
+}
+
+/** True for odd rows: the first row of a list stays unbanded, stripes alternate from there. */
+function isZebra(index: number): boolean {
+  return index % 2 === 1
+}
+
+/** Child rows alternate under their container, starting opposite the container's own band. */
+function childZebra(index: number, containerBanded: boolean): boolean {
+  return index % 2 === 0 ? !containerBanded : containerBanded
 }
 
 /* ── The detail view ──────────────────────────────────────────────────────── */
@@ -391,7 +412,7 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
 
       {/* Header: question + meta */}
       <div style={rowStyle}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{record.question || record.id}</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{record.question || record.id}</div>
         <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
           <span>{t('rowsCount', { n: visibleRows.length })}</span>
           {failedCount > 0 && <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{t('failedCount', { n: failedCount })}</span>}
@@ -460,7 +481,7 @@ function MarkerRow({ row }: { row: TraceRow }): React.JSX.Element {
         {markerLabel(kind)}
       </div>
       {typeof row.text === 'string' && row.text.length > 0 && (
-        <div style={{ marginTop: 6, fontSize: 13, color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{row.text}</div>
+        <div style={{ marginTop: 6, fontSize: 14.5, color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{row.text}</div>
       )}
     </div>
   )
@@ -472,19 +493,27 @@ function WritesGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
   return (
     <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
       <CollapseHeader label={t('writesGroup', { n: rows.length })} defaultOpen>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {rows.map((row) => {
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {rows.map((row, index) => {
             const name = String(row.name)
             const expandable = !row.deleted && isExpandable(row.value)
             return (
-              <div key={row.seq} id={`set-${name}`} style={{ display: 'flex', alignItems: expandable ? 'flex-start' : 'baseline', gap: 8, fontSize: 12.5 }}>
-                {!expandable && <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, ...codeFont }}>{name}</span>}
+              <div key={row.seq} id={`set-${name}`} style={{
+                display: 'flex',
+                alignItems: expandable ? 'flex-start' : 'baseline',
+                gap: 8,
+                fontSize: 14,
+                width: '100%',
+                boxSizing: 'border-box',
+                ...(!expandable && isZebra(index) ? zebraRow : {}),
+              }}>
+                {!expandable && <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, ...codeFont, fontSize: 13.5 }}>{name}</span>}
                 {row.deleted === true
                   ? <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>{t('deleted')}</span>
                   : expandable
-                    ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} /></div>
+                    ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} banded={isZebra(index)} /></div>
                     : <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(row.value)}</span>}
-                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>rev {row.rev}</span>}
+                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12.5 }}>rev {row.rev}</span>}
               </div>
             )
           })}
@@ -500,15 +529,23 @@ function ReadsGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
   return (
     <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
       <CollapseHeader label={t('readsGroup', { n: rows.length })} defaultOpen>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {rows.map((row) => {
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {rows.map((row, index) => {
             const name = String(row.name)
             const expandable = isExpandable(row.value)
             return (
-              <div key={row.seq} style={{ display: 'flex', alignItems: expandable ? 'flex-start' : 'baseline', gap: 8, fontSize: 12.5 }}>
-                {!expandable && <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, ...codeFont }}>{name}</span>}
+              <div key={row.seq} style={{
+                display: 'flex',
+                alignItems: expandable ? 'flex-start' : 'baseline',
+                gap: 8,
+                fontSize: 14,
+                width: '100%',
+                boxSizing: 'border-box',
+                ...(!expandable && isZebra(index) ? zebraRow : {}),
+              }}>
+                {!expandable && <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, ...codeFont, fontSize: 13.5 }}>{name}</span>}
                 {expandable
-                  ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} /></div>
+                  ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} banded={isZebra(index)} /></div>
                   : <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(row.value)}</span>}
               </div>
             )
@@ -525,13 +562,13 @@ function FailuresGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
   return (
     <div style={{ ...rowStyle, borderColor: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
       <CollapseHeader label={t('failuresGroup', { n: rows.length })}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {rows.map((row) => (
-            <div key={row.seq} style={{ fontSize: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {rows.map((row, index) => (
+            <div key={row.seq} style={{ fontSize: 14, width: '100%', boxSizing: 'border-box', ...(isZebra(index) ? zebraRow : {}) }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <span style={{ ...codeFont, color: 'var(--dsw-alias-label-tertiary)' }}>#{row.seq}</span>
-                {typeof row.solver === 'string' && <span style={{ ...codeFont }}>{row.solver}</span>}
-                <span style={{ padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-error-primary)', color: 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>
+                {typeof row.solver === 'string' && <span style={{ ...codeFont, fontSize: 13.5 }}>{row.solver}</span>}
+                <span style={{ padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-error-primary)', color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>
                   {String(row.code)}
                 </span>
               </div>
@@ -562,7 +599,7 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
   const solver = typeof row.solver === 'string' ? row.solver : row.tool
   return (
     <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
-      <details open={open} style={{ fontSize: 12.5 }}>
+      <details open={open} style={{ fontSize: 14.5 }}>
         <summary
           onClick={(event) => { event.preventDefault(); setOpen(!open) }}
           style={{ cursor: 'pointer', color: 'var(--dsw-alias-label-primary)', fontWeight: 600, marginBottom: 6 }}
@@ -570,20 +607,20 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
           <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
             <span>{t('callLabel')}</span>
             {!open && (
-              <span style={{ fontWeight: 400, color: 'var(--dsw-alias-label-secondary)', ...codeFont }}>{solver}</span>
+              <span style={{ fontWeight: 400, color: 'var(--dsw-alias-label-secondary)', ...codeFont, fontSize: 13.5 }}>{solver}</span>
             )}
           </span>
         </summary>
         {open && (
-          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <MetaLine label={t('callSolver')} value={solver} />
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <MetaLine label={t('callSolver')} value={solver} banded={false} />
             {typeof row.target === 'string' && (
-              <MetaLine label={t('callTarget')} value={row.target}>
-                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>rev {row.rev}</span>}
+              <MetaLine label={t('callTarget')} value={row.target} banded={false}>
+                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12.5 }}>rev {row.rev}</span>}
               </MetaLine>
             )}
-            {Object.entries(args).map(([name, value]) => (
-              <RowNode key={name} label={name} value={value} />
+            {Object.entries(args).map(([name, value], index) => (
+              <RowNode key={name} label={name} value={value} banded={isZebra(index)} />
             ))}
             {refs.length > 0 && (
               <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -593,7 +630,7 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
                     type="button"
                     title={t('jumpToSet', { name })}
                     onClick={() => document.getElementById(`set-${name}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                    style={{ ...codeFont, padding: '1px 8px', borderRadius: 999, border: '1px solid var(--dsw-alias-label-tertiary)', background: 'none', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 11 }}
+                    style={{ ...codeFont, padding: '1px 8px', borderRadius: 999, border: '1px solid var(--dsw-alias-label-tertiary)', background: 'none', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 12.5 }}
                   >
                     @{name}
                   </button>
@@ -601,8 +638,8 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
               </div>
             )}
             {row.result !== undefined && row.result !== null && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{t('callResult')}</span>
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{t('callResult')}</span>
                 <RowNode value={row.result} />
               </div>
             )}
@@ -613,12 +650,20 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
   )
 }
 
-/** One label/value line used for the solver and target rows of a call card. */
-function MetaLine({ label, value, children }: { label: string; value: string; children?: React.ReactNode }): React.JSX.Element {
+/** One label/value line used for the solver and target rows of a call card; banded rows get the zebra stripe. */
+function MetaLine({ label, value, banded, children }: { label: string; value: string; banded: boolean; children?: React.ReactNode }): React.JSX.Element {
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5 }}>
-      <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64 }}>{label}</span>
-      <span style={{ color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-word', ...codeFont }}>{value}</span>
+    <div style={{
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: 8,
+      fontSize: 14.5,
+      width: '100%',
+      boxSizing: 'border-box',
+      ...(banded ? zebraRow : {}),
+    }}>
+      <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, fontSize: 13.5 }}>{label}</span>
+      <span style={{ color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-word', ...codeFont, fontSize: 13.5 }}>{value}</span>
       {children}
     </div>
   )
@@ -638,7 +683,7 @@ function EventRow({ row }: { row: TraceRow }): React.JSX.Element {
   }
   return (
     <div style={{ ...rowStyle, padding: '6px 12px' }}>
-      <span style={{ ...codeFont, color: 'var(--dsw-alias-label-secondary)', fontSize: 12 }}>
+      <span style={{ ...codeFont, color: 'var(--dsw-alias-label-secondary)', fontSize: 14 }}>
         {label}{hasValue ? ` = ${displayValue(row.value)}` : ''}
       </span>
     </div>
@@ -649,7 +694,7 @@ function EventRow({ row }: { row: TraceRow }): React.JSX.Element {
 
 function CollapseHeader({ label, children, defaultOpen = false }: { label: React.ReactNode; children: React.ReactNode; defaultOpen?: boolean }): React.JSX.Element {
   return (
-    <details open={defaultOpen} style={{ fontSize: 12.5 }}>
+    <details open={defaultOpen} style={{ fontSize: 14.5 }}>
       <summary style={{ cursor: 'pointer', color: 'var(--dsw-alias-label-primary)', fontWeight: 600, marginBottom: 6 }}>{label}</summary>
       {children}
     </details>
