@@ -261,32 +261,36 @@ function RowNodeImpl({ label, value, depth }: { label?: string; value: unknown; 
 
 type Item =
   | { kind: 'marker'; row: TraceRow }
-  | { kind: 'conditions'; rows: TraceRow[] }
+  | { kind: 'writes'; rows: TraceRow[] }
+  | { kind: 'reads'; rows: TraceRow[] }
   | { kind: 'failures'; rows: TraceRow[] }
   | { kind: 'call'; row: TraceRow }
   | { kind: 'event'; row: TraceRow }
 
-/** Fold consecutive ok set rows into a condition group and consecutive failures into one section. */
+/**
+ * Fold consecutive ok set rows into a "writes" card, consecutive ok get rows
+ * into a "reads" card, and consecutive failures into one section.
+ */
 function groupRows(rows: TraceRow[]): Item[] {
   const items: Item[] = []
   let run: TraceRow[] = []
   const flush = (): void => {
     if (run.length === 0) return
     const first = run[0]!
-    if (first.tool === 'set' && first.ok) items.push({ kind: 'conditions', rows: run })
+    if (first.tool === 'set' && first.ok) items.push({ kind: 'writes', rows: run })
+    else if (first.tool === 'get' && first.ok) items.push({ kind: 'reads', rows: run })
     else if (!first.ok) items.push({ kind: 'failures', rows: run })
     else if (first.tool === 'call') items.push({ kind: 'call', row: first })
     else items.push({ kind: 'event', row: first })
     run = []
   }
   for (const row of rows) {
-    const groupable = (row.tool === 'set' && row.ok) || !row.ok
-    const sameRun = run.length > 0
-      && ((run[0]!.tool === 'set' && row.ok && row.tool === 'set') || (!run[0]!.ok && !row.ok))
-    if (groupable && sameRun) run.push(row)
+    const runKey = (row.ok && (row.tool === 'set' || row.tool === 'get')) ? row.tool : !row.ok ? 'fail' : null
+    const currentKey = run.length > 0 ? (run[0]!.ok ? run[0]!.tool : 'fail') : null
+    if (runKey !== null && runKey === currentKey) run.push(row)
     else {
       flush()
-      if (groupable) run.push(row)
+      if (runKey !== null) run.push(row)
       else if (row.tool === 'marker') items.push({ kind: 'marker', row })
       else if (row.tool === 'call' && row.ok) items.push({ kind: 'call', row })
       else items.push({ kind: 'event', row })
@@ -404,7 +408,7 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
 }
 
 function itemKey(item: Item): string {
-  if (item.kind === 'conditions' || item.kind === 'failures') return `${item.kind}-${item.rows[0]?.seq ?? 0}`
+  if (item.kind === 'writes' || item.kind === 'reads' || item.kind === 'failures') return `${item.kind}-${item.rows[0]?.seq ?? 0}`
   return `${item.row.tool}-${item.row.seq}`
 }
 
@@ -416,8 +420,10 @@ function TimelineItem({ item }: { item: Item }): React.JSX.Element {
   switch (item.kind) {
     case 'marker':
       return <MarkerRow row={item.row} />
-    case 'conditions':
-      return <ConditionsGroup rows={item.rows} />
+    case 'writes':
+      return <WritesGroup rows={item.rows} />
+    case 'reads':
+      return <ReadsGroup rows={item.rows} />
     case 'failures':
       return <FailuresGroup rows={item.rows} />
     case 'call':
@@ -460,12 +466,12 @@ function MarkerRow({ row }: { row: TraceRow }): React.JSX.Element {
   )
 }
 
-/* ── Conditions group ─────────────────────────────────────────────────────── */
+/* ── Writes group (set rows) ──────────────────────────────────────────────── */
 
-function ConditionsGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
+function WritesGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
   return (
     <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
-      <CollapseHeader label={t('conditionsGroup', { n: rows.length })} defaultOpen>
+      <CollapseHeader label={t('writesGroup', { n: rows.length })} defaultOpen>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {rows.map((row) => {
             const name = String(row.name)
@@ -479,6 +485,31 @@ function ConditionsGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
                     ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} /></div>
                     : <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(row.value)}</span>}
                 {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>rev {row.rev}</span>}
+              </div>
+            )
+          })}
+        </div>
+      </CollapseHeader>
+    </div>
+  )
+}
+
+/* ── Reads group (get rows), same card style as writes ────────────────────── */
+
+function ReadsGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
+  return (
+    <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
+      <CollapseHeader label={t('readsGroup', { n: rows.length })} defaultOpen>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {rows.map((row) => {
+            const name = String(row.name)
+            const expandable = isExpandable(row.value)
+            return (
+              <div key={row.seq} style={{ display: 'flex', alignItems: expandable ? 'flex-start' : 'baseline', gap: 8, fontSize: 12.5 }}>
+                {!expandable && <span style={{ color: 'var(--dsw-alias-label-secondary)', minWidth: 64, ...codeFont }}>{name}</span>}
+                {expandable
+                  ? <div style={{ flex: '1 1 auto', minWidth: 0 }}><RowNode label={name} value={row.value} /></div>
+                  : <span style={{ wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' }}>{displayValue(row.value)}</span>}
               </div>
             )
           })}
@@ -522,7 +553,7 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
   const refs: string[] = []
   referencedSlots(row.args, refs)
   return (
-    <div style={{ ...rowStyle, borderLeft: '3px solid var(--dsw-alias-state-success-primary)', paddingLeft: 10, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
+    <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
       <CollapseHeader
         defaultOpen
         label={
