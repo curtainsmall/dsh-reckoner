@@ -11,9 +11,10 @@
 import { useEffect, useState } from 'react'
 import { t, useAppLocale } from './locales.ts'
 import { IconChevronLeft, IconMarkdown, IconTex } from './icons.tsx'
-import { displayValue, Dialog, GhostButton } from './ui.tsx'
-import { buildMarkdownArticle } from './article-md.ts'
-import { buildLatexArticle } from './article-tex.ts'
+import { displayValue } from './ui.tsx'
+import { ArticleFormat } from '../generate.ts'
+import { useGenState } from './generation.ts'
+import { GenerationSetupDialog } from './generation-ui.tsx'
 
 const BODY_ENDPOINT = '/api/dsh-electro-lab/records/'
 const POLL_MS = 5000
@@ -394,40 +395,18 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
 /** Right-hand column of the record detail: article generation actions (Markdown and LaTeX). */
 function ArticleActions({ body }: { body: RecordBody }): React.JSX.Element {
   const [hovered, setHovered] = useState<string | null>(null)
-  const [preview, setPreview] = useState<{ kind: 'md' | 'tex'; text: string } | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [setupFormat, setSetupFormat] = useState<ArticleFormat | null>(null)
+  const { progress: genProgress } = useGenState()
+  const genRunning = genProgress?.status === 'running'
 
-  const copyArticle = (): void => {
-    if (preview === null) return
-    const text = preview.text
-    const done = (): void => {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    }
-    if (navigator.clipboard !== undefined) {
-      void navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done))
-    } else {
-      fallbackCopy(text, done)
-    }
-  }
-  const downloadArticle = (): void => {
-    if (preview === null) return
-    const blob = new Blob([preview.text], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `electrolab-${body.id}.${preview.kind === 'md' ? 'md' : 'tex'}`
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const action = (key: string, label: string, icon: React.ReactNode, onClick: () => void): React.JSX.Element => (
+  const action = (key: string, label: string, icon: React.ReactNode, format: ArticleFormat): React.JSX.Element => (
     <button
       key={key}
       type="button"
       title={label}
       aria-label={label}
-      onClick={onClick}
+      disabled={genRunning}
+      onClick={() => setSetupFormat(format)}
       onMouseEnter={() => setHovered(key)}
       onMouseLeave={() => setHovered(null)}
       style={{
@@ -437,8 +416,8 @@ function ArticleActions({ body }: { body: RecordBody }): React.JSX.Element {
         border: '1px solid var(--dsw-alias-border-l2)',
         background: hovered === key ? 'var(--dsw-alias-interactive-bg-hover)' : 'none',
         color: 'var(--dsw-alias-label-primary)',
-        cursor: 'pointer',
-        opacity: 1,
+        cursor: genRunning ? 'default' : 'pointer',
+        opacity: genRunning ? 0.45 : 1,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -449,51 +428,18 @@ function ArticleActions({ body }: { body: RecordBody }): React.JSX.Element {
   )
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 'none' }}>
-      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={24} />, () => setPreview({ kind: 'md', text: buildMarkdownArticle(body) }))}
-      {action('articleGenerateTex', t('articleGenerateTex'), <IconTex size={28} />, () => setPreview({ kind: 'tex', text: buildLatexArticle(body) }))}
-      <Dialog
-        open={preview !== null}
-        title={preview === null ? '' : preview.kind === 'md' ? t('articlePreview') : t('articlePreviewTex')}
-        width={720}
-        height={520}
-        onClose={() => setPreview(null)}
-        footer={[
-          <GhostButton key="copy" onClick={copyArticle}>{copied ? t('articleCopied') : t('articleCopy')}</GhostButton>,
-          <GhostButton key="download" onClick={downloadArticle}>{t('articleDownload')}</GhostButton>,
-          <GhostButton key="close" onClick={() => setPreview(null)}>{t('backToRecords')}</GhostButton>,
-        ]}
-      >
-        {preview !== null && (
-          <pre style={{
-            margin: 0,
-            fontSize: 12.5,
-            lineHeight: 1.6,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            color: 'var(--dsw-alias-label-primary)',
-            font: '12.5px/1.6 ui-monospace, monospace',
-          }}>{preview.text}</pre>
-        )}
-      </Dialog>
+      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={24} />, ArticleFormat.Markdown)}
+      {action('articleGenerateTex', t('articleGenerateTex'), <IconTex size={28} />, ArticleFormat.Latex)}
+      {setupFormat !== null && (
+        <GenerationSetupDialog
+          open
+          format={setupFormat}
+          recordId={body.id}
+          onClose={() => setSetupFormat(null)}
+        />
+      )}
     </div>
   )
-}
-
-/** Fallback copy for environments without the async clipboard API. */
-function fallbackCopy(text: string, done: () => void): void {
-  const area = document.createElement('textarea')
-  area.value = text
-  area.style.position = 'fixed'
-  area.style.opacity = '0'
-  document.body.appendChild(area)
-  area.select()
-  try {
-    document.execCommand('copy')
-  } catch {
-    // ignore — nothing else to try
-  }
-  document.body.removeChild(area)
-  done()
 }
 
 function itemKey(item: Item): string {

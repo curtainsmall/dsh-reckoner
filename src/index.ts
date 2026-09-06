@@ -14,7 +14,9 @@ import { createEngineTools } from './tools/engine-tools.ts'
 import { createDeclarationTools } from './tools/declaration-tools.ts'
 import { compileExternalSolver } from './engine/external-solvers.ts'
 import { registerKernelSolvers } from './engine/solvers/index.ts'
+import type { GenerationCall, GenerationResult, Record } from './generate.ts'
 import { clearRestartRequired, deleteDeclaration, readDeclarations, restartRequired, upsertDeclaration, validateDeclaration } from './tool.ts'
+import { registerGenerateEndpoints } from './generate-server.ts'
 import { registerSkills } from './skill.ts'
 import { installPresets } from './preset.ts'
 
@@ -67,6 +69,54 @@ const RECORDS_INDEX_PATH = '/api/dsh-electro-lab/records-index'
 // WebRoute paths carry no trailing slash; requests are /records/<id>.
 const RECORDS_BODY_PREFIX = '/api/dsh-electro-lab/records'
 const EXTERNAL_PATH = '/api/dsh-electro-lab/external-solvers'
+
+/**
+ * Flatten one stored engine record into the article-generation facts: the
+ * question, established conditions, analysis notes, successful solver steps
+ * with their resolved arguments and results, and the final answer. Failed
+ * attempts and introspection rows are skipped.
+ */
+function loadGenerationRecord(id: string): Record | undefined {
+  const meta = engine.indexRows().find((row) => row.id === id)
+  if (meta === undefined) return undefined
+  const conditions: string[] = []
+  const notes: string[] = []
+  const calls: GenerationCall[] = []
+  const results: GenerationResult[] = []
+  let answer = ''
+  for (const row of engine.store.readRows(id)) {
+    if (row.ok !== true) continue
+    if (row.tool === 'marker') {
+      const text = typeof row.text === 'string' ? row.text.trim() : ''
+      if (text.length === 0) continue
+      if (row.kind === 'analyse') notes.push(text)
+      else if (row.kind === 'answer') answer = text
+      continue
+    }
+    if (row.tool === 'set') {
+      const name = typeof row.name === 'string' ? row.name : ''
+      if (row.deleted === true) conditions.push(`${name}: removed`)
+      else conditions.push(`${name}: ${JSON.stringify(row.value)}`)
+      continue
+    }
+    if (row.tool === 'call' && typeof row.solver === 'string') {
+      const callId = String(row.seq)
+      calls.push({
+        callId,
+        name: row.solver,
+        arguments: JSON.stringify(row.resolved ?? row.args ?? {}),
+      })
+      if (row.result !== null && row.result !== undefined) {
+        results.push({ callId, content: JSON.stringify(row.result) })
+      }
+    }
+  }
+  const analyse = [
+    conditions.length > 0 ? `Established conditions:\n${conditions.map((line) => `- ${line}`).join('\n')}` : '',
+    ...notes,
+  ].filter((line) => line.length > 0).join('\n\n')
+  return { id, question: meta.question, analyse, answer, calls, results }
+}
 
 export function apply(ctx: Context): void {
   ctx.effect(() => {
@@ -232,6 +282,12 @@ export function apply(ctx: Context): void {
         },
       }))
     }
+
+    // Article generation subsystem (LLM jobs, file writing, compile, browsing).
+    disposers.push(registerGenerateEndpoints(ctx as never, {
+      home: recordsHome,
+      loadRecord: loadGenerationRecord,
+    }))
 
     return () => {
       for (const off of disposers) off()

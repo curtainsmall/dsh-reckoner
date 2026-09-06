@@ -9,6 +9,11 @@
  */
 import { FontAwesomeIcon, type CSSVariables } from '@fortawesome/react-fontawesome'
 import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft'
+import { faDownload } from '@fortawesome/free-solid-svg-icons/faDownload'
+import { faArrowUp } from '@fortawesome/free-solid-svg-icons/faArrowUp'
+import { faFolder } from '@fortawesome/free-solid-svg-icons/faFolder'
+import { faFile } from '@fortawesome/free-solid-svg-icons/faFile'
+import { faMinus } from '@fortawesome/free-solid-svg-icons/faMinus'
 import { faMarkdown } from '@fortawesome/free-brands-svg-icons/faMarkdown'
 import { faTex } from '@fortawesome/free-brands-svg-icons/faTex'
 
@@ -24,6 +29,31 @@ function sized(size: number): React.CSSProperties & CSSVariables {
 /** ‹ back / collapse. */
 export function IconChevronLeft({ size = 16 }: IconProps): React.JSX.Element {
   return <FontAwesomeIcon icon={faChevronLeft} style={sized(size)} />
+}
+
+/** ↓ download / export. */
+export function IconDownload({ size = 16 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faDownload} style={sized(size)} />
+}
+
+/** ↑ up one level. */
+export function IconArrowUp({ size = 14 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faArrowUp} style={sized(size)} />
+}
+
+/** folder glyph (directory tree). */
+export function IconFolder({ size = 14 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faFolder} style={sized(size)} />
+}
+
+/** file glyph (directory tree). */
+export function IconFile({ size = 14 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faFile} style={sized(size)} />
+}
+
+/** — minimize / collapse. */
+export function IconMinus({ size = 14 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faMinus} style={sized(size)} />
 }
 
 /** Markdown brand glyph. */
