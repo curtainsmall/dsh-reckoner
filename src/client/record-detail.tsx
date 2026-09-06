@@ -183,6 +183,7 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
   const [record, setRecord] = useState<RecordBody | null>(null)
   const [failed, setFailed] = useState(false)
   const [backHover, setBackHover] = useState(false)
+  const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -218,12 +219,14 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
   }
   if (record === null) return <div style={{ minHeight: 120 }} />
 
-  const failedCount = record.rows.filter((row) => !row.ok).length
-  const items = groupRows(record.rows)
+  // "Display all" off hides introspection noise (solver_info rows) from the narrative timeline.
+  const visibleRows = showAll ? record.rows : record.rows.filter((row) => row.tool !== 'solver_info')
+  const failedCount = visibleRows.filter((row) => !row.ok).length
+  const items = groupRows(visibleRows)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <button
           type="button"
           aria-label={t('backToRecords')}
@@ -239,13 +242,22 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}><IconChevronLeft size={16} /></span>
           <span style={{ lineHeight: 1 }}>{t('backToRecords')}</span>
         </button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showAll}
+            onChange={(event) => setShowAll(event.target.checked)}
+            style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }}
+          />
+          {t('displayAll')}
+        </label>
       </div>
 
       {/* Header: question + meta */}
       <div style={rowStyle}>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{record.question || record.id}</div>
         <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
-          <span>{t('rowsCount', { n: record.rows.length })}</span>
+          <span>{t('rowsCount', { n: visibleRows.length })}</span>
           {failedCount > 0 && <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{t('failedCount', { n: failedCount })}</span>}
           {record.sealedAt === null
             ? <span style={{ padding: '1px 7px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' }}>{t('incomplete')}</span>
