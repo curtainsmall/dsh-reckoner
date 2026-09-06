@@ -142,25 +142,6 @@ function isExpandable(value: unknown): boolean {
   return v.type === 'array' || v.type === 'object'
 }
 
-/** Compact one-line summary of a container (used in collapsed summaries). */
-function containerSummary(value: unknown): string {
-  if (Array.isArray(value)) return `array · ${value.length}`
-  if (typeof value !== 'object' || value === null) return String(value)
-  const v = value as Record<string, unknown>
-  if (v.type === 'array' && Array.isArray(v.value)) return `array · ${v.value.length}`
-  if (v.type === 'object' && typeof v.value === 'object' && v.value !== null) {
-    return `object · {${Object.keys(v.value as Record<string, unknown>).join(', ')}}`
-  }
-  if (v.type !== undefined) return String(v.type)
-  const keys = Object.keys(v)
-  return keys.length === 0 ? '{}' : `{${keys.join(', ')}}`
-}
-
-/** A short text that summarizes any argument value for a collapsed call row. */
-function summaryText(value: unknown): string {
-  return isExpandable(value) ? containerSummary(value) : displayValue(value)
-}
-
 /** Container kind used by the tree (objects show {…}, arrays show […]). */
 type TreeKind = 'object' | 'array' | null
 
@@ -511,7 +492,7 @@ function ConditionsGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
 
 function FailuresGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
   return (
-    <div style={{ ...rowStyle, borderColor: 'var(--dsw-alias-state-error-primary)' }}>
+    <div style={{ ...rowStyle, borderColor: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
       <CollapseHeader label={t('failuresGroup', { n: rows.length })}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {rows.map((row) => (
@@ -540,15 +521,13 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
   const args = (row.args ?? {}) as Record<string, unknown>
   const refs: string[] = []
   referencedSlots(row.args, refs)
-  const argsText = Object.entries(args).map(([name, value]) => `${name} = ${summaryText(value)}`).join(' · ')
   return (
-    <div style={{ ...rowStyle, borderLeft: '3px solid var(--dsw-alias-state-success-primary)', paddingLeft: 10 }}>
+    <div style={{ ...rowStyle, borderLeft: '3px solid var(--dsw-alias-state-success-primary)', paddingLeft: 10, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
       <CollapseHeader
         defaultOpen
         label={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginRight: 4 }}>
             <span style={{ ...codeFont }}>{String(row.solver)}</span>
-            <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{argsText}</span>
             {typeof row.target === 'string' && (
               <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{t('callTarget')} <code style={codeFont}>{row.target}</code></span>
             )}
