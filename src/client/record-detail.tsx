@@ -13,6 +13,7 @@ import { t, useAppLocale } from './locales.ts'
 import { IconChevronLeft, IconMarkdown, IconTex } from './icons.tsx'
 import { displayValue, Dialog, GhostButton } from './ui.tsx'
 import { buildMarkdownArticle } from './article-md.ts'
+import { buildLatexArticle } from './article-tex.ts'
 
 const BODY_ENDPOINT = '/api/dsh-electro-lab/records/'
 const POLL_MS = 5000
@@ -390,15 +391,15 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
   )
 }
 
-/** Right-hand column of the record detail: article generation actions. Markdown generation is live; LaTeX is a placeholder. */
+/** Right-hand column of the record detail: article generation actions (Markdown and LaTeX). */
 function ArticleActions({ body }: { body: RecordBody }): React.JSX.Element {
   const [hovered, setHovered] = useState<string | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ kind: 'md' | 'tex'; text: string } | null>(null)
   const [copied, setCopied] = useState(false)
 
   const copyArticle = (): void => {
     if (preview === null) return
-    const text = preview
+    const text = preview.text
     const done = (): void => {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
@@ -411,40 +412,15 @@ function ArticleActions({ body }: { body: RecordBody }): React.JSX.Element {
   }
   const downloadArticle = (): void => {
     if (preview === null) return
-    const blob = new Blob([preview], { type: 'text/markdown;charset=utf-8' })
+    const blob = new Blob([preview.text], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `electrolab-${body.id}.md`
+    anchor.download = `electrolab-${body.id}.${preview.kind === 'md' ? 'md' : 'tex'}`
     anchor.click()
     URL.revokeObjectURL(url)
   }
 
-  const placeholder = (key: string, label: string, icon: React.ReactNode): React.JSX.Element => (
-    <button
-      key={key}
-      type="button"
-      aria-disabled="true"
-      title={`${label} — ${t('articleComingSoon')}`}
-      onMouseEnter={() => setHovered(key)}
-      onMouseLeave={() => setHovered(null)}
-      style={{
-        width: 44,
-        height: 44,
-        borderRadius: 8,
-        border: '1px solid var(--dsw-alias-border-l2)',
-        background: hovered === key ? 'var(--dsw-alias-interactive-bg-hover)' : 'none',
-        color: 'var(--dsw-alias-label-primary)',
-        cursor: 'default',
-        opacity: hovered === key ? 0.8 : 0.55,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {icon}
-    </button>
-  )
   const action = (key: string, label: string, icon: React.ReactNode, onClick: () => void): React.JSX.Element => (
     <button
       key={key}
@@ -473,13 +449,13 @@ function ArticleActions({ body }: { body: RecordBody }): React.JSX.Element {
   )
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 'none' }}>
-      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={24} />, () => setPreview(buildMarkdownArticle(body)))}
-      {placeholder('articleGenerateTex', t('articleGenerateTex'), <IconTex size={28} />)}
+      {action('articleGenerateMarkdown', t('articleGenerateMarkdown'), <IconMarkdown size={24} />, () => setPreview({ kind: 'md', text: buildMarkdownArticle(body) }))}
+      {action('articleGenerateTex', t('articleGenerateTex'), <IconTex size={28} />, () => setPreview({ kind: 'tex', text: buildLatexArticle(body) }))}
       <Dialog
         open={preview !== null}
-        title={t('articlePreview')}
-        width={680}
-        height={480}
+        title={preview === null ? '' : preview.kind === 'md' ? t('articlePreview') : t('articlePreviewTex')}
+        width={720}
+        height={520}
         onClose={() => setPreview(null)}
         footer={[
           <GhostButton key="copy" onClick={copyArticle}>{copied ? t('articleCopied') : t('articleCopy')}</GhostButton>,
@@ -496,7 +472,7 @@ function ArticleActions({ body }: { body: RecordBody }): React.JSX.Element {
             wordBreak: 'break-word',
             color: 'var(--dsw-alias-label-primary)',
             font: '12.5px/1.6 ui-monospace, monospace',
-          }}>{preview}</pre>
+          }}>{preview.text}</pre>
         )}
       </Dialog>
     </div>
