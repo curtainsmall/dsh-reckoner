@@ -141,6 +141,7 @@ const MARKDOWN_SHARED_RULES = [
   "Restate the question clearly at the start, in the user's own words. Remove any meta or filler text that was added while merging multiple inputs into one question.",
   'Every number must come from the provided step results and the final answer — never invent or recompute values.',
   'Never include record ids or timestamps anywhere in the article.',
+  "Never mention ElectroLab, DeepSeek Harness, the harness, solvers, calculation steps, records or the generation process in the article — present the work as if you carried out the calculation yourself, from the problem statement to the final result. The only allowed occurrences of the name are the document's fixed title 'DeepSeek Harness ElectroLab Solution' and the author line 'DeepSeek Harness ElectroLab'.",
 ]
 
 /**

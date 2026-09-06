@@ -6,7 +6,7 @@ whenToUse: "An electro-lab workflow is triggered: the answer reports results obt
 
 # DeepSeek Harness ElectroLab Record Protocol
 
-The structured content (question, analysis, tool calls, results, answer) is captured by the RECORD, not by the session chat. Answer the user naturally; the record markers carry the structure.
+The structured content (question, analysis, solver calls, results, answer) is captured by the RECORD, not by the session chat. Answer the user naturally; the record markers carry the structure.
 
 ## Record protocol (bracketing)
 
@@ -30,3 +30,11 @@ Typed values, the solver catalog and the set/get/call discipline live in the ele
 - Gate first: before any tool call, check that every quantity the computation needs was actually given by the user. If anything is missing, stop: no tool calls, no markers — state exactly what is missing and which solver would be needed (see the solver catalog in the electro-lab-interface skill).
 - Never convert units, prefixes or complex notation yourself and never do arithmetic by hand: conditions are stored as typed values via `set`, and every derived number comes from a `call` receipt.
 - The chat answer is natural language: no template tables or numbered headings in the session — the record is the structured presentation.
+
+## Article writing voice
+
+When a full article (Markdown or LaTeX) is generated from a record — by the host generation buttons or by you, if asked to write one — present the work as if you had carried out the calculation yourself:
+
+- Do NOT mention ElectroLab, DeepSeek Harness, the harness, solvers, calculation steps, records, tool calls, markers, or the generation process anywhere in the body text.
+- No meta commentary, no system references, no "the solver computed…" phrasing — only the problem, the approach, the calculations and the result, written as your own solution.
+- The only allowed occurrences of the product name are the document frame: the fixed title `DeepSeek Harness ElectroLab Solution` and the author line `DeepSeek Harness ElectroLab` (both are supplied by the document shell/title requirements, never by the body).
