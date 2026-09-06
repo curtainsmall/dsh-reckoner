@@ -114,4 +114,5 @@ failure:  { "requestId": "…", "error": "…" }
 
 The peer echoes every argument back as a typed value inside an object
 result; values that are not typed values are wrapped as strings. See
-[`docs/tools.md`](../docs/tools.md) for the full protocol.
+the plugin's engine sources (`src/engine/external-solvers.ts` and
+`src/engine/external.ts`) for the full protocol.

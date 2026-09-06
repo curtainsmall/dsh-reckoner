@@ -16,15 +16,13 @@ The plugin works as an agent preset: pick **ElectroLab Mode** when starting a se
 
 All calculation happens inside a deterministic **engine**. The agent operates it through three primitives — `set` (write a typed value into a slot), `get` (read a slot) and `call` (run one of 38 math solvers and store the result) — bracketed by the record markers `record_question` / `record_analyse` / `record_answer`. Typed values carry their own kind, variant and prefix (e.g. `{type: "number", value: 25, kind: "temperature", variant: "degC"}`); the engine stores them as given and performs SI and unit conversion only at calculation boundaries. Every step lands in a per-record trace file, so each solve is a reproducible process that can be replayed without re-computing.
 
-The solver catalog covers expression algebra, series, transfer functions, DSP/DFT, signal quality (THD, jitter, ADC budget), circuits (impedance, resonance, transients, AC power), electronics (op-amps, dividers, LED), RF & Smith chart (reflection, matching networks), transmission lines, noise, and filter design. See the [engine manual](docs/tools.md).
+The solver catalog covers expression algebra, series, transfer functions, DSP/DFT, signal quality (THD, jitter, ADC budget), circuits (impedance, resonance, transients, AC power), electronics (op-amps, dividers, LED), RF & Smith chart (reflection, matching networks), transmission lines, noise, and filter design. See the [engine manual](docs/engine.md).
 
-Settled records are listed in the client panel's **Records** tab (indexed from `record-index.jsonl`, refreshed every 5 s); incomplete records are marked as such. Record bodies are process traces under `~/.dsh-electro-lab/records/`.
+Settled records are listed in the client panel's **Records** tab (indexed from `record-index.jsonl`, refreshed every 5 s); incomplete records are marked as such. Record bodies are process traces under `~/.dsh-electro-lab/records/`. The list has a select mode (multi-select, select all, delete with confirmation) and each record opens a timeline detail page: collapsible cards for writes/reads/failures and calls, JSON tree values with zebra striping, and a fixed toolbar/title area with the timeline scrolling beneath it.
 
-## External solvers
+## Article generation
 
-Beyond the built-ins you can register your own solvers, reached over an **http** or **file** transport. A declaration (name, description, parameters, an explicit **returns** shape, transport options) lives in `~/.dsh-electro-lab/external-solvers.jsonl`; at engine start every enabled declaration is registered as an external solver, so changes apply after a host restart. Register through the manager tools (`external_solver_add` / `external_solver_update` / `external_solver_delete`) or the **External solvers** tab of the Records panel, which also edits, enables/disables and deletes declarations. The wire protocol is a typed envelope: `{requestId, args}` → `{requestId, result}` (typed value, `null` for void) or `{requestId, error}` — POST only, typed values only, no symbols across the wire.
-
-[`external-solvers-example/`](external-solvers-example/README.md) is an independent npm project with manual test counterparts for this feature — `node src/echo.ts http` / `file` echoes the envelope protocol back end to end.
+The record detail page's right rail offers **Markdown** and **LaTeX** generation: the host LLM writes a fluent, self-contained solution article from the record's trace (question, established conditions, analysis notes, solver steps with their resolved arguments and results, and the final answer), presented as the model's own calculation — never mentioning ElectroLab, solvers or the generation process. Each button opens its own setup dialog (article language, output directory with a host-driven directory browser, file name; remembered across runs), then runs a cancellable background job whose progress dialog can be minimized to a corner pill that survives navigation. LaTeX articles are proper XeLaTeX documents (ctexart for zh-CN, fontspec + unicode-math + siunitx for en — pure Unicode throughout); **PDF compilation is LaTeX-only** (xelatex, two passes). Markdown output is written flat as `.md` and never compiled. The generated file is the primary artifact: open it or its folder straight from the progress dialog.
 
 ## Development
 
@@ -32,8 +30,7 @@ See [Contributing](.github/CONTRIBUTING.md) for the development setup, commit co
 
 ## Docs
 
-- [Engine manual](docs/tools.md) (also in [简体中文](docs/tools.zh-CN.md))
-- [external-solvers-example](external-solvers-example/README.md)
+- [Engine manual](docs/engine.md) (also in [简体中文](docs/engine.zh-CN.md))
 - [Contributing](.github/CONTRIBUTING.md)
 
 ## License

@@ -107,4 +107,4 @@ response: { "requestId": "…", "result": { "type": "object", "value": { "messag
 failure:  { "requestId": "…", "error": "…" }
 ```
 
-对端把收到的每个参数都以类型化值形式回显在一个对象结果里；不是类型化值的值会被包成字符串。完整协议见 [`docs/tools.md`](../docs/tools.md)。
+对端把收到的每个参数都以类型化值形式回显在一个对象结果里；不是类型化值的值会被包成字符串。完整协议见插件引擎源码（`src/engine/external-solvers.ts` 与 `src/engine/external.ts`）。

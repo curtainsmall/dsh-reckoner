@@ -1,15 +1,15 @@
 # ElectroLab 引擎手册
 
-[English](tools.md)
+[English](engine.md)
 
 DeepSeek Harness ElectroLab 插件把全部电气电子计算放在一台确定性的**引擎**内完成。语言模型从不亲自计算：它通过三个原语与三个记录标记操作引擎，引擎维护一张类型化值变量表，在计算边界换算数值，记录每一步，并把每次求解封口成一条可浏览的记录。
 
-本手册是引擎使用面的完整参考——类型化值、原语、标记、求解器目录、存储与外部求解器。以 **ElectroLab 模式**启动的会话，会经由 `electro-lab-interface` 技能（引擎手册）与 `electro-lab-template` 技能（记录协议）携带同样的规则。
+本手册是引擎使用面的完整参考——类型化值、原语、标记、求解器目录与存储。以 **ElectroLab 模式**启动的会话，会经由 `electro-lab-interface` 技能（引擎手册）与 `electro-lab-template` 技能（记录协议）携带同样的规则。
 
 ## 1. 工作原理
 
 - **每个宿主进程一台全局引擎。** 任何会话的标记都作用于同一台引擎；任何时刻至多有一条未封口记录（单一 open 不变量）。
-- **LLM 使用面只有七个工具**：`set`、`get`、`call`、`solver_info`、`record_question`、`record_analyse`、`record_answer`——外加声明管理器 `external_solver_add` / `external_solver_update` / `external_solver_delete`。约 40 个领域工具、`solve_steps` 与文本↔值编解码工具已退役；数学内核住在引擎的 solver 注册表中，由 `call` 调用。`solver_info` 直接从注册表暴露某个 solver 的精确签名（参数名、数量 kind、允许的枚举、可选标记、returns）——调用陌生 solver 前先读它。
+- **LLM 使用面只有七个工具**：`set`、`get`、`call`、`solver_info`、`record_question`、`record_analyse`、`record_answer`。约 40 个领域工具、`solve_steps` 与文本↔值编解码工具已退役；数学内核住在引擎的 solver 注册表中，由 `call` 调用。`solver_info` 直接从注册表暴露某个 solver 的精确签名（参数名、数量 kind、允许的枚举、可选标记、returns）——调用陌生 solver 前先读它。
 - **记录是一个过程（时间线）。** 每次引擎操作都会追加一行完全自描述的轨迹行（输入与输出都记录在案）；一条记录可以被重放，从而在不重新计算任何东西的前提下重建任意时刻的状态。
 - **输入即值。** 模型给什么，引擎就存什么；字符串永远是字符串。
 
@@ -51,10 +51,10 @@ DeepSeek Harness ElectroLab 插件把全部电气电子计算放在一台确定�
 ## 3. 原语
 
 ```
-set  { name, value }     write one slot: value = a typed value; value: null deletes the slot
-get  { name }            read one slot (the stored typed value, exactly as written)
-call { solver, args, target }  call one registered solver; args values are typed values or slot references like { "type": "slot", "value": "R" }
-solver_info { solver }        inspect a solver's signature (parameters, enums, returns) before calling it
+set  { name, value }      写入一个槽：value 是类型化值；value: null 删除该槽
+get  { name }             读取一个槽（返回存储的类型化值，与写入时完全一致）
+call { solver, args, target }  调用一个已注册求解器；args 值是类型化值或形如 { "type": "slot", "value": "R" } 的槽引用
+solver_info { solver }    调用前检视求解器的签名（参数、枚举、returns）
 ```
 
 语义：
@@ -80,14 +80,14 @@ failure:      → { ok: false, code, error }
 ## 4. 记录与标记
 
 ```
-record_question { text }    open a record (clears the table); a re-open seals the previous record as duplicate-start
-record_analyse  { text }    the analysis: knowns and the approach with formulas — no computed numbers
-record_answer   { text }    the final answer; seals the record
+record_question { text }   开启一条记录（清空变量表）；重复开启会把上一条记录封口为 duplicate-start
+record_analyse  { text }   分析：已知量与带公式的思路——不含任何计算出的数字
+record_answer   { text }   最终答案；封口该记录
 ```
 
 - 至多一条未封口记录。第二次 `record_question` 会把当前未封口记录封口（duplicate-start）并开启新记录——两条 open 行永不可能并存。
 - 没有未封口记录时的 `record_answer` 会保留一条 duplicate-end 错误记录。
-- 中断的记录（索引中 `sealedAt: null` 且有本体文件）会在下次引擎启动时续写：轨迹在同一文件中继续，变量表据其重建。incomplete（未完成）的记录永远不会自行变完整——它要么日后被封口（duplicate-start），要么永远停在 incomplete。
+- 中断的记录（索引中 `sealedAt: null` 且有本体文件）会在下次引擎启动时续写：轨迹在同一文件中继续，变量表据其重建。未封口（incomplete，即「未完成」）的记录永远不会自行变完整——它要么日后被封口（duplicate-start），要么永远停在未完成状态。
 
 ## 5. 求解器目录
 
@@ -234,7 +234,7 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 { "seq": 6, "tool": "marker", "kind": "answer", "ok": true, "text": "…", "at": … }
 ```
 
-- `call` 行存储结果：任何调用的输出都作为事实进入该行——恢复状态时直接用存储的结果，**从不重新计算**（外部 solver 的输出源自网络/文件，无法重算）。
+- `call` 行存储结果：任何调用的输出都作为事实进入该行——恢复状态时直接用存储的结果，**从不重新计算**。
 - `resolved` 是实际进入 run 的参数集：引用已展开，换算全部完成（SI、直角坐标）。`args` 保留原文；两者逐键对照。
 - 内核内部的中间步骤与模型的推理文本都不会被记录；粒度就是一次引擎操作。轨迹的读者是人——每一步都就地呈现原始输入、换算值与结果，并可用任意方式独立复核。
 
@@ -250,73 +250,4 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 ## 7. 宿主端点
 
 - `GET /api/dsh-electro-lab/records-index`——供记录面板列表使用的索引行（`{ rows: [{ id, openedAt, sealedAt, question }] }`）。列表每 5 秒轮询一次；从不读取轨迹本体。
-- `GET /api/dsh-electro-lab/external-solvers`——声明档案与脏位（`{ solvers: […], restartRequired }`）。
-- `PUT /api/dsh-electro-lab/external-solvers?config=<base64url JSON>`——校验并写入（upsert）一条声明（置脏位）。
-- `DELETE /api/dsh-electro-lab/external-solvers?name=<name>`——删除一条声明。
 
-## 8. 外部求解器
-
-外部求解器是驻留在远端端点、归用户所有的计算求解器；引擎通过 **http** 或 **file** 传输访问它们。声明存放于记录主目录下的 `external-solvers.jsonl`；引擎启动时，每条启用的声明都会**原样**注册进 solver 注册表、成为一个外部 solver（没有编译层——传输由引擎自己包装）。更改在宿主重启后生效；脏位置位期间，界面会显示待重启提示。
-
-### 声明
-
-```json
-{
-  "name": "echo_http",
-  "description": "Echo peer over http: returns every parameter it receives, verbatim",
-  "enabled": true,
-  "parameters": {
-    "message": { "type": "string", "description": "a text echoed back verbatim", "required": true },
-    "values":  { "type": "array", "items": { "type": "quantity", "kind": "none" }, "description": "values echoed back verbatim" },
-    "flag":    { "type": "boolean", "description": "a boolean echoed back verbatim" }
-  },
-  "returns": {
-    "type": "object",
-    "fields": {
-      "message": { "type": "string" },
-      "values":  { "type": "array", "items": { "type": "quantity", "kind": "none" } },
-      "flag":    { "type": "boolean" }
-    }
-  },
-  "transport": "http",
-  "transportOptions": { "url": "http://127.0.0.1:8787/echo" },
-  "timeoutMs": 10000
-}
-```
-
-- 参数规格：`{ "type": "quantity", "kind": <lowercase kind name> }`（quantity 接受裸数字、`{re, im}` 或 `{mag, ang}` 载荷）、`{ "type": "string", "enum"?: [...] }`、`{ "type": "boolean" }`、`{ "type": "array", "items": <spec> }`（同质，items 可嵌套）。
-- `returns` 对注册而言**必填**：使用同样的 spec 叶子（或显式 `null` = void）。没有 returns、或带不可映射的 `"any"` 叶子的声明会被保留在档案中，但在启动时被跳过并给出警告。
-- http 的 `transportOptions`：`url`、可选 `headers`。档案方言为兼容仍接受 `method` 字段，但宿主恒发 **POST**——类型化参数以 JSON 请求体形式传输。
-- file 的 `transportOptions`：`directory`（宿主在其中写入 `in.<id>.json` 并轮询 `out.<id>.json`）、可选 `inPrefix` / `outPrefix` / `pollMs`。
-- 命名规则：小写开头、`a-z0-9_`、最长 64，在外部 solver 与内置 solver 中唯一。
-
-### 线协议（类型化信封）
-
-```
-request:  { "requestId": "<uuid>", "args": { "<parameter>": <typed value> } }
-success:  { "requestId": "<uuid>", "result": <typed value> }    // non-void
-success:  { "requestId": "<uuid>", "result": null }             // void: still a result message, just valueless
-failure:  { "requestId": "<uuid>", "error": "<string message>" }
-```
-
-- 类型化值在线路上是自描述的：`type` 判别形状，`value` 承载内容，complex 恒为 rect，`kind` 携带量纲。variant/prefix 从不出现——引擎已换算到 SI 基准。第三方实现只需实现五个 type 分支。
-- **`result` 字段恒在**（void = null）——它为将来的消息种类预留位置，`result` 与任何同级消息永不混淆。
-- 宿主按 solver 签名校验响应：非 void solver 收到 `result: null`（或没有 result）是协议错误；void solver 收到 result 同样是协议错误。
-- `requestId` 回显会被校验；超时与协议违规由宿主抛出。失败与本地 solver 共享同一条结构化错误路径——无论来源如何，调用都以同一种错误收据呈现，并连同其 code 记入轨迹。
-
-| code | 含义 |
-|---|---|
-| `EXTERNAL_ERROR` | 端点自身报告失败（信封的 `error` 字段） |
-| `EXTERNAL_HTTP` | http 传输失败（非 2xx 状态） |
-| `EXTERNAL_TIMEOUT` | 外部调用超时 |
-| `EXTERNAL_RESPONSE` | 响应信封中的协议违规 |
-
-### 管理工具
-
-| 工具 | 用途 |
-|---|---|
-| `external_solver_add` | 注册一条新的外部求解器声明（名称已存在时报错） |
-| `external_solver_update` | 替换一条已有声明（不存在时报错） |
-| `external_solver_delete` | 按名称删除一条声明 |
-
-写入会立即持久化并置脏位；结果报告 `restartRequired: true`。记录面板的**「外部求解器」页**以表单编辑方式提供同样的操作。[`external-solvers-example/`](../external-solvers-example/README.zh-CN.md) 是独立的 npm 工程，内含该信封协议的手动测试对端——`node src/echo.ts http` / `file` 可将其端到端回显。

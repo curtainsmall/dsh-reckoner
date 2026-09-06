@@ -79,4 +79,4 @@ requestId 不匹配的响应会被宿主拒绝；非 JSON 的请求体会收到 
 
 ## 协议参考
 
-完整的声明语法（name/description/enabled/parameters/returns/transport/transportOptions）、类型化值载荷形状与线协议见插件的 [`docs/tools.md`](../docs/tools.md)（ElectroLab 引擎手册——外部求解器章节）及其简体中文镜像 [`docs/tools.zh-CN.md`](../docs/tools.zh-CN.md)。
+完整的声明语法（name/description/enabled/parameters/returns/transport/transportOptions）、类型化值载荷形状与线协议实现在插件引擎源码中——见插件仓库的 `src/engine/external-solvers.ts`（声明编译）与 `src/engine/external.ts`（类型化信封传输）。

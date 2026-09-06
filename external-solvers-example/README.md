@@ -115,6 +115,6 @@ typed args travel as the JSON body.
 
 The full declaration grammar (name/description/enabled/parameters/returns/
 transport/transportOptions), the typed-value payload shapes and the wire
-protocol are documented in the plugin's [`docs/tools.md`](../docs/tools.md)
-(ElectroLab Engine Manual — External solvers section) and its
-Chinese mirror [`docs/tools.zh-CN.md`](../docs/tools.zh-CN.md).
+protocol are implemented in the plugin's engine sources — see
+`src/engine/external-solvers.ts` (declaration compilation) and
+`src/engine/external.ts` (typed envelope transport) in the plugin repository.

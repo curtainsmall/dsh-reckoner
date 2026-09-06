@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-09-06
+
+### Breaking
+
+- Upgrading from 0.9.0: previously saved records (`records.jsonl` + `open-record.json`) are no longer read and are not migrated — the engine now stores traces as `record-index.jsonl` + `records/<id>.jsonl`, so old records will not appear in the panel.
+- Sessions and integrations built for the old tool catalog will break: the previous tool names are gone — drive the engine with `set` / `get` / `call` instead (see Changed below).
+
+### Changed
+
+- The tool catalog is replaced by a deterministic calculation **engine** (`set` / `get` / `call` primitives over typed values — number/complex/string/boolean/array/object with kind, variant and prefix — plus slot references that resolve at call time and are copied on `set`). One engine per process, one variable table per question; failures are receipts with no side effects.
+- Engine terminology everywhere: callables are **solvers** (38 kernel solvers: expression algebra, series, transfer functions, DSP/DFT, signal quality, circuits, electronics, RF & Smith chart, transmission lines, noise, filter design), the docs are the ElectroLab engine manual, and the record markers bracket each solve.
+- The records UI follows the trace: **Records** list (indexed, 5 s refresh, incomplete badge, select mode with multi-delete) and a per-record **timeline detail** (collapsible writes/reads/failures/call cards, JSON tree values with zebra rows, display-all toggle, fixed toolbar/title with the timeline scrolling beneath, right-hand article rail).
+- Record storage moved to append-only traces: `record-index.jsonl` + `records/<id>.jsonl` under `~/.dsh-electro-lab` (or `DSH_ELECTRO_LAB_HOME`), replayed — never recomputed — after a host restart.
+
+### Added
+
+- Self-healing receipts: missing or mistyped arguments are listed together with the expected spec and a ready-to-send typed example; `@name` slot strings are rejected with a migration hint; `solver_info` introspects any solver before its first call.
+- Article generation (Markdown and LaTeX) through the host LLM: the detail rail's two buttons open per-format setup dialogs (article language, host-driven directory browser, file name — remembered), and a cancellable background job reports phase progress in a dialog that can minimize to a corner pill surviving navigation. LaTeX output is a sanitized model body inside a XeLaTeX shell (ctexart / fontspec + unicode-math + siunitx, pure Unicode); **PDF compilation is LaTeX-only** (xelatex, two passes). Articles are written as the model's own calculation — never mentioning ElectroLab, solvers or the generation process.
+
+### Removed
+
+- The old tool catalog's declaration machinery, solve-step orchestration and the five-section record UI.
+
 ## [0.9.0] - 2026-09-03
 
 ### Added

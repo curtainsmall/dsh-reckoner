@@ -1,15 +1,15 @@
 # ElectroLab Engine Manual
 
-[简体中文](tools.zh-CN.md)
+[简体中文](engine.zh-CN.md)
 
 The DeepSeek Harness ElectroLab plugin runs all electrical & electronics calculation inside a deterministic **engine**. The language model never computes: it operates the engine through three primitives and three record markers, and the engine keeps a typed-value table, converts values at calculation boundaries, records every step, and seals each solve into a browsable record.
 
-This manual is the full reference for the engine surface — typed values, primitives, markers, the solver catalog, storage, and external solvers. Sessions started in **ElectroLab Mode** carry the same rules in the `electro-lab-interface` skill (engine manual) and `electro-lab-template` skill (record protocol).
+This manual is the full reference for the engine surface — typed values, primitives, markers, the solver catalog, and storage. Sessions started in **ElectroLab Mode** carry the same rules in the `electro-lab-interface` skill (engine manual) and `electro-lab-template` skill (record protocol).
 
 ## 1. How it works
 
 - **One global engine per host process.** Any session's markers act on the same engine; at most one record is open at a time (single-open invariant).
-- **The LLM surface is seven tools**: `set`, `get`, `call`, `solver_info`, `record_question`, `record_analyse`, `record_answer` — plus the declaration managers `external_solver_add` / `external_solver_update` / `external_solver_delete`. The ~40 domain tools, `solve_steps` and the text↔value codecs are gone; the math kernels live in the engine's solver registry and are invoked by `call`. `solver_info` exposes a solver's exact signature (parameter names, quantity kinds, allowed enums, optional flags, returns) straight from the registry — read it before calling an unfamiliar solver.
+- **The LLM surface is seven tools**: `set`, `get`, `call`, `solver_info`, `record_question`, `record_analyse`, `record_answer`. The ~40 domain tools, `solve_steps` and the text↔value codecs are gone; the math kernels live in the engine's solver registry and are invoked by `call`. `solver_info` exposes a solver's exact signature (parameter names, quantity kinds, allowed enums, optional flags, returns) straight from the registry — read it before calling an unfamiliar solver.
 - **A record is a process (timeline).** Each engine operation appends one fully self-describing trace line (input and output both stored); a record can be replayed to rebuild the recorded state at any point without re-computing anything.
 - **Input is value.** What the model gives is what the engine stores; a string stays a string.
 
@@ -234,7 +234,7 @@ One line per engine operation or marker; every line carries everything needed to
 { "seq": 6, "tool": "marker", "kind": "answer", "ok": true, "text": "…", "at": … }
 ```
 
-- `call` lines store the result: any call's output enters the line as fact — restoring state uses the stored result directly and **never recomputes** (external solver output comes from the network/files and cannot be recomputed).
+- `call` lines store the result: any call's output enters the line as fact — restoring state uses the stored result directly and **never recomputes**.
 - `resolved` is the argument set that actually entered the run: references expanded and all conversions done (SI, rect). `args` keeps the originals; the two line up per key.
 - No kernel-internal intermediate steps and no model reasoning text are recorded; the granularity is one engine operation. The reader of a trace is a human — every step shows original input, converted values and result in place, and can be re-verified independently.
 
@@ -250,73 +250,4 @@ Rebuilding state replays the lines in order: `set` lines set the slot to the sto
 ## 7. Host endpoints
 
 - `GET /api/dsh-electro-lab/records-index` — the index rows for the Records panel list (`{ rows: [{ id, openedAt, sealedAt, question }] }`). The list polls every 5 s; it never reads trace bodies.
-- `GET /api/dsh-electro-lab/external-solvers` — the declaration archive + dirty bit (`{ solvers: […], restartRequired }`).
-- `PUT /api/dsh-electro-lab/external-solvers?config=<base64url JSON>` — validate and upsert one declaration (sets the dirty bit).
-- `DELETE /api/dsh-electro-lab/external-solvers?name=<name>` — delete one declaration.
 
-## 8. External solvers
-
-External solvers are user-owned calculation solvers living on a remote endpoint; the engine reaches them over an **http** or **file** transport. Declarations live in `external-solvers.jsonl` under the records home; at engine start every enabled declaration is registered **verbatim** into the solver registry as an external solver (no compile layer — the transport is wrapped by the engine itself). Changes apply after a host restart; the UI shows a pending-restart notice while the dirty bit is set.
-
-### Declaration
-
-```json
-{
-  "name": "echo_http",
-  "description": "Echo peer over http: returns every parameter it receives, verbatim",
-  "enabled": true,
-  "parameters": {
-    "message": { "type": "string", "description": "a text echoed back verbatim", "required": true },
-    "values":  { "type": "array", "items": { "type": "quantity", "kind": "none" }, "description": "values echoed back verbatim" },
-    "flag":    { "type": "boolean", "description": "a boolean echoed back verbatim" }
-  },
-  "returns": {
-    "type": "object",
-    "fields": {
-      "message": { "type": "string" },
-      "values":  { "type": "array", "items": { "type": "quantity", "kind": "none" } },
-      "flag":    { "type": "boolean" }
-    }
-  },
-  "transport": "http",
-  "transportOptions": { "url": "http://127.0.0.1:8787/echo" },
-  "timeoutMs": 10000
-}
-```
-
-- Parameter specs: `{ "type": "quantity", "kind": <lowercase kind name> }` (a quantity accepts a bare number, `{re, im}` or `{mag, ang}` payloads), `{ "type": "string", "enum"?: [...] }`, `{ "type": "boolean" }`, `{ "type": "array", "items": <spec> }` (homogeneous, items may nest).
-- `returns` is **required for registration**: the same spec leaves (or explicit `null` = void). A declaration without a returns, or with the unmappable `"any"` leaf, is kept in the archive but skipped at start with a warning.
-- http `transportOptions`: `url`, optional `headers`. The archive dialect still accepts a `method` field for compatibility, but the host always sends **POST** — typed args travel as the JSON request body.
-- file `transportOptions`: `directory` (the host writes `in.<id>.json` there and polls for `out.<id>.json`), optional `inPrefix` / `outPrefix` / `pollMs`.
-- Name rules: lowercase start, `a-z0-9_`, max 64, unique among external and built-in solvers.
-
-### Wire protocol (typed envelope)
-
-```
-request:  { "requestId": "<uuid>", "args": { "<parameter>": <typed value> } }
-success:  { "requestId": "<uuid>", "result": <typed value> }    // non-void
-success:  { "requestId": "<uuid>", "result": null }             // void: still a result message, just valueless
-failure:  { "requestId": "<uuid>", "error": "<string message>" }
-```
-
-- Typed values are self-describing across the wire: `type` discriminates the shape, `value` carries the content, complex is always rect, `kind` carries the dimension. Variants/prefixes never appear — the engine has already converted to the SI base. A third-party implementation only implements the five type branches.
-- **The `result` field is always present** (void = null) — it reserves the slot for future message kinds, so `result` and any sibling message can never be confused.
-- The host validates the response against the solver signature: a non-void solver receiving `result: null` (or no result) is a protocol error; a void solver receiving a result is one too.
-- `requestId` echo is verified; timeouts and protocol violations are raised by the host. Failures share one structured error path with local solvers — whatever the source, the call surfaces as the same error receipt and is recorded in the trace with its code.
-
-| code | meaning |
-|---|---|
-| `EXTERNAL_ERROR` | the endpoint itself reported failure (envelope `error` field) |
-| `EXTERNAL_HTTP` | http transport failure (non-2xx status) |
-| `EXTERNAL_TIMEOUT` | the external call timed out |
-| `EXTERNAL_RESPONSE` | protocol violation in the response envelope |
-
-### Manager tools
-
-| tool | purpose |
-|---|---|
-| `external_solver_add` | Register a new external solver declaration (fails when the name already exists) |
-| `external_solver_update` | Replace an existing declaration (fails when it does not exist) |
-| `external_solver_delete` | Remove a declaration by name |
-
-Writes persist immediately and set the dirty bit; results report `restartRequired: true`. The Records panel's **External solvers** tab offers the same actions with form editing. [`external-solvers-example/`](../external-solvers-example/README.md) is an independent npm project with manual test counterparts for the envelope protocol — `node src/echo.ts http` / `file` echoes it end to end.
