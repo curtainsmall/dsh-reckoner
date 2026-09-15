@@ -1,13 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { attachConsoleSink, attachFileSink, formatLine, log, LogLevel, setLevel, setSinks } from '../src/log.ts'
-
-/** Read the run index the way a script outside the client would. */
-function readRuns(index: string): Array<{ name: string; startedAt: number; endedAt: number | null; pid: number; level: string }> {
-  return readFileSync(index, 'utf8').split('\n').filter((text) => text.trim().length > 0).map((text) => JSON.parse(text))
-}
 
 /** The local-time instant every formatter assertion is stamped with. */
 const AT = new Date(2025, 5, 14, 12, 3, 41, 882)
@@ -147,44 +142,54 @@ describe('level and sinks', () => {
 })
 
 describe('file sink', () => {
-  it('writes one event-only run file plus one index row, sealed on close', () => {
+  it('writes one event-only run file and nothing else', () => {
     const home = tempHome()
     const run = attachFileSink(home)
     cleanup(() => { run.close() })
     expect(run.file.startsWith(join(home, 'logs'))).toBe(true)
     expect(basename(run.file)).toMatch(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.\d{3}\.log$/)
     log.warn('external call failed', { code: 'EXTERNAL_TIMEOUT', took_ms: 30001 })
-    // the run file carries nothing but events — the run's own state is indexed instead
+    // the run's own record is the file: the name is the start instant, the last line is the end
     expect(readFileSync(run.file, 'utf8'))
       .toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} WARN {2}external call failed code=EXTERNAL_TIMEOUT took_ms=30001\n$/)
-    const indexFile = join(home, 'log-index.jsonl')
-    const open = readRuns(indexFile)
-    expect(open).toHaveLength(1)
-    expect(open[0]).toMatchObject({ name: basename(run.file), endedAt: null, pid: process.pid, level: LogLevel.Info })
-    expect(typeof open[0]!.startedAt).toBe('number')
+    // logging is not plugin state: it writes no state file and no sibling of the log
+    expect(existsSync(join(home, 'state.json'))).toBe(false)
+    expect(readdirSync(home)).toEqual(['logs'])
+    // a closed run receives nothing more, and closing twice changes nothing
     run.close()
-    const closed = readRuns(indexFile)
-    expect(closed).toHaveLength(1)
-    expect(typeof closed[0]!.endedAt).toBe('number')
-    // a closed run receives nothing more, and closing twice adds no row
     log.warn('after close')
     run.close()
     expect(readFileSync(run.file, 'utf8')).not.toContain('after close')
-    expect(readRuns(indexFile)).toHaveLength(1)
   })
 
-  it('steps the file name forward instead of reusing a taken one', () => {
+  it('steps the file name forward instead of reusing a taken one, and keeps each run its own file', () => {
     const home = tempHome()
     const first = attachFileSink(home)
     cleanup(() => { first.close() })
+    log.info('plugin mounted')
     const second = attachFileSink(home)
     cleanup(() => { second.close() })
     expect(second.file).not.toBe(first.file)
-    // attaching a new run seals the previous one
-    const rows = readRuns(join(home, 'log-index.jsonl'))
-    expect(rows).toHaveLength(2)
-    expect(rows[0]).toMatchObject({ name: basename(first.file), endedAt: expect.any(Number) })
-    expect(rows[1]).toMatchObject({ name: basename(second.file), endedAt: null })
+    // the first run survives as its own file, with its own content
+    expect(readFileSync(first.file, 'utf8')).toContain('INFO  plugin mounted')
+    expect(readFileSync(second.file, 'utf8')).toBe('')
+    expect(readdirSync(join(home, 'logs'))).toHaveLength(2)
+  })
+
+  it('never opens an existing log, and reports a clock that cannot name a second run', () => {
+    const home = tempHome()
+    const logs = join(home, 'logs')
+    mkdirSync(logs, { recursive: true })
+    // A frozen clock forces the exclusive create to lose the name on every attempt.
+    vi.useFakeTimers()
+    cleanup(() => { vi.useRealTimers() })
+    vi.setSystemTime(new Date(2025, 5, 14, 12, 3, 41, 882))
+    const taken = '2025-06-14_12-03-41.882.log'
+    writeFileSync(join(logs, taken), 'an earlier run\n')
+    expect(() => attachFileSink(home)).toThrow(/already taken/)
+    // no invented suffix, and the earlier run's log is untouched: never appended to, never truncated
+    expect(readdirSync(logs)).toEqual([taken])
+    expect(readFileSync(join(logs, taken), 'utf8')).toBe('an earlier run\n')
   })
 
   it('keeps the newest runs, never prunes the current one, and leaves other files alone', () => {
@@ -196,9 +201,6 @@ describe('file sink', () => {
       const name = `2025-01-01_00-00-00.${String(index).padStart(3, '0')}.log`
       old.push(name)
       writeFileSync(join(root, name), '')
-      // the index keeps a row per run file, including the ones retention is about to drop
-      writeFileSync(join(home, 'log-index.jsonl'), '', { flag: 'a' })
-      appendFileSync(join(home, 'log-index.jsonl'), `${JSON.stringify({ name, startedAt: 1, endedAt: 1, pid: 1, level: 'info' })}\n`)
     }
     writeFileSync(join(root, 'notes.txt'), 'not a run file')
     const run = attachFileSink(home)
@@ -208,11 +210,7 @@ describe('file sink', () => {
     expect(kept).toContain(basename(run.file))
     expect(kept).not.toContain(old[0])
     expect(kept).toContain(old[old.length - 1])
-    // retention owns the run files only, and their index rows go with them
+    // retention owns the run files only
     expect(kept).toContain('notes.txt')
-    const names = readRuns(join(home, 'log-index.jsonl')).map((row) => row.name)
-    expect(names).toHaveLength(20)
-    expect(names).toContain(basename(run.file))
-    expect(names).not.toContain(old[0])
   })
 })

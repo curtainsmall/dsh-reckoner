@@ -17,6 +17,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readState, updateState } from './state.ts'
 import { defineTool, type DefineToolOptions, type InferArgs, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import type { JsonValue, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { QuantityKind, QUANTITY_KIND_NAMES } from './math/quantity-kind.ts'
@@ -148,18 +149,12 @@ export type ToolDeclaration = DeclarationBase & {
 
 /** The external-solver declaration archive (one JSON declaration per line). */
 export const DECLARATIONS_FILE = 'external-solvers.jsonl'
-/** Non-config serialized state (the restart dirty bit lives here). */
-export const STATE_FILE = 'state.json'
 
-/** Persistent restarts are tracked in state.json (application state, not the declaration file). */
+/** The restart dirty bit lives in the shared state file (application state, not the declaration file). */
 const STATE_RESTART_KEY = 'restartRequired'
 
 export function declarationsPath(home: string): string {
   return join(home, DECLARATIONS_FILE)
-}
-
-export function statePath(home: string): string {
-  return join(home, STATE_FILE)
 }
 
 /** All declarations currently stored (enabled or not), in file order. */
@@ -187,25 +182,14 @@ function writeDeclarations(home: string, declarations: ToolDeclaration[]): void 
 }
 
 function setRestartRequired(home: string, required: boolean): void {
-  const file = statePath(home)
-  let state: Record<string, unknown> = {}
-  try {
-    state = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
-  } catch {
-    // missing or corrupt state reads as {}
-  }
-  state[STATE_RESTART_KEY] = required
-  writeFileSync(file, JSON.stringify(state), 'utf8')
+  updateState(home, (state) => {
+    state[STATE_RESTART_KEY] = required
+  })
 }
 
 /** True when a restart is pending for declaration changes to take effect. */
 export function restartRequired(home: string): boolean {
-  try {
-    const state = JSON.parse(readFileSync(statePath(home), 'utf8')) as Record<string, unknown>
-    return state[STATE_RESTART_KEY] === true
-  } catch {
-    return false
-  }
+  return readState(home)[STATE_RESTART_KEY] === true
 }
 
 /** Clear the dirty bit; the host calls this once the solvers are (re)registered at start. */

@@ -1,12 +1,11 @@
 /**
  * Plugin logging: one text line per event, two sinks (stdout, one file per host run).
  *
- * The file sink writes `<home>/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log` — one file per plugin mount,
- * that is per host run — containing nothing but event lines. The run's own state lives beside the
- * other home state, in `<home>/log-index.jsonl`: one row per run, appended when the run starts and
- * sealed with its `endedAt` when the plugin unmounts, so a row still carrying `endedAt: null` is a
- * run that did not unmount. That row (`{name, startedAt, endedAt, pid, level}`) never enters the
- * log text, which keeps both sinks line-for-line identical.
+ * The file sink writes `<home>/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log` — one file per plugin mount, that
+ * is per host run — and the file is the run's whole record: the name is the start instant, the last
+ * line's timestamp is the end, and a file whose last line is not `plugin unmounted` is a run that
+ * died instead of finishing. Nothing about a run is written anywhere else: logging touches the state
+ * file not at all, because a log fact belongs to the log, not to the plugin's state.
  *
  * A line is `<timestamp> <LEVEL> <message>[ k=v …]`:
  *
@@ -48,9 +47,7 @@
  * this module imports no engine, record or tool code (host side only; never bundled into
  * the client).
  */
-import {
-  appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync,
-} from 'node:fs'
+import { closeSync, mkdirSync, openSync, readdirSync, rmSync, statSync, writeSync } from 'node:fs'
 import { join, basename } from 'node:path'
 
 /** Severity, lowest first; Off silences every sink. */
@@ -105,9 +102,13 @@ const KEEP_RUNS = 20
 const MAX_RUN_BYTES = 50 * 1024 * 1024
 /** A run file is named by its creation timestamp, so `ls` sorts runs by age; RUN_NAME is what retention owns. */
 const RUN_SUFFIX = '.log'
-const RUN_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.\d{3}(-\d+)?\.log$/
-/** The run index beside the other home state (records/ ↔ record-index.jsonl, logs/ ↔ log-index.jsonl). */
-const INDEX_FILE = 'log-index.jsonl'
+const RUN_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.\d{3}\.log$/
+/**
+ * Attempts to find a free run-file name before giving up. A failed exclusive create costs real time
+ * (~0.2 ms here), so this outlasts several system clock ticks even where a tick is 15 ms — while a
+ * clock that truly never advances still terminates instead of spinning forever.
+ */
+const CREATE_ATTEMPTS = 256
 
 interface SinkEntry {
   sink: LogSink
@@ -294,94 +295,40 @@ export function attachConsoleSink(): () => void {
   })
 }
 
-/** A run file's own state, not an event: one row in log-index.jsonl, mirroring a record index row. */
+/** The open run file: this module's whole per-run state, all of it in memory. */
 interface RunFile {
-  name: string
   file: string
-  index: string
   fd: number
   detach: () => void
   closed: boolean
 }
 
-/** One run-index row: `{id, openedAt, sealedAt}` for a record is `{name, startedAt, endedAt}` for a run. */
-interface RunRow {
-  name: string
-  startedAt: number
-  endedAt: number | null
-  pid: number
-  level: LogLevel
-}
-
 let activeRun: RunFile | null = null
 
-/** Read every run row; a missing or corrupt file reads as none (corrupt lines are skipped, like the record index). */
-function readRuns(index: string): RunRow[] {
-  try {
-    const rows: RunRow[] = []
-    for (const text of readFileSync(index, 'utf8').split('\n')) {
-      if (text.trim().length === 0) continue
-      try {
-        const row = JSON.parse(text) as RunRow
-        if (typeof row.name === 'string' && typeof row.startedAt === 'number') rows.push(row)
-      } catch {
-        // skip a corrupt row rather than losing the index
-      }
-    }
-    return rows
-  } catch {
-    return []
-  }
+/** Whether an exclusive create lost the name to a file that already exists. */
+function isTaken(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'EEXIST'
 }
 
-function writeRuns(index: string, rows: RunRow[]): void {
-  writeFileSync(index, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length > 0 ? '\n' : ''), 'utf8')
-}
-
-/** Index bookkeeping is best effort throughout: a run never loses its log because its row could not be written. */
-function appendRun(index: string, row: RunRow): void {
-  try {
-    appendFileSync(index, `${JSON.stringify(row)}\n`, 'utf8')
-  } catch {
-    // the run simply has no index row
-  }
-}
-
-/** Seal one run with its endedAt. */
-function sealRun(index: string, name: string, endedAt: number): void {
-  try {
-    const rows = readRuns(index)
-    const at = rows.findIndex((row) => row.name === name)
-    if (at === -1) return
-    rows[at] = { ...rows[at]!, endedAt }
-    writeRuns(index, rows)
-  } catch {
-    // the row keeps endedAt: null and reads as an unfinished run
-  }
-}
-
-/** Drop rows whose log file is gone (retention removed it, or the user did). */
-function pruneRunRows(index: string, root: string, current: string): void {
-  try {
-    const present = new Set(readdirSync(root))
-    present.add(current)
-    writeRuns(index, readRuns(index).filter((row) => present.has(row.name)))
-  } catch {
-    // a stale row is harmless: the file it names is gone
-  }
-}
-
-/** Create the run file; a taken name (a re-mounted plugin in the same millisecond) steps 1 ms forward. */
+/**
+ * Create this run's file and hold it open.
+ *
+ * The create is exclusive ('wx'), so an existing run's log is never opened, appended to or truncated.
+ * A taken name (a re-mounted plugin inside the same recorded millisecond) is simply retried with a
+ * fresh reading of the clock: the failed create costs real time, so the clock moves on by itself and
+ * no timestamp is ever invented. A clock that never advances cannot name a second run — after
+ * CREATE_ATTEMPTS tries the caller is told, and logging falls back to the console.
+ */
 function createRunFile(root: string): { file: string; fd: number } {
-  let at = Date.now()
-  for (let attempt = 0; attempt < 1000; attempt += 1) {
-    const file = join(root, `${dirStamp(new Date(at))}${RUN_SUFFIX}`)
-    if (!existsSync(file)) return { file, fd: openSync(file, 'a') }
-    at += 1
+  for (let attempt = 0; attempt < CREATE_ATTEMPTS; attempt += 1) {
+    const file = join(root, `${dirStamp(new Date())}${RUN_SUFFIX}`)
+    try {
+      return { file, fd: openSync(file, 'wx') }
+    } catch (error) {
+      if (!isTaken(error)) throw error
+    }
   }
-  // Pathological clock: a pid-suffixed name (RUN_NAME tolerates the suffix, so retention still owns it).
-  const file = join(root, `${dirStamp(new Date(at))}-${String(process.pid)}${RUN_SUFFIX}`)
-  return { file, fd: openSync(file, 'a') }
+  throw new Error(`cannot create a log file in ${root}: every name it tried was already taken`)
 }
 
 function fileBytes(file: string): number {
@@ -421,7 +368,6 @@ function closeRun(run: RunFile | null): void {
   run.closed = true
   if (activeRun === run) activeRun = null
   run.detach()
-  sealRun(run.index, run.name, Date.now())
   try {
     closeSync(run.fd)
   } catch {
@@ -430,26 +376,23 @@ function closeRun(run: RunFile | null): void {
 }
 
 /**
- * Attach the per-run file sink: `<home>/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log` (events only), one file
- * per plugin mount — that is, per host run — pruned to the newest KEEP_RUNS, plus one row in
- * `<home>/log-index.jsonl` holding the run's own state. Writing is synchronous on the opened
- * descriptor, so the last lines survive a crash and nothing needs flushing. Throws only if the log
- * file cannot be created — the caller decides whether logging is worth failing over.
+ * Attach the per-run file sink: `<home>/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, one file per plugin
+ * mount — that is, per host run — pruned to the newest KEEP_RUNS. The file is created exclusively and
+ * held open, and is plain event lines; nothing about the run is recorded outside it. Writing is
+ * synchronous on the held descriptor, so the last lines survive a crash and nothing needs flushing.
+ * Throws only if no log file could be created — the caller decides whether logging is worth failing
+ * over.
  */
 export function attachFileSink(home: string): { file: string; close(): void } {
   closeRun(activeRun)
   const root = join(home, 'logs')
   mkdirSync(root, { recursive: true })
   const { file, fd } = createRunFile(root)
-  const name = basename(file)
-  const index = join(home, INDEX_FILE)
-  appendRun(index, { name, startedAt: Date.now(), endedAt: null, pid: process.pid, level })
-  const run: RunFile = { name, file, index, fd, detach: () => {}, closed: false }
+  const run: RunFile = { file, fd, detach: () => {}, closed: false }
   run.detach = addSink({ write: (line) => { writeSync(fd, `${line}\n`) } })
   activeRun = run
   try {
-    pruneRuns(root, name)
-    pruneRunRows(index, root, name)
+    pruneRuns(root, basename(file))
   } catch {
     // retention is best effort: never cost the current run its log
   }

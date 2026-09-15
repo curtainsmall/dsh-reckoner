@@ -143,7 +143,7 @@ function loadGenerationRecord(id: string): Record | undefined {
 
 export function apply(ctx: Context): void {
   // Logging: one line per event on stdout, plus one file per host run. The level is the single
-  // knob (DSH_ELECTRO_LAB_LOG_LEVEL); a run directory that cannot be created is reported and
+  // knob (DSH_ELECTRO_LAB_LOG_LEVEL); a log file that cannot be created is reported and
   // skipped — logging must never keep the plugin from mounting.
   const level = resolveLevel(process.env.DSH_ELECTRO_LAB_LOG_LEVEL)
   setLevel(level)
@@ -156,7 +156,9 @@ export function apply(ctx: Context): void {
     } catch (error) {
       log.warn('log file sink unavailable', { home: recordsHome, error })
     }
-    log.info('plugin mounted', { home: recordsHome, file: run?.file ?? null, level })
+    // The run is described entirely by its log file: `file` names it, `pid` says which host process
+    // wrote it, and the closing `plugin unmounted` line says it ended instead of dying.
+    log.info('plugin mounted', { home: recordsHome, file: run?.file ?? null, pid: process.pid, level })
 
     return () => {
       log.info('plugin unmounted', { uptime_ms: Date.now() - startedAt })
