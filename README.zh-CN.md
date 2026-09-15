@@ -24,6 +24,16 @@ dsh plugin --profile web add dsh-electro-lab
 
 详情页右侧栏提供 **Markdown** 与 **LaTeX** 两种生成：宿主 LLM 依据记录轨迹（问题、已建立的条件、分析笔记、带已解析参数与结果的求解步骤、最终答案）写出流畅、自洽的解题文章——以模型"自己完成计算"的口吻呈现，正文绝不提及 ElectroLab、求解器或生成过程。每个按钮各开自己的设置对话框（文章语言、经宿主目录浏览选择的输出目录、文件名；记忆上次设置），随后运行可取消的后台任务，其进度对话框可最小化为角落胶囊、在任意页面切换间存活。LaTeX 文章是规范的 XeLaTeX 文档（zh-CN 用 ctexart，en 用 fontspec + unicode-math + siunitx——全程纯 Unicode）；**PDF 编译仅限 LaTeX**（xelatex 跑两遍）。Markdown 以 `.md` 平铺写出、从不编译。生成的文件是主产物：可在进度对话框中直接打开文件或所在目录。
 
+## 外部求解器
+
+除内置目录外，你还可以注册自己的计算求解器，经 **http** 或 **file** 传输访问。声明（名称、描述、参数、显式的 **returns** 形状、传输选项）存放于 `~/.dsh-electro-lab/external-solvers.jsonl`；引擎启动时，每条启用的声明都会直接注册进 solver 注册表——与内置求解器共用同一套签名语言，因此 `solver_info` 与 `call` 对它们无需任何特判即可工作。更改在宿主重启后生效（生效前面板会显示待重启提示）。
+
+注册与管理有三条路径：管理工具（`external_solver_add` / `external_solver_update` / `external_solver_delete`），或面板的 **「外部求解器」页**——该页可列出、添加、编辑、启用/停用与删除声明。注册要求 **returns 显式给出**（一个 spec，或 `null` 表示 void）；缺少 returns 的声明只会被存档、启动时跳过并给出告警。
+
+线协议是类型化信封，只发 POST：`{requestId, args}` → `{requestId, result}`（类型化值，void 时为 `null`）或 `{requestId, error}`。线上只传类型化值——不出现符号，也不出现 variant/prefix 词。失败与本地求解器走同一套错误收据（`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`）并落入记录轨迹；结果作为事实存储，重放时绝不重算。
+
+[`external-solvers-example/`](external-solvers-example/README.zh-CN.md) 是独立的 npm 工程，内含手动测试对端——`node src/echo.ts http` / `file` 可将信封协议端到端回显；注册指南逐字段列出应填内容。
+
 ## 开发
 
 开发环境、提交规范与发布流程详见[参与贡献](docs/CONTRIBUTING.zh-CN.md)。
@@ -31,6 +41,7 @@ dsh plugin --profile web add dsh-electro-lab
 ## 文档
 
 - [引擎手册](docs/engine.zh-CN.md)（另见 [English](docs/engine.md)）
+- [external-solvers-example](external-solvers-example/README.zh-CN.md)
 - [参与贡献](docs/CONTRIBUTING.zh-CN.md)
 
 ## 许可
