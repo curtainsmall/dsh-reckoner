@@ -11,6 +11,8 @@ import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { readState, updateState } from './state.ts'
+import { log } from './log.ts'
 import {
   ArticleFormat,
   ArticleLanguage,
@@ -83,8 +85,6 @@ export const LIST_ROOTS_PATH = '/api/dsh-electro-lab/list-roots'
 export const DIRECTORY_TREE_CSS_PATH = '/api/dsh-electro-lab/directory-tree.css'
 export const GENERATE_DIR_PATH = '/api/dsh-electro-lab/generate-dir'
 
-/** Non-config serialized state lives in one JSON file under the records home. */
-const STATE_FILE = 'state.json'
 /** Legacy plain-text location of the remembered directory (migrated on read). */
 const LEGACY_GENERATE_DIR_FILE = 'generate-dir.txt'
 
@@ -94,16 +94,6 @@ interface GenerateState {
   generateLanguage?: string
   generateFormat?: string
   generateCompile?: boolean
-}
-
-/** Raw state.json contents (never throws — missing or corrupt file reads as {}). */
-function readStoredState(home: string): Partial<GenerateState> {
-  try {
-    const parsed = JSON.parse(readFileSync(join(home, STATE_FILE), 'utf8'))
-    return typeof parsed === 'object' && parsed !== null ? (parsed as Partial<GenerateState>) : {}
-  } catch {
-    return {}
-  }
 }
 
 /** Membership guards for query-string enum values. */
@@ -117,7 +107,7 @@ function isArticleLanguage(value: unknown): value is ArticleLanguage {
 
 /** The remembered generation state, with a one-time migration from the legacy plain-text file. */
 function readGenerateState(home: string): GenerateState {
-  const stored = readStoredState(home)
+  const stored = readState(home)
   const state: GenerateState = {
     generateDir: typeof stored.generateDir === 'string' && stored.generateDir.trim().length > 0 ? stored.generateDir.trim() : undefined,
     generateLanguage: typeof stored.generateLanguage === 'string' && stored.generateLanguage.length > 0 ? stored.generateLanguage : undefined,
@@ -135,15 +125,18 @@ function readGenerateState(home: string): GenerateState {
   return state
 }
 
-/** Persist the generation state; undefined fields keep their stored values. */
+/** Persist the generation settings into the shared state file; undefined fields keep their stored values. */
 function writeGenerateState(home: string, state: GenerateState): void {
-  mkdirSync(home, { recursive: true })
-  const merged: Partial<GenerateState> = { ...readStoredState(home), ...state }
-  if (merged.generateDir === undefined || merged.generateDir.trim().length === 0) delete merged.generateDir
-  if (merged.generateLanguage === undefined || merged.generateLanguage.length === 0) delete merged.generateLanguage
-  if (merged.generateFormat === undefined || !isArticleFormat(merged.generateFormat)) delete merged.generateFormat
-  if (merged.generateCompile === undefined || typeof merged.generateCompile !== 'boolean') delete merged.generateCompile
-  writeFileSync(join(home, STATE_FILE), JSON.stringify(merged), 'utf8')
+  updateState(home, (stored) => {
+    for (const [key, value] of Object.entries(state)) {
+      if (value !== undefined) stored[key] = value
+    }
+    // Drop anything empty or invalid rather than keeping a key no reader would trust.
+    if (typeof stored.generateDir !== 'string' || stored.generateDir.trim().length === 0) delete stored.generateDir
+    if (typeof stored.generateLanguage !== 'string' || stored.generateLanguage.length === 0) delete stored.generateLanguage
+    if (!isArticleFormat(stored.generateFormat)) delete stored.generateFormat
+    if (typeof stored.generateCompile !== 'boolean') delete stored.generateCompile
+  })
   try {
     rmSync(join(home, LEGACY_GENERATE_DIR_FILE), { force: true })
   } catch {
@@ -402,9 +395,11 @@ function startGenerateJob(
   const jobId = randomUUID()
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 300_000)
+  const startedAt = Date.now()
   const job: GenerateJob = { status: 'running', percent: 5, phase: GenerationPhase.Prepare, abort: () => controller.abort() }
   generateJobs.set(jobId, job)
   void (async () => {
+    log.info('article generation started', { format, language, file: fileName, dir: directory })
     try {
       job.percent = 10
       job.phase = GenerationPhase.Generate
@@ -424,14 +419,19 @@ function startGenerateJob(
         job.percent = 96
         const compiled = await compileLatexToPdf(targetDir, fileName)
         if (compiled.ok) job.pdfPath = compiled.pdfPath
-        else job.compileError = compiled.error
+        else {
+          job.compileError = compiled.error
+          log.warn('latex compile failed', { file: target, error: compiled.error })
+        }
       }
       job.status = 'done'
       job.percent = 100
       job.path = target
+      log.info('article generation finished', { format, took_ms: Date.now() - startedAt, path: target })
     } catch (error) {
       job.status = 'error'
       job.error = error instanceof Error ? error.message : String(error)
+      log.error('article generation failed', { format, took_ms: Date.now() - startedAt, error })
     } finally {
       clearTimeout(timeout)
       setTimeout(() => { generateJobs.delete(jobId) }, 60_000)

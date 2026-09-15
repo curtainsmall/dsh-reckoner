@@ -5,12 +5,12 @@
  */
 import { ToolError, ToolErrorCode } from '../errors.ts'
 import type { Parameters } from './values.ts'
-import type { DeclarationTransport, DeclarationHttpOptions, DeclarationFileOptions } from '../tool.ts'
+import type { DeclarationTransport, DeclarationHttpOptions } from '../tool.ts'
 
-/** An external solver's wiring block: when the engine sees one, it automatically wraps an http/file executor as its run. */
+/** An external solver's wiring block: when the engine sees one, it automatically wraps the http executor as its run. */
 export interface ExternalBlock {
   transport: DeclarationTransport
-  transportOptions: DeclarationHttpOptions | DeclarationFileOptions
+  transportOptions: DeclarationHttpOptions
   timeoutMs?: number
 }
 

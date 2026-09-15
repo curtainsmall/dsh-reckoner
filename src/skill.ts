@@ -7,6 +7,7 @@
  */
 import { readFileSync } from 'node:fs'
 import type { Context } from 'cordis'
+import { log } from './log.ts'
 
 interface SkillFile {
   name: string
@@ -58,7 +59,7 @@ export function registerSkills(ctx: Context): () => void {
       const skill = parseSkillFile(readFileSync(new URL(file, SKILLS_DIR), 'utf8'))
       disposers.push(skills.register(skill))
     } catch (error) {
-      ctx.logger?.warn(`[dsh-electro-lab] failed to register skill ${file}: ${error instanceof Error ? error.message : String(error)}`)
+      log.warn('skill not registered', { file, error })
     }
   }
   return () => {

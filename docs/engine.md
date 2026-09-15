@@ -202,13 +202,16 @@ The solver surface is exactly the migrated kernels under the engine's one-shape-
 
 ## 6. Storage
 
-The records home is `~/.dsh-electro-lab` (override with the `DSH_ELECTRO_LAB_HOME` environment variable):
+The plugin home is `~/.dsh-electro-lab` (override with the `DSH_ELECTRO_LAB_HOME` environment variable):
 
 ```
 ~/.dsh-electro-lab/
   record-index.jsonl     ← index (outside records/)
   records/
     <id>.jsonl           ← the trace body (id is a UUID v4)
+  state.json             ← plugin state: generation settings + restart flag
+  logs/
+    <YYYY-MM-DD_HH-mm-ss.SSS>.log   ← one host run, plain event lines
 ```
 
 ### record-index.jsonl (index only)
@@ -245,7 +248,18 @@ Rebuilding state replays the lines in order: `set` lines set the slot to the sto
 ### Consistency
 
 - Orphan index rows (sealedAt null without a body file) are cleared at engine start — the index is a projection and can be safely rebuilt.
-- The new system does not read the old-format `records.jsonl`; the old file is left untouched.
+- The open record is the index row with `sealedAt: null` whose body exists; a restart recovers it from that pair, not from a pointer file.
+- Old-format `records.jsonl` / `open-record.json` are not read; leftovers are ignored and safe to delete.
+
+### state.json (plugin state)
+
+The plugin's own state: the generation dialog's settings (`generateDir`, `generateLanguage`, `generateFormat`, `generateCompile`) and the external-declaration restart flag (`restartRequired`, cleared once declarations are registered at start). Writes go through one owner module as read-modify-write, so a writer touches only its own keys, and the file is replaced atomically (temporary file + rename), so a crash mid-write leaves the previous file intact. An unreadable file reads as `{}`.
+
+### logs/ (one file per host run)
+
+One file per plugin mount: `<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, created exclusively and held open. Lines are `<timestamp> <LEVEL> <message>[ k=v …]`, written to the file and to stdout. Field values are JSON types expanded one level — a nested object or array is one token — and an Error becomes its message plus `  | ` continuation lines with the stack. `DSH_ELECTRO_LAB_LOG_LEVEL` (`debug` | `info` | `warn` | `error` | `off`, default `info`) is the only setting; the newest 20 files up to 50 MB are kept.
+
+The file is the run's whole record: the name is the start, the last line is the end, and a log whose last line is not `plugin unmounted` is a run that was killed. Transport facts (endpoint, request id, elapsed time) are logged, never written to a record.
 
 ## 7. Host endpoints
 

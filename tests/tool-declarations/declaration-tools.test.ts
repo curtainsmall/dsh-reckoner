@@ -7,7 +7,7 @@ import type { JsonValue } from '@deepseek-ai/dsh-tools'
 import { createDeclarationTools } from '../../src/tools/declaration-tools.ts'
 import { readDeclarations, restartRequired } from '../../src/tool.ts'
 import { ToolError } from '../../src/tool.ts'
-import { DeclarationHttpMethod, DeclarationParamType, DeclarationTransport, type ToolDeclaration } from '../../src/tool.ts'
+import { DeclarationParamType, DeclarationTransport, type ToolDeclaration } from '../../src/tool.ts'
 
 const TOOL: ToolDeclaration = {
   name: 'sample_echo',
@@ -17,7 +17,7 @@ const TOOL: ToolDeclaration = {
     gain: { type: DeclarationParamType.Quantity, kind: 'log', description: 'the gain' },
   },
   transport: DeclarationTransport.Http,
-  transportOptions: { url: 'https://example.test/calc', method: DeclarationHttpMethod.Post },
+  transportOptions: { url: 'https://example.test/calc' },
 }
 
 function fakeExec(): ToolRunContext {

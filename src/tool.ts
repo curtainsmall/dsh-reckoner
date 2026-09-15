@@ -10,13 +10,14 @@
  *    bit, and validation. Declarations are not compiled into tools anymore —
  *    at plugin start every enabled declaration is recorded verbatim into the
  *    engine's solver registry as an external solver (engine/external-solvers.ts), which
- *    wraps the http/file transport itself.
+ *    wraps the http transport itself.
  *
  * ToolError/ToolErrorCode are re-exported so callers import the failure
  * types from one place.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readState, updateState } from './state.ts'
 import { defineTool, type DefineToolOptions, type InferArgs, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import type { JsonValue, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { QuantityKind, QUANTITY_KIND_NAMES } from './math/quantity-kind.ts'
@@ -90,15 +91,6 @@ export { QUANTITY_KIND_NAMES }
 /** Transports a declared solver can be reached over. */
 export enum DeclarationTransport {
   Http = 'http',
-  File = 'file',
-}
-
-/** HTTP verbs accepted by the archive dialect. The host transport is POST
- *  only (typed args travel as a JSON body), so a non-POST method is accepted
- *  for archive compatibility but not honored by the executor. */
-export enum DeclarationHttpMethod {
-  Get = 'GET',
-  Post = 'POST',
 }
 
 /** A parameter's settled semantic type — quantity mirrors the returns leaves. */
@@ -137,45 +129,32 @@ interface DeclarationBase {
   timeoutMs?: number
 }
 
-/** http transport options. The request is a POST with the typed envelope as body. */
+/**
+ * http transport options: the endpoint the host POSTs the typed envelope to.
+ * The verb is not a declaration field — typed args travel as a JSON body, so
+ * POST is the only verb and the host never negotiates it.
+ */
 export interface DeclarationHttpOptions {
   url: string
-  method: DeclarationHttpMethod
   headers?: Record<string, string>
 }
 
-/** file transport options: a whitelisted directory where the host writes
- *  requests and polls for responses. */
-export interface DeclarationFileOptions {
-  directory: string
-  inPrefix?: string
-  outPrefix?: string
-  pollMs?: number
+/** One declaration. */
+export type ToolDeclaration = DeclarationBase & {
+  transport: DeclarationTransport.Http
+  transportOptions: DeclarationHttpOptions
 }
-
-/** One declaration — a discriminated union so `transport` narrows
- *  `transportOptions` precisely. */
-export type ToolDeclaration = DeclarationBase & (
-  | { transport: DeclarationTransport.Http; transportOptions: DeclarationHttpOptions }
-  | { transport: DeclarationTransport.File; transportOptions: DeclarationFileOptions }
-)
 
 /* ── Archive ──────────────────────────────────────────────────────────────── */
 
 /** The external-solver declaration archive (one JSON declaration per line). */
 export const DECLARATIONS_FILE = 'external-solvers.jsonl'
-/** Non-config serialized state (the restart dirty bit lives here). */
-export const STATE_FILE = 'state.json'
 
-/** Persistent restarts are tracked in state.json (application state, not the declaration file). */
+/** The restart dirty bit lives in the shared state file (application state, not the declaration file). */
 const STATE_RESTART_KEY = 'restartRequired'
 
 export function declarationsPath(home: string): string {
   return join(home, DECLARATIONS_FILE)
-}
-
-export function statePath(home: string): string {
-  return join(home, STATE_FILE)
 }
 
 /** All declarations currently stored (enabled or not), in file order. */
@@ -203,25 +182,14 @@ function writeDeclarations(home: string, declarations: ToolDeclaration[]): void 
 }
 
 function setRestartRequired(home: string, required: boolean): void {
-  const file = statePath(home)
-  let state: Record<string, unknown> = {}
-  try {
-    state = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
-  } catch {
-    // missing or corrupt state reads as {}
-  }
-  state[STATE_RESTART_KEY] = required
-  writeFileSync(file, JSON.stringify(state), 'utf8')
+  updateState(home, (state) => {
+    state[STATE_RESTART_KEY] = required
+  })
 }
 
 /** True when a restart is pending for declaration changes to take effect. */
 export function restartRequired(home: string): boolean {
-  try {
-    const state = JSON.parse(readFileSync(statePath(home), 'utf8')) as Record<string, unknown>
-    return state[STATE_RESTART_KEY] === true
-  } catch {
-    return false
-  }
+  return readState(home)[STATE_RESTART_KEY] === true
 }
 
 /** Clear the dirty bit; the host calls this once the solvers are (re)registered at start. */
@@ -290,7 +258,7 @@ export function validateDeclaration(config: unknown): string[] {
   }
   if (typeof tool.description !== 'string') errors.push('description is required')
   if (tool.enabled !== undefined && typeof tool.enabled !== 'boolean') errors.push('enabled must be a boolean when present')
-  if (tool.transport !== DeclarationTransport.Http && tool.transport !== DeclarationTransport.File) {
+  if (tool.transport !== DeclarationTransport.Http) {
     errors.push(`transport must be one of ${Object.values(DeclarationTransport).join(', ')}`)
   }
   if (typeof tool.parameters !== 'object' || tool.parameters === null || Array.isArray(tool.parameters)) {
@@ -311,28 +279,11 @@ export function validateDeclaration(config: unknown): string[] {
     errors.push('transportOptions is required')
     return errors
   }
-  // The declared transport decides which options shape is expected (the
-  // union discriminant); an invalid transport already reported itself and
-  // skips the per-shape checks.
-  const http = options as { url?: unknown; method?: unknown }
-  const file = options as { directory?: unknown; pollMs?: unknown }
-  switch (tool.transport) {
-    case DeclarationTransport.Http:
-      if (typeof http.url !== 'string' || !/^https?:\/\//.test(http.url)) {
-        errors.push('transportOptions.url must be an http(s) URL')
-      }
-      if (http.method !== DeclarationHttpMethod.Get && http.method !== DeclarationHttpMethod.Post) {
-        errors.push(`transportOptions.method must be one of ${Object.values(DeclarationHttpMethod).join(', ')}`)
-      }
-      break
-    case DeclarationTransport.File:
-      if (typeof file.directory !== 'string' || (file.directory as string).length === 0) {
-        errors.push('transportOptions.directory is required for file transport')
-      }
-      if (file.pollMs !== undefined && (!Number.isFinite(file.pollMs as number) || (file.pollMs as number) <= 0)) {
-        errors.push('transportOptions.pollMs must be a positive number')
-      }
-      break
+  // Only the http transport exists: its options are the endpoint the typed
+  // envelope is POSTed to. Nothing about the verb is declared or negotiated.
+  const http = options as { url?: unknown }
+  if (typeof http.url !== 'string' || !/^https?:\/\//.test(http.url)) {
+    errors.push('transportOptions.url must be an http(s) URL')
   }
   return errors
 }

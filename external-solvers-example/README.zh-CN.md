@@ -18,28 +18,20 @@ node src/echo.ts http --port 8787
 # [http] echo peer listening on http://127.0.0.1:8787/
 ```
 
-file 传输（宿主在其中写入 `in.<id>.json`，并轮询 `out.<id>.json`）：
-
-```bash
-node src/echo.ts file --dir C:/elab-inbox
-# [file] echo peer watching C:\elab-inbox
-```
-
 或一次性安装开发工具后使用 npm 脚本：
 
 ```bash
 pnpm install
 pnpm echo:http
-pnpm echo:file          # 使用本目录下的 ./elab-inbox
 ```
 
 ## 2. 注册声明
 
-[`register-guide.zh-CN.md`](register-guide.zh-CN.md) 列出两个求解器及对话框每个字段应填的确切值，包括 **returns** 编辑器（没有显式 returns 的声明只会被存档、永远不会注册）。在记录面板中打开**「外部求解器」页** → **「添加外部求解器」**，按指南填写表单；或在会话中让智能体注册该求解器，把指南中该求解器的 `agentDeclaration` JSON 原文粘贴给它；智能体会调用 `external_solver_add`。`echo_file` 的目录假定对端以 `--dir C:/elab-inbox` 运行——请改成你实际使用的目录。更改在下次宿主重启时生效。
+[`register-guide.zh-CN.md`](register-guide.zh-CN.md) 列出该求解器及对话框每个字段应填的确切值，包括 **returns** 编辑器（没有显式 returns 的声明只会被存档、永远不会注册）。在记录面板中打开**「外部求解器」页** → **「添加外部求解器」**，按指南填写表单；或在会话中让智能体注册该求解器，把指南中该求解器的 `agentDeclaration` JSON 原文粘贴给它；智能体会调用 `external_solver_add`。更改在下次宿主重启时生效。
 
 ## 3. 重启宿主
 
-声明在引擎启动时注册：重启 DSH 宿主进程，然后刷新页面。`echo_http` 与 `echo_file` 会出现在智能体可 `call` 的引擎求解器中。
+声明在引擎启动时注册：重启 DSH 宿主进程，然后刷新页面。`echo_http` 会出现在智能体可 `call` 的引擎求解器中。
 
 ## 4. 调用
 
@@ -59,7 +51,7 @@ pnpm echo:file          # 使用本目录下的 ./elab-inbox
 }
 ```
 
-记录面板会在轨迹中把调用参数与回显结果并排展示——这正是该演示的目的。file 传输还会顺带演练宿主的轮询与清理（调用结束后 `in.*.json` 与 `out.*.json` 都会消失）。
+记录面板会在轨迹中把调用参数与回显结果并排展示——这正是该演示的目的。
 
 ## 5. 不经插件自检
 

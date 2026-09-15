@@ -24,6 +24,12 @@ dsh plugin --profile web add dsh-electro-lab
 
 详情页右侧栏提供 **Markdown** 与 **LaTeX** 两种生成：宿主 LLM 依据记录轨迹（问题、已建立的条件、分析笔记、带已解析参数与结果的求解步骤、最终答案）写出流畅、自洽的解题文章——以模型"自己完成计算"的口吻呈现，正文绝不提及 ElectroLab、求解器或生成过程。每个按钮各开自己的设置对话框（文章语言、经宿主目录浏览选择的输出目录、文件名；记忆上次设置），随后运行可取消的后台任务，其进度对话框可最小化为角落胶囊、在任意页面切换间存活。LaTeX 文章是规范的 XeLaTeX 文档（zh-CN 用 ctexart，en 用 fontspec + unicode-math + siunitx——全程纯 Unicode）；**PDF 编译仅限 LaTeX**（xelatex 跑两遍）。Markdown 以 `.md` 平铺写出、从不编译。生成的文件是主产物：可在进度对话框中直接打开文件或所在目录。
 
+## 日志
+
+插件把每个事件记成一行文本，同时写入 stdout 与每次宿主运行一个文件：`~/.dsh-electro-lab/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`。
+
+唯一的设置是 `DSH_ELECTRO_LAB_LOG_LEVEL=debug|info|warn|error|off`（默认 `info`）。保留最新 20 个文件、总量不超过 50 MB。末行不是 `plugin unmounted` 的日志属于被杀掉的 run。
+
 ## 开发
 
 开发环境、提交规范与发布流程详见[参与贡献](docs/CONTRIBUTING.zh-CN.md)。

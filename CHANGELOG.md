@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-09-15
+
+### Added
+
+- **Logging**: one text line per event, on stdout and in one file per host run (`~/.dsh-electro-lab/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`). `DSH_ELECTRO_LAB_LOG_LEVEL` (default `info`) is the only setting; the newest 20 files up to 50 MB are kept.
+
+### Changed
+
+- Plugin state is one file, `~/.dsh-electro-lab/state.json` (generation settings + external-declaration restart flag), written through one owner module that replaces the file atomically.
+
 ## [0.10.0] - 2026-09-06
 
 ### Breaking
@@ -197,6 +207,7 @@ oiseFigureDb`, `gainDb`, `magnitudeDb`, `returnLossDb`…) — dB is a log scale
 
 - First public beta of ElectroLab: the complete feature set listed under [0.1.0] above, published to npm under the `beta` dist-tag.
 
+[0.11.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.11.0
 [0.9.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.9.0
 [0.8.1]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.8.1
 [0.8.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.8.0

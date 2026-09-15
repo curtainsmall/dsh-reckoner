@@ -202,13 +202,16 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 
 ## 6. 存储
 
-记录主目录是 `~/.dsh-electro-lab`（可用 `DSH_ELECTRO_LAB_HOME` 环境变量覆盖）：
+插件主目录是 `~/.dsh-electro-lab`（可用 `DSH_ELECTRO_LAB_HOME` 环境变量覆盖）：
 
 ```
 ~/.dsh-electro-lab/
-  record-index.jsonl     ← index (outside records/)
+  record-index.jsonl     ← 索引（在 records/ 之外）
   records/
-    <id>.jsonl           ← the trace body (id is a UUID v4)
+    <id>.jsonl           ← 轨迹本体（id 为 UUID v4）
+  state.json             ← 插件状态：生成设置 + 重启标记
+  logs/
+    <YYYY-MM-DD_HH-mm-ss.SSS>.log   ← 一次宿主运行，纯事件行
 ```
 
 ### record-index.jsonl（仅作索引）
@@ -245,7 +248,18 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 ### 一致性
 
 - 孤儿索引行（sealedAt 为 null 但没有本体文件）在引擎启动时清除——索引只是投影，可安全重建。
-- 新系统不读取旧格式的 `records.jsonl`；旧文件保持原样不动。
+- 打开的记录就是**索引里 `sealedAt: null` 且本体存在的那一行**；重启从这一对恢复，不依赖任何指针文件。
+- 旧格式的 `records.jsonl` / `open-record.json` 不被读取；遗留文件会被忽略，可直接删除。
+
+### state.json（插件状态）
+
+插件自身的状态：生成对话框的设置（`generateDir`、`generateLanguage`、`generateFormat`、`generateCompile`）与外部声明重启标记（`restartRequired`，声明在启动时注册完毕后清除）。写入经由唯一持有模块做「读—改—写」，写者只动自己的键；文件以**原子替换**落盘（先写临时文件再改名），写入中途崩溃只会留下上一版完整文件。文件不可读时读成 `{}`。
+
+### logs/（每次宿主运行一个文件）
+
+每次插件挂载一个文件：`<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`，独占创建并保持打开。行格式为 `<时间戳> <LEVEL> <message>[ k=v …]`，同时写入文件与 stdout。字段值为 JSON 类型、只展开一层——嵌套对象或数组是一个 token——Error 渲染为消息并追加带 `  | ` 前缀的堆栈续行。唯一的设置是 `DSH_ELECTRO_LAB_LOG_LEVEL`（`debug` | `info` | `warn` | `error` | `off`，默认 `info`）；保留最新 20 个文件、总量不超过 50 MB。
+
+一次 run 的全部信息就在这个文件里：文件名是开始，末行是结束，末行不是 `plugin unmounted` 的 run 是被杀掉的。传输事实（端点、请求 id、耗时）只记入日志，不写入记录。
 
 ## 7. 宿主端点
 

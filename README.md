@@ -24,6 +24,12 @@ Settled records are listed in the client panel's **Records** tab (indexed from `
 
 The record detail page's right rail offers **Markdown** and **LaTeX** generation: the host LLM writes a fluent, self-contained solution article from the record's trace (question, established conditions, analysis notes, solver steps with their resolved arguments and results, and the final answer), presented as the model's own calculation — never mentioning ElectroLab, solvers or the generation process. Each button opens its own setup dialog (article language, output directory with a host-driven directory browser, file name; remembered across runs), then runs a cancellable background job whose progress dialog can be minimized to a corner pill that survives navigation. LaTeX articles are proper XeLaTeX documents (ctexart for zh-CN, fontspec + unicode-math + siunitx for en — pure Unicode throughout); **PDF compilation is LaTeX-only** (xelatex, two passes). Markdown output is written flat as `.md` and never compiled. The generated file is the primary artifact: open it or its folder straight from the progress dialog.
 
+## Logs
+
+The plugin logs one text line per event to stdout and to one file per host run, `~/.dsh-electro-lab/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`.
+
+`DSH_ELECTRO_LAB_LOG_LEVEL=debug|info|warn|error|off` (default `info`) is the only setting. The newest 20 run files up to 50 MB are kept. A log whose last line is not `plugin unmounted` belongs to a run that was killed.
+
 ## Development
 
 See [Contributing](.github/CONTRIBUTING.md) for the development setup, commit conventions, and release process.
