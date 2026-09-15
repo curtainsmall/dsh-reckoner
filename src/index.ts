@@ -15,7 +15,14 @@ import { createDeclarationTools } from './tools/declaration-tools.ts'
 import { compileExternalSolver } from './engine/external-solvers.ts'
 import { registerKernelSolvers } from './engine/solvers/index.ts'
 import type { GenerationCall, GenerationResult, Record } from './generate.ts'
-import { clearRestartRequired, deleteDeclaration, readDeclarations, restartRequired, upsertDeclaration, validateDeclaration } from './tool.ts'
+import {
+  clearRestartRequired,
+  deleteDeclaration,
+  readDeclarations,
+  restartRequired,
+  upsertDeclaration,
+  validateDeclaration,
+} from './tool.ts'
 import { registerGenerateEndpoints } from './generate-server.ts'
 import { registerSkills } from './skill.ts'
 import { installPresets } from './preset.ts'

@@ -26,7 +26,7 @@ The record detail page's right rail offers **Markdown** and **LaTeX** generation
 
 ## External solvers
 
-Beyond the built-in catalog you can register your own calculation solvers, reached over an **http** or **file** transport. A declaration (name, description, parameters, an explicit **returns** shape, transport options) lives in `~/.dsh-electro-lab/external-solvers.jsonl`; at engine start every enabled declaration is registered straight into the solver registry — same signature language as the built-ins, so `solver_info` and `call` work on them unchanged. Changes apply after a host restart (the panel shows a pending-restart notice until then).
+Beyond the built-in catalog you can register your own calculation solvers, reached over an **http** transport. A declaration (name, description, parameters, an explicit **returns** shape, transport options) lives in `~/.dsh-electro-lab/external-solvers.jsonl`; at engine start every enabled declaration is registered straight into the solver registry — same signature language as the built-ins, so `solver_info` and `call` work on them unchanged. Changes apply after a host restart (the panel shows a pending-restart notice until then).
 
 Register and manage declarations three ways: the manager tools (`external_solver_add` / `external_solver_update` / `external_solver_delete`), or the **External solvers** tab of the panel, which lists, adds, edits, enables/disables and deletes them. `returns` is required for registration (a spec, or `null` for void); a declaration without it is archived but skipped, with a warning at start.
 

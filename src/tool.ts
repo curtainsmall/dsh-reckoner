@@ -10,7 +10,7 @@
  *    bit, and validation. Declarations are not compiled into tools anymore —
  *    at plugin start every enabled declaration is recorded verbatim into the
  *    engine's solver registry as an external solver (engine/external-solvers.ts), which
- *    wraps the http/file transport itself.
+ *    wraps the http transport itself.
  *
  * ToolError/ToolErrorCode are re-exported so callers import the failure
  * types from one place.
@@ -90,15 +90,6 @@ export { QUANTITY_KIND_NAMES }
 /** Transports a declared solver can be reached over. */
 export enum DeclarationTransport {
   Http = 'http',
-  File = 'file',
-}
-
-/** HTTP verbs accepted by the archive dialect. The host transport is POST
- *  only (typed args travel as a JSON body), so a non-POST method is accepted
- *  for archive compatibility but not honored by the executor. */
-export enum DeclarationHttpMethod {
-  Get = 'GET',
-  Post = 'POST',
 }
 
 /** A parameter's settled semantic type — quantity mirrors the returns leaves. */
@@ -137,28 +128,21 @@ interface DeclarationBase {
   timeoutMs?: number
 }
 
-/** http transport options. The request is a POST with the typed envelope as body. */
+/**
+ * http transport options: the endpoint the host POSTs the typed envelope to.
+ * The verb is not a declaration field — typed args travel as a JSON body, so
+ * POST is the only verb and the host never negotiates it.
+ */
 export interface DeclarationHttpOptions {
   url: string
-  method: DeclarationHttpMethod
   headers?: Record<string, string>
 }
 
-/** file transport options: a whitelisted directory where the host writes
- *  requests and polls for responses. */
-export interface DeclarationFileOptions {
-  directory: string
-  inPrefix?: string
-  outPrefix?: string
-  pollMs?: number
+/** One declaration. */
+export type ToolDeclaration = DeclarationBase & {
+  transport: DeclarationTransport.Http
+  transportOptions: DeclarationHttpOptions
 }
-
-/** One declaration — a discriminated union so `transport` narrows
- *  `transportOptions` precisely. */
-export type ToolDeclaration = DeclarationBase & (
-  | { transport: DeclarationTransport.Http; transportOptions: DeclarationHttpOptions }
-  | { transport: DeclarationTransport.File; transportOptions: DeclarationFileOptions }
-)
 
 /* ── Archive ──────────────────────────────────────────────────────────────── */
 
@@ -290,7 +274,7 @@ export function validateDeclaration(config: unknown): string[] {
   }
   if (typeof tool.description !== 'string') errors.push('description is required')
   if (tool.enabled !== undefined && typeof tool.enabled !== 'boolean') errors.push('enabled must be a boolean when present')
-  if (tool.transport !== DeclarationTransport.Http && tool.transport !== DeclarationTransport.File) {
+  if (tool.transport !== DeclarationTransport.Http) {
     errors.push(`transport must be one of ${Object.values(DeclarationTransport).join(', ')}`)
   }
   if (typeof tool.parameters !== 'object' || tool.parameters === null || Array.isArray(tool.parameters)) {
@@ -311,28 +295,11 @@ export function validateDeclaration(config: unknown): string[] {
     errors.push('transportOptions is required')
     return errors
   }
-  // The declared transport decides which options shape is expected (the
-  // union discriminant); an invalid transport already reported itself and
-  // skips the per-shape checks.
-  const http = options as { url?: unknown; method?: unknown }
-  const file = options as { directory?: unknown; pollMs?: unknown }
-  switch (tool.transport) {
-    case DeclarationTransport.Http:
-      if (typeof http.url !== 'string' || !/^https?:\/\//.test(http.url)) {
-        errors.push('transportOptions.url must be an http(s) URL')
-      }
-      if (http.method !== DeclarationHttpMethod.Get && http.method !== DeclarationHttpMethod.Post) {
-        errors.push(`transportOptions.method must be one of ${Object.values(DeclarationHttpMethod).join(', ')}`)
-      }
-      break
-    case DeclarationTransport.File:
-      if (typeof file.directory !== 'string' || (file.directory as string).length === 0) {
-        errors.push('transportOptions.directory is required for file transport')
-      }
-      if (file.pollMs !== undefined && (!Number.isFinite(file.pollMs as number) || (file.pollMs as number) <= 0)) {
-        errors.push('transportOptions.pollMs must be a positive number')
-      }
-      break
+  // Only the http transport exists: its options are the endpoint the typed
+  // envelope is POSTed to. Nothing about the verb is declared or negotiated.
+  const http = options as { url?: unknown }
+  if (typeof http.url !== 'string' || !/^https?:\/\//.test(http.url)) {
+    errors.push('transportOptions.url must be an http(s) URL')
   }
   return errors
 }

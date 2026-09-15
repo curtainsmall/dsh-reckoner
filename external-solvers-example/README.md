@@ -30,39 +30,27 @@ node src/echo.ts http --port 8787
 # [http] echo peer listening on http://127.0.0.1:8787/
 ```
 
-File transport (the host writes `in.<id>.json` there and polls for
-`out.<id>.json`):
-
-```bash
-node src/echo.ts file --dir C:/elab-inbox
-# [file] echo peer watching C:\elab-inbox
-```
-
-Or install the dev tooling once and use the npm scripts:
+Or install the dev tooling once and use the npm script:
 
 ```bash
 pnpm install
 pnpm echo:http
-pnpm echo:file          # uses ./elab-inbox under this directory
 ```
 
-## 2. Register the declarations
+## 2. Register the declaration
 
-[`register-guide.md`](register-guide.md) lists the two solvers with the
+[`register-guide.md`](register-guide.md) lists the solver with the
 exact value for every dialog field, including the **returns** editor (a
 declaration without an explicit returns is archived but never registers). In
 the Records panel open the **External solvers** tab → **Add external solver** and
 fill the form accordingly, or ask the agent in a session to register the
 solver, pasting the solver's `agentDeclaration` JSON from the guide; the
-agent calls `external_solver_add`. The `echo_file` directory assumes the peer
-runs with `--dir C:/elab-inbox` — adapt it to the directory you actually
-use. Changes apply at the next host restart.
+agent calls `external_solver_add`. Changes apply at the next host restart.
 
 ## 3. Restart the host
 
 Declarations register at engine start: restart the DSH host process, then
-reload the page. `echo_http` and `echo_file` now appear among the solvers the agent
-can `call`.
+reload the page. `echo_http` now appears among the solvers the agent can `call`.
 
 ## 4. Call it
 
@@ -86,9 +74,7 @@ slot; `get` returns exactly what the peer echoed back, as typed values:
 ```
 
 The Records panel shows the call arguments and the echoed result side by
-side in the trace, which is the point of the demo. The file transport also
-exercises the host's polling and cleanup (both `in.*.json` and `out.*.json`
-disappear after the call).
+side in the trace, which is the point of the demo.
 
 ## 5. Self-check without the plugin
 

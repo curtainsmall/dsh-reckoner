@@ -1,9 +1,9 @@
 # Registering the Example Solvers
 
-The peer must be running first (`node src/echo.ts http --port 8787` or
-`node src/echo.ts file --dir <directory>`). In the plugin's Records panel
-open the **External solvers** tab and click **Add external solver**, then fill
-the dialog with the values below. Changes apply after a host restart.
+The peer must be running first (`node src/echo.ts http --port 8787`). In the
+plugin's Records panel open the **External solvers** tab and click **Add
+external solver**, then fill the dialog with the values below. Changes apply
+after a host restart.
 
 Alternatively, ask the agent in a session to register the solver and paste
 the solver's `agentDeclaration` JSON; the agent calls `external_solver_add`.
@@ -13,9 +13,7 @@ the solver's `agentDeclaration` JSON; the agent calls `external_solver_add`.
 | Dialog field | Enter | Note |
 |---|---|---|
 | Name | `echo_http` | the solver name the agent will call; starts lowercase, `a-z0-9_` only |
-| Transport | `http` | http calls a URL; file exchanges request/response files in a directory |
-| Method | `POST` | the host always sends POST — the typed envelope rides the request body |
-| URL | `http://127.0.0.1:8787/` | where the peer listens; `--port` overrides 8787 |
+| URL | `http://127.0.0.1:8787/` | the only transport: the host POSTs the typed envelope here; `--port` overrides 8787 |
 | Timeout (ms) | `10000` | optional; empty keeps the 30000 default |
 | Description | `Echo peer over http (ElectroLab external-solver manual test): returns every parameter it receives, verbatim` | what the agent reads to decide when to call the solver |
 | Enabled | on | a disabled declaration is kept but not registered |
@@ -58,48 +56,7 @@ registers): type `object`, then add one field per returned key:
     }
   },
   "transport": "http",
-  "transportOptions": { "url": "http://127.0.0.1:8787/", "method": "POST" },
-  "timeoutMs": 10000
-}
-```
-
-## echo_file
-
-| Dialog field | Enter | Note |
-|---|---|---|
-| Name | `echo_file` | the solver name the agent will call; starts lowercase, `a-z0-9_` only |
-| Transport | `file` | http calls a URL; file exchanges request/response files in a directory |
-| Directory | `C:/elab-inbox` | the directory passed to the peer; the host writes `in.<id>.json` there |
-| Poll interval (ms) | `200` | optional; empty keeps the 200 default |
-| Request / Response file prefix | (empty) | empty keeps the `in` / `out` defaults |
-| Timeout (ms) | `10000` | optional; empty keeps the 30000 default |
-| Description | `Echo peer over file transport (ElectroLab external-solver manual test): returns every parameter it receives, verbatim` | what the agent reads to decide when to call the solver |
-| Enabled | on | a disabled declaration is kept but not registered |
-
-Parameters and Returns: the same rows as `echo_http` above.
-
-`agentDeclaration`:
-
-```json
-{
-  "name": "echo_file",
-  "description": "Echo peer over file transport (ElectroLab external-solver manual test): returns every parameter it receives, verbatim",
-  "enabled": true,
-  "parameters": {
-    "message": { "type": "string", "description": "a text echoed back verbatim", "required": true },
-    "values": { "type": "array", "items": { "type": "quantity", "kind": "none" }, "description": "values echoed back verbatim" },
-    "flag": { "type": "boolean", "description": "a boolean echoed back verbatim" }
-  },
-  "returns": {
-    "type": "object",
-    "fields": {
-      "message": { "type": "string" },
-      "values": { "type": "array", "items": { "type": "quantity", "kind": "none" } },
-      "flag": { "type": "boolean" }
-    }
-  },
-  "transport": "file",
-  "transportOptions": { "directory": "C:/elab-inbox", "pollMs": 200 },
+  "transportOptions": { "url": "http://127.0.0.1:8787/" },
   "timeoutMs": 10000
 }
 ```

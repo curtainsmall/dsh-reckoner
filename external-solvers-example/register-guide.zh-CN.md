@@ -1,6 +1,6 @@
 # 注册示例求解器
 
-对端必须先行启动（`node src/echo.ts http --port 8787` 或 `node src/echo.ts file --dir <目录>`）。在插件的记录面板中打开**「外部求解器」页**，点击**「添加外部求解器」**，然后按下表填写对话框。更改在宿主重启后生效。
+对端必须先行启动（`node src/echo.ts http --port 8787`）。在插件的记录面板中打开**「外部求解器」页**，点击**「添加外部求解器」**，然后按下表填写对话框。更改在宿主重启后生效。
 
 另一种方式是：在会话中让智能体注册该求解器，并把该求解器的 `agentDeclaration` JSON 原文粘贴给它；智能体会调用 `external_solver_add`。
 
@@ -9,9 +9,7 @@
 | 对话框字段 | 填写 | 说明 |
 |---|---|---|
 | 名称 | `echo_http` | 智能体将调用的 solver 名称；小写字母开头，仅 `a-z0-9_` |
-| 传输 | `http` | http 调用一个 URL；file 通过目录交换请求/响应文件 |
-| 方法 | `POST` | 宿主恒发 POST——类型化信封随请求体传输 |
-| URL | `http://127.0.0.1:8787/` | 对端监听地址；`--port` 可覆盖 8787 |
+| URL | `http://127.0.0.1:8787/` | 唯一的传输方式：宿主向该地址 POST 类型化信封；`--port` 可覆盖 8787 |
 | 超时（毫秒） | `10000` | 可选；留空保持默认 30000 |
 | 描述 | `Echo peer over http (ElectroLab external-solver manual test): returns every parameter it receives, verbatim` | 智能体据此判断何时调用该 solver |
 | 启用 | 开 | 停用的声明会被保留，但不会被注册 |
@@ -53,48 +51,7 @@ Returns——**Returns** 区域（必填；没有 Returns 的声明永远不会�
     }
   },
   "transport": "http",
-  "transportOptions": { "url": "http://127.0.0.1:8787/", "method": "POST" },
-  "timeoutMs": 10000
-}
-```
-
-## echo_file
-
-| 对话框字段 | 填写 | 说明 |
-|---|---|---|
-| 名称 | `echo_file` | 智能体将调用的 solver 名称；小写字母开头，仅 `a-z0-9_` |
-| 传输 | `file` | http 调用一个 URL；file 通过目录交换请求/响应文件 |
-| 目录 | `C:/elab-inbox` | 传给对端的目录；宿主在其中写入 `in.<id>.json` |
-| 轮询间隔（毫秒） | `200` | 可选；留空保持默认 200 |
-| 请求/响应文件前缀 | （留空） | 留空保持 `in` / `out` 默认值 |
-| 超时（毫秒） | `10000` | 可选；留空保持默认 30000 |
-| 描述 | `Echo peer over file transport (ElectroLab external-solver manual test): returns every parameter it receives, verbatim` | 智能体据此判断何时调用该 solver |
-| 启用 | 开 | 停用的声明会被保留，但不会被注册 |
-
-参数与 Returns：与上文 `echo_http` 的行相同。
-
-`agentDeclaration`：
-
-```json
-{
-  "name": "echo_file",
-  "description": "Echo peer over file transport (ElectroLab external-solver manual test): returns every parameter it receives, verbatim",
-  "enabled": true,
-  "parameters": {
-    "message": { "type": "string", "description": "a text echoed back verbatim", "required": true },
-    "values": { "type": "array", "items": { "type": "quantity", "kind": "none" }, "description": "values echoed back verbatim" },
-    "flag": { "type": "boolean", "description": "a boolean echoed back verbatim" }
-  },
-  "returns": {
-    "type": "object",
-    "fields": {
-      "message": { "type": "string" },
-      "values": { "type": "array", "items": { "type": "quantity", "kind": "none" } },
-      "flag": { "type": "boolean" }
-    }
-  },
-  "transport": "file",
-  "transportOptions": { "directory": "C:/elab-inbox", "pollMs": 200 },
+  "transportOptions": { "url": "http://127.0.0.1:8787/" },
   "timeoutMs": 10000
 }
 ```

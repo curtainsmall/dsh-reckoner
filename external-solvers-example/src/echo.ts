@@ -2,20 +2,17 @@
 /**
  * ElectroLab external-solver echo peer — a manual test/demo counterpart.
  *
- * Context envelope protocol (typed values): the request carries
- * {requestId, args} where every argument is a typed value; the response is
- * {requestId, result} with a typed value (or result: null for void), or
- * {requestId, error: "…"} for a failed computation. This script echoes the
- * typed args back inside an object result, so a model call can be verified
- * end to end. Node.js standard library only; no build step.
+ * Envelope protocol (typed values): the request carries {requestId, args}
+ * where every argument is a typed value; the response is {requestId, result}
+ * with a typed value (or result: null for void), or {requestId, error: "…"}
+ * for a failed computation. This script echoes the typed args back inside an
+ * object result, so a model call can be verified end to end. Node.js standard
+ * library only; no build step.
  *
- *     node src/echo.ts http --port 8787                     # HTTP server
- *     node src/echo.ts file --dir C:/elab-inbox --poll 200  # watched directory
+ *     node src/echo.ts http --port 8787     # HTTP server (the only transport)
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -85,40 +82,10 @@ function serveHttp(host: string, port: number): void {
   })
 }
 
-function serveFile(directory: string, pollMs: number): void {
-  mkdirSync(directory, { recursive: true })
-  console.log(`[file] echo peer watching ${directory}`)
-  setInterval(() => {
-    for (const name of readdirSync(directory)) {
-      if (!name.startsWith('in.') || !name.endsWith('.json')) continue
-      const inPath = join(directory, name)
-      const requestId = name.slice('in.'.length, -'.json'.length)
-      let envelope: unknown
-      try {
-        envelope = JSON.parse(readFileSync(inPath, 'utf8'))
-      } catch (error) {
-        console.error(`[file] unreadable ${name}: ${error instanceof Error ? error.message : String(error)} — deleting without reply`)
-        rmSync(inPath, { force: true })
-        continue
-      }
-      if (!isRecord(envelope) || typeof envelope.requestId !== 'string') {
-        console.error(`[file] ${name} has no requestId — deleting without reply`)
-        rmSync(inPath, { force: true })
-        continue
-      }
-      const outPath = join(directory, `out.${requestId}.json`)
-      writeFileSync(outPath, JSON.stringify({ requestId: envelope.requestId, result: echoResult(envelope) }), 'utf8')
-      console.log(`[file] ${name} -> out.${requestId}.json`)
-      rmSync(inPath, { force: true })
-    }
-  }, pollMs)
-}
-
 function usage(): void {
-  console.log('ElectroLab external-solver echo peer (http or file transport)')
+  console.log('ElectroLab external-solver echo peer (http transport)')
   console.log('')
   console.log('  node src/echo.ts http [--host 127.0.0.1] [--port 8787]')
-  console.log('  node src/echo.ts file --dir <directory> [--poll 200]')
   process.exitCode = 1
 }
 
@@ -133,14 +100,6 @@ const mode = argv[0]
 
 if (mode === 'http') {
   serveHttp(argValue(argv, '--host', '127.0.0.1'), Number(argValue(argv, '--port', '8787')))
-} else if (mode === 'file') {
-  const directory = argValue(argv, '--dir', '')
-  if (directory.length === 0) {
-    console.error('[file] --dir is required')
-    usage()
-  } else {
-    serveFile(directory, Math.max(20, Number(argValue(argv, '--poll', '200'))))
-  }
 } else {
   usage()
 }

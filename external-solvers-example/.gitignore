@@ -7,9 +7,6 @@ lib/
 dist/
 *.tsbuildinfo
 
-# local test inbox (the file-transport worker's default directory)
-elab-inbox/
-
 # logs & misc
 *.log
 .DS_Store

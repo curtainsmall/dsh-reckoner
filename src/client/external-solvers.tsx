@@ -6,8 +6,8 @@
  * or through the LLM manager tools (external_solver_add/update/delete); both
  * paths only register the tools at the next host restart, so the dirty bit
  * returned by the endpoint drives the pending-restart banner. Saving a
- * declaration IS the authorization for its transport — the form shows the
- * reach of http/file transports in warning text before the save button.
+ * declaration IS the authorization for its endpoint — the form shows the
+ * reach of the http transport in warning text before the save button.
  *
  * The form covers the whole declaration language except transport headers
  * and shapes unrepresentable in the row editors (deeply nested arrays or
@@ -41,19 +41,11 @@ interface ExternalSolversResponse {
 const EXTERNAL_ENDPOINT = '/api/dsh-electro-lab/external-solvers'
 const POLL_MS = 5000
 
-/** The transport target line: "http · GET <url>" or "file · <directory>". */
+/** The transport target line: "http · <url>". */
 function transportLine(tool: ExternalSolverView): string {
   const options = tool.transportOptions ?? {}
-  if (tool.transport === 'http') {
-    const method = typeof options.method === 'string' ? options.method : 'POST'
-    const url = typeof options.url === 'string' ? options.url : ''
-    return `http · ${method} ${url}`
-  }
-  if (tool.transport === 'file') {
-    const directory = typeof options.directory === 'string' ? options.directory : ''
-    return `file · ${directory}`
-  }
-  return tool.transport
+  const url = typeof options.url === 'string' ? options.url : ''
+  return `http · ${url}`
 }
 
 /* ── Row chrome ───────────────────────────────────────────────────────────── */
@@ -325,13 +317,7 @@ interface FormState {
   name: string
   description: string
   enabled: boolean
-  transport: 'http' | 'file'
   url: string
-  method: 'GET' | 'POST'
-  directory: string
-  pollMs: string
-  inPrefix: string
-  outPrefix: string
   timeoutMs: string
   rows: ParamRow[]
   /** Parameter names preserved verbatim (the row editor cannot model them). */
@@ -527,19 +513,12 @@ function seedForm(tool: ExternalSolverView | null): FormState {
     else unmodeled.push(key)
   }
   const readString = (key: string): string => (typeof options[key] === 'string' ? String(options[key]) : '')
-  const readMs = (key: string): string => (typeof options[key] === 'number' ? String(options[key]) : '')
   return {
     name: tool?.name ?? '',
     description: tool?.description ?? '',
     // A declaration without the flag is enabled (registration default).
     enabled: tool?.enabled !== false,
-    transport: tool?.transport === 'file' ? 'file' : 'http',
     url: readString('url'),
-    method: tool?.transport === 'http' && options.method === 'GET' ? 'GET' : 'POST',
-    directory: readString('directory'),
-    pollMs: readMs('pollMs'),
-    inPrefix: readString('inPrefix'),
-    outPrefix: readString('outPrefix'),
     timeoutMs: typeof tool?.timeoutMs === 'number' ? String(tool.timeoutMs) : '',
     rows,
     unmodeled,
@@ -574,29 +553,13 @@ function buildConfig(state: FormState, original: ExternalSolverView | null): unk
   else if (timeout !== undefined) config.timeoutMs = timeout
   else delete config.timeoutMs
 
+  // http is the only transport: the declaration carries the endpoint only —
+  // the verb is the host's business and is never stored.
   const options = (original?.transportOptions ?? {}) as Record<string, unknown>
-  if (state.transport === 'http') {
-    config.transport = 'http'
-    const wasHttp = original?.transport === 'http' && typeof options === 'object'
-    config.transportOptions = {
-      ...(wasHttp ? options : {}),
-      url: state.url.trim(),
-      method: state.method,
-    }
-  } else {
-    config.transport = 'file'
-    const wasFile = original?.transport === 'file' && typeof options === 'object'
-    const fileOptions: Record<string, unknown> = { ...(wasFile ? options : {}), directory: state.directory.trim() }
-    const pollMs = parsePositive(state.pollMs)
-    if (pollMs !== undefined && Number.isNaN(pollMs)) fileOptions.pollMs = state.pollMs // keeps raw text; validation blocks the save
-    else if (pollMs !== undefined) fileOptions.pollMs = pollMs
-    else delete fileOptions.pollMs
-    for (const [key, text] of [['inPrefix', state.inPrefix], ['outPrefix', state.outPrefix]] as const) {
-      const value = text.trim()
-      if (value.length === 0) delete fileOptions[key]
-      else fileOptions[key] = value
-    }
-    config.transportOptions = fileOptions
+  config.transport = 'http'
+  config.transportOptions = {
+    ...(typeof options === 'object' && options !== null ? options : {}),
+    url: state.url.trim(),
   }
 
   const parameters: Record<string, unknown> = {}
@@ -613,14 +576,9 @@ function buildConfig(state: FormState, original: ExternalSolverView | null): unk
 function validateForm(state: FormState): string[] {
   const errors: string[] = []
   if (!NAME_PATTERN.test(state.name.trim())) errors.push(t('invalidName'))
-  if (state.transport === 'http') {
-    if (!/^https?:\/\/.+/.test(state.url.trim())) errors.push(t('urlRequired'))
-  } else if (state.directory.trim().length === 0) {
-    errors.push(t('fileDirectoryRequired'))
-  }
+  if (!/^https?:\/\/.+/.test(state.url.trim())) errors.push(t('urlRequired'))
   const numberFields: Array<[keyof FormState, string]> = [
     ['timeoutMs', t('timeoutLabel')],
-    ['pollMs', t('pollMsLabel')],
   ]
   for (const [key, label] of numberFields) {
     const text = String(state[key])
@@ -726,8 +684,6 @@ function EditorDialog({ editor, onClose, onSaved }: {
   const removeReturnField = (id: number): void => {
     set('returns', { ...state.returns, fields: state.returns.fields.filter((row) => row.id !== id) })
   }
-  const isHttp = state.transport === 'http'
-
   const save = (): void => {
     const errors = validateForm(state)
     if (errors.length > 0) {
@@ -770,12 +726,6 @@ function EditorDialog({ editor, onClose, onSaved }: {
               style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }}
             />
           </Field>
-          <Field label={t('transportLabel')} style={{ flex: 0.9 }}>
-            <select value={state.transport} onChange={(event) => set('transport', event.target.value as 'http' | 'file')} style={controlStyle}>
-              <option value="http">{t('transportHttp')}</option>
-              <option value="file">{t('transportFile')}</option>
-            </select>
-          </Field>
           <Field label={t('timeoutLabel')} style={{ flex: 1 }}>
             <input type="text" inputMode="numeric" value={state.timeoutMs} onChange={(event) => set('timeoutMs', event.target.value)} style={controlStyle} />
           </Field>
@@ -788,45 +738,13 @@ function EditorDialog({ editor, onClose, onSaved }: {
           {t('enabledLabel')}
         </label>
 
-        {/* Transport options */}
-        {isHttp ? (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Field label={t('methodLabel')} style={{ flex: 0.7 }}>
-              <select value={state.method} onChange={(event) => set('method', event.target.value as 'GET' | 'POST')} style={controlStyle}>
-                <option value="POST">POST</option>
-                <option value="GET">GET</option>
-              </select>
-            </Field>
-            <Field label={t('urlLabel')} style={{ flex: 2 }}>
-              <input type="text" value={state.url} spellCheck={false} onChange={(event) => set('url', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
-            </Field>
-          </div>
-        ) : (
-          <>
-            <Field label={t('directoryLabel')}>
-              <input type="text" value={state.directory} spellCheck={false} onChange={(event) => set('directory', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
-            </Field>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Field label={t('pollMsLabel')}>
-                <input type="text" inputMode="numeric" value={state.pollMs} onChange={(event) => set('pollMs', event.target.value)} style={controlStyle} />
-              </Field>
-              <Field label={t('inPrefixLabel')}>
-                <input type="text" value={state.inPrefix} spellCheck={false} onChange={(event) => set('inPrefix', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
-              </Field>
-              <Field label={t('outPrefixLabel')}>
-                <input type="text" value={state.outPrefix} spellCheck={false} onChange={(event) => set('outPrefix', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
-              </Field>
-            </div>
-          </>
-        )}
-        {isHttp && state.url.trim().length > 0 && (
+        {/* Endpoint: http is the only transport, and the verb is the host's own business. */}
+        <Field label={t('urlLabel')}>
+          <input type="text" value={state.url} spellCheck={false} onChange={(event) => set('url', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
+        </Field>
+        {state.url.trim().length > 0 && (
           <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', lineHeight: 1.5 }}>
             {t('warnHttp', { url: state.url.trim() })}
-          </div>
-        )}
-        {!isHttp && state.directory.trim().length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', lineHeight: 1.5 }}>
-            {t('warnFile', { directory: state.directory.trim() })}
           </div>
         )}
 

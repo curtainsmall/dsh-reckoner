@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { compileExternalSolver } from '../../src/engine/external-solvers.ts'
 import { QuantityKind } from '../../src/math/quantity-kind.ts'
-import { DeclarationHttpMethod, DeclarationParamType, DeclarationTransport, type ToolDeclaration } from '../../src/tool.ts'
+import { DeclarationParamType, DeclarationTransport, type ToolDeclaration } from '../../src/tool.ts'
 
 const BASE: ToolDeclaration = {
   name: 'sample_echo',
@@ -12,7 +12,7 @@ const BASE: ToolDeclaration = {
     count: { type: DeclarationParamType.Quantity, kind: QuantityKind.None },
   },
   transport: DeclarationTransport.Http,
-  transportOptions: { url: 'http://127.0.0.1:1/x', method: DeclarationHttpMethod.Post },
+  transportOptions: { url: 'http://127.0.0.1:1/x' },
 }
 
 describe('compileExternalSolver', () => {

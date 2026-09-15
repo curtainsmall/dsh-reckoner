@@ -12,7 +12,6 @@ import {
   validateDeclaration,
 } from '../../src/tool.ts'
 import {
-  DeclarationHttpMethod,
   DeclarationParamType,
   DeclarationTransport,
   type ToolDeclaration,
@@ -30,18 +29,8 @@ const HTTP_TOOL: ToolDeclaration = {
     points: { type: DeclarationParamType.Array, items: { type: DeclarationParamType.Quantity, kind: 'frequency', description: 'one point' }, description: 'the points' },
   },
   transport: DeclarationTransport.Http,
-  transportOptions: { url: 'https://example.test/calc', method: DeclarationHttpMethod.Post, headers: { authorization: 'token' } },
+  transportOptions: { url: 'https://example.test/calc', headers: { authorization: 'token' } },
   timeoutMs: 5000,
-}
-
-/** A valid file-transport declaration. */
-const FILE_TOOL: ToolDeclaration = {
-  name: 'file_calc',
-  description: 'Calculates through a watched directory',
-  enabled: true,
-  parameters: {},
-  transport: DeclarationTransport.File,
-  transportOptions: { directory: 'C:\\scratch\\elab', inPrefix: 'req', outPrefix: 'res', pollMs: 50 },
 }
 
 let home = ''
@@ -58,9 +47,9 @@ describe('readDeclarations / upsert / delete', () => {
   it('starts empty and stores declarations in file order', () => {
     expect(readDeclarations(home)).toEqual([])
     upsertDeclaration(home, HTTP_TOOL)
-    upsertDeclaration(home, FILE_TOOL)
+    upsertDeclaration(home, { ...HTTP_TOOL, name: 'second_calc' })
     const tools = readDeclarations(home)
-    expect(tools.map((tool) => tool.name)).toEqual(['sample_echo', 'file_calc'])
+    expect(tools.map((tool) => tool.name)).toEqual(['sample_echo', 'second_calc'])
   })
 
   it('upsert replaces by name in place and delete removes by name', () => {
@@ -96,9 +85,16 @@ describe('readDeclarations / upsert / delete', () => {
 })
 
 describe('validateDeclaration', () => {
-  it('accepts the full http and file declarations', () => {
+  it('accepts the full http declaration', () => {
     expect(validateDeclaration(HTTP_TOOL)).toEqual([])
-    expect(validateDeclaration(FILE_TOOL)).toEqual([])
+  })
+
+  it('rejects an unknown or removed transport', () => {
+    // http is the only transport: anything else (including the removed file
+    // transport) is refused by validation and never reaches registration.
+    expect(validateDeclaration({ ...HTTP_TOOL, transport: 'websocket' })).toContain('transport must be one of http')
+    expect(validateDeclaration({ ...HTTP_TOOL, transport: 'file' })).toContain('transport must be one of http')
+    expect(validateDeclaration({ ...HTTP_TOOL, transport: 'pipe' })).toContain('transport must be one of http')
   })
 
   it('accepts a declaration without enabled (defaults to enabled at registration)', () => {
@@ -120,12 +116,6 @@ describe('validateDeclaration', () => {
   it('rejects a missing description and a non-boolean enabled', () => {
     expect(validateDeclaration({ ...HTTP_TOOL, description: 7 })).toContain('description is required')
     expect(validateDeclaration({ ...HTTP_TOOL, enabled: 'yes' })).toContain('enabled must be a boolean when present')
-  })
-
-  it('rejects an unknown transport', () => {
-    expect(validateDeclaration({ ...HTTP_TOOL, transport: 'websocket' })).toContain(
-      'transport must be one of http, file',
-    )
   })
 
   it('rejects bad timeoutMs', () => {
@@ -173,16 +163,6 @@ describe('validateDeclaration', () => {
   it('rejects bad http transportOptions', () => {
     expect(validateDeclaration({ ...HTTP_TOOL, transportOptions: {} })).toContain('transportOptions.url must be an http(s) URL')
     expect(validateDeclaration({ ...HTTP_TOOL, transportOptions: { url: 'ftp://x' } })).toContain('transportOptions.url must be an http(s) URL')
-    expect(validateDeclaration({ ...HTTP_TOOL, transportOptions: { url: 'https://x', method: 'PUT' } })).toContain(
-      'transportOptions.method must be one of GET, POST',
-    )
-  })
-
-  it('rejects bad file transportOptions', () => {
-    expect(validateDeclaration({ ...FILE_TOOL, transportOptions: {} })).toContain('transportOptions.directory is required for file transport')
-    expect(validateDeclaration({ ...FILE_TOOL, transportOptions: { directory: 'C:\\x', pollMs: 0 } })).toContain(
-      'transportOptions.pollMs must be a positive number',
-    )
   })
 
   it('requires transportOptions', () => {

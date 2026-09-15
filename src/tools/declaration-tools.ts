@@ -23,9 +23,8 @@ const DECLARATION_GUIDE =
   '"description": what the solver computes; ' +
   '"enabled": true (the default when omitted) or false; ' +
   '"parameters": object mapping each parameter name to its spec; ' +
-  '"transport": "http" or "file"; ' +
-  '"transportOptions": for "http" { "url": an http(s) URL, "method": "GET" or "POST", "headers"?: object }, ' +
-  'for "file" { "directory": an absolute path the host polls for the response, "inPrefix"?: string, "outPrefix"?: string, "pollMs"?: number }; ' +
+  '"transport": "http" (the only transport); ' +
+  '"transportOptions": { "url": an http(s) URL, "headers"?: object }; ' +
   '"timeoutMs"?: positive number (default 30000); ' +
   '"returns": the result shape — spec leaves, or null for void; explicit and required: a declaration without it is archived but never registers }. ' +
   'Parameter specs: ' +
