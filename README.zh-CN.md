@@ -32,7 +32,13 @@ dsh plugin --profile web add dsh-electro-lab
 
 线协议是类型化信封，只发 POST：`{requestId, args}` → `{requestId, result}`（类型化值，void 时为 `null`）或 `{requestId, error}`。线上只传类型化值——不出现符号，也不出现 variant/prefix 词。失败与本地求解器走同一套错误收据（`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`）并落入记录轨迹；结果作为事实存储，重放时绝不重算。
 
-[`external-solvers-example/`](external-solvers-example/README.zh-CN.md) 是独立的 npm 工程，内含手动测试对端——`node src/echo.ts http` / `file` 可将信封协议端到端回显；注册指南逐字段列出应填内容。
+[`external-solvers-example/`](external-solvers-example/README.zh-CN.md) 是独立的 npm 工程，内含手动测试对端——`node src/echo.ts http` 可将信封协议端到端回显；注册指南逐字段列出应填内容。
+
+## 日志
+
+插件把每个事件记成一行文本，同时写入 stdout 与每次宿主运行一个文件：`~/.dsh-electro-lab/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`。
+
+唯一的设置是 `DSH_ELECTRO_LAB_LOG_LEVEL=debug|info|warn|error|off`（默认 `info`）。保留最新 20 个文件、总量不超过 50 MB。末行不是 `plugin unmounted` 的日志属于被杀掉的 run。
 
 ## 开发
 

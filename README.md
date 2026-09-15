@@ -32,7 +32,13 @@ Register and manage declarations three ways: the manager tools (`external_solver
 
 The wire protocol is a typed envelope, POST only: `{requestId, args}` → `{requestId, result}` (typed value, `null` for void) or `{requestId, error}`. Typed values only — no symbols and no variant/prefix words cross the wire. Failures surface as the same error receipts as local solvers (`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`) and land in the record trace; results are stored as facts and never recomputed on replay.
 
-[`external-solvers-example/`](external-solvers-example/README.md) is an independent npm project with manual test counterparts — `node src/echo.ts http` / `file` echoes the envelope protocol end to end, and the register guide lists every field value to type into the panel form.
+[`external-solvers-example/`](external-solvers-example/README.md) is an independent npm project with a manual test counterpart — `node src/echo.ts http` echoes the envelope protocol end to end, and the register guide lists every field value to type into the panel form.
+
+## Logs
+
+The plugin logs one text line per event to stdout and to one file per host run, `~/.dsh-electro-lab/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`.
+
+`DSH_ELECTRO_LAB_LOG_LEVEL=debug|info|warn|error|off` (default `info`) is the only setting. The newest 20 run files up to 50 MB are kept. A log whose last line is not `plugin unmounted` belongs to a run that was killed.
 
 ## Development
 
