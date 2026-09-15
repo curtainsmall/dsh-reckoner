@@ -4,6 +4,7 @@
  * Primitives (set/get/call) and markers execute through it; every step appends one trace row (with inputs and outputs).
  */
 import { ToolError, ToolErrorCode } from '../errors.ts'
+import { log } from '../log.ts'
 import { VariableTable } from './table.ts'
 import { SolverRegistry, type SolverDef } from './registry.ts'
 import { RecordStore, type IndexRow, type TraceRow } from './storage.ts'
@@ -219,7 +220,7 @@ export class Engine {
   private async runVoid(solver: SolverDef, resolved: Record<string, TypedValue>, native: Record<string, unknown>): Promise<void> {
     try {
       if (solver.external !== undefined) {
-        const result = await callExternal(solver.external, resolved)
+        const result = await callExternal(solver.id, solver.external, resolved)
         if (result !== null) throw new ToolError(`solver "${solver.id}" is void but the endpoint returned a result`, ToolErrorCode.ExternalResponse)
         return
       }
@@ -315,7 +316,7 @@ export class Engine {
     let raw: unknown
     try {
       if (solver.external !== undefined) {
-        const result = await callExternal(solver.external, resolved)
+        const result = await callExternal(solver.id, solver.external, resolved)
         if (result === null) throw new ToolError(`solver "${solver.id}" is not void but the endpoint returned result: null`, ToolErrorCode.ExternalResponse)
         const error = validateAgainstSpec(spec, result, `solver "${solver.id}" result`)
         if (error !== undefined) throw new ToolError(`solver "${solver.id}": ${error}`, ToolErrorCode.ExternalResponse)
@@ -340,6 +341,8 @@ export class Engine {
   private failure(tool: string, error: unknown): Receipt {
     const code = error instanceof ToolError ? error.code : ToolErrorCode.Tool
     const message = error instanceof Error ? error.message : String(error)
+    // Run-time diagnostics only: the trace row below stays the authoritative account of the failure.
+    log.warn('engine op failed', { tool, code, error: message })
     if (this.open !== null) {
       this.trace({ tool, ok: false, code, error: message })
     }

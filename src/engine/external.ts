@@ -13,6 +13,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { ToolError, ToolErrorCode } from '../errors.ts'
+import { log } from '../log.ts'
 import { validateValue, type TypedValue } from './values.ts'
 import type { ExternalBlock } from './registry.ts'
 
@@ -40,9 +41,10 @@ function readResult(body: unknown, requestId: string): TypedValue | null {
 }
 
 /** Run one external call; return the result from the response (may be null; the engine validates it against the solver signature). */
-export async function callExternal(block: ExternalBlock, args: Record<string, TypedValue>): Promise<TypedValue | null> {
+export async function callExternal(solverId: string, block: ExternalBlock, args: Record<string, TypedValue>): Promise<TypedValue | null> {
   const timeoutMs = block.timeoutMs ?? 30000
   const requestId = randomUUID()
+  const startedAt = Date.now()
   const payload = { requestId, args: Object.fromEntries(Object.entries(args).map(([key, value]) => [key, wireValue(value)])) }
   const options = block.transportOptions as { url: string; headers?: Record<string, string> }
   const controller = new AbortController()
@@ -64,8 +66,18 @@ export async function callExternal(block: ExternalBlock, args: Record<string, Ty
     } catch {
       throw new ToolError(`the tool returned non-JSON: ${text.slice(0, 120)}`, ToolErrorCode.ExternalResponse)
     }
-    return readResult(parsed, requestId)
+    const result = readResult(parsed, requestId)
+    // Transport facts live in the log, never in the record: the trace holds the call itself.
+    log.info('external call ok', { solver: solverId, ep: options.url, req: requestId, took_ms: Date.now() - startedAt })
+    return result
   } catch (error) {
+    log.warn('external call failed', {
+      solver: solverId,
+      ep: options.url,
+      req: requestId,
+      took_ms: Date.now() - startedAt,
+      code: error instanceof ToolError ? error.code : ToolErrorCode.Tool,
+    })
     if (error instanceof ToolError) throw error
     if (error instanceof Error && error.name === 'AbortError') {
       throw new ToolError(`http request timed out after ${timeoutMs} ms`, ToolErrorCode.ExternalTimeout)

@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { log } from './log.ts'
 import {
   ArticleFormat,
   ArticleLanguage,
@@ -402,9 +403,11 @@ function startGenerateJob(
   const jobId = randomUUID()
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 300_000)
+  const startedAt = Date.now()
   const job: GenerateJob = { status: 'running', percent: 5, phase: GenerationPhase.Prepare, abort: () => controller.abort() }
   generateJobs.set(jobId, job)
   void (async () => {
+    log.info('article generation started', { format, language, file: fileName, dir: directory })
     try {
       job.percent = 10
       job.phase = GenerationPhase.Generate
@@ -424,14 +427,19 @@ function startGenerateJob(
         job.percent = 96
         const compiled = await compileLatexToPdf(targetDir, fileName)
         if (compiled.ok) job.pdfPath = compiled.pdfPath
-        else job.compileError = compiled.error
+        else {
+          job.compileError = compiled.error
+          log.warn('latex compile failed', { file: target, error: compiled.error })
+        }
       }
       job.status = 'done'
       job.percent = 100
       job.path = target
+      log.info('article generation finished', { format, took_ms: Date.now() - startedAt, path: target })
     } catch (error) {
       job.status = 'error'
       job.error = error instanceof Error ? error.message : String(error)
+      log.error('article generation failed', { format, took_ms: Date.now() - startedAt, error })
     } finally {
       clearTimeout(timeout)
       setTimeout(() => { generateJobs.delete(jobId) }, 60_000)

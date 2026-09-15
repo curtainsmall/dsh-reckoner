@@ -26,6 +26,7 @@ import {
 import { registerGenerateEndpoints } from './generate-server.ts'
 import { registerSkills } from './skill.ts'
 import { installPresets } from './preset.ts'
+import { attachConsoleSink, attachFileSink, log, resolveLevel, setLevel } from './log.ts'
 
 /** Plugin identity for cordis.yml rows. */
 export const name = 'dsh-electro-lab'
@@ -39,17 +40,41 @@ declare module 'cordis' {
     webServer: WebServerLike
   }
 }
+/** Minimal structural shape of the web-server response the handlers write to. */
+interface WebResponseLike {
+  statusCode?: number
+  setHeader(name: string, value: string): void
+  end(body: string): void
+}
+
 /** Minimal structural shape of the web-server route registry. */
 interface WebServerLike {
   register(route: {
     kind: 'exact' | 'prefix'
     path: string
-    handler(req: unknown, res: {
-      statusCode?: number
-      setHeader(name: string, value: string): void
-      end(body: string): void
-    }): void | Promise<void>
+    handler(req: unknown, res: WebResponseLike): void | Promise<void>
   }): () => void
+}
+
+type RouteHandler = (req: unknown, res: WebResponseLike) => void | Promise<void>
+
+/** An unexpected endpoint throw is logged before it reaches the web server; behavior is unchanged. */
+function guard(path: string, handler: RouteHandler): RouteHandler {
+  return (req, res) => {
+    try {
+      const pending = handler(req, res)
+      if (pending instanceof Promise) {
+        return pending.catch((error: unknown) => {
+          log.error('endpoint failed', { path, error })
+          throw error
+        })
+      }
+      return pending
+    } catch (error) {
+      log.error('endpoint failed', { path, error })
+      throw error
+    }
+  }
 }
 
 interface RequestLike {
@@ -117,6 +142,29 @@ function loadGenerationRecord(id: string): Record | undefined {
 }
 
 export function apply(ctx: Context): void {
+  // Logging: one line per event on stdout, plus one file per host run. The level is the single
+  // knob (DSH_ELECTRO_LAB_LOG_LEVEL); a run directory that cannot be created is reported and
+  // skipped — logging must never keep the plugin from mounting.
+  const level = resolveLevel(process.env.DSH_ELECTRO_LAB_LOG_LEVEL)
+  setLevel(level)
+  ctx.effect(() => {
+    const startedAt = Date.now()
+    const detachConsole = attachConsoleSink()
+    let run: { file: string; close(): void } | undefined
+    try {
+      run = attachFileSink(recordsHome)
+    } catch (error) {
+      log.warn('log file sink unavailable', { home: recordsHome, error })
+    }
+    log.info('plugin mounted', { home: recordsHome, file: run?.file ?? null, level })
+
+    return () => {
+      log.info('plugin unmounted', { uptime_ms: Date.now() - startedAt })
+      if (run !== undefined) run.close()
+      detachConsole()
+    }
+  }, 'dsh-electro-lab: logger')
+
   ctx.effect(() => {
     const disposers: Array<() => void> = []
 
@@ -133,7 +181,7 @@ export function apply(ctx: Context): void {
         const solver = compileExternalSolver(declaration)
         if (solver !== null && engine.registry.get(solver.id) === undefined) engine.registry.register(solver)
       } catch (error) {
-        ctx.logger?.warn(`[dsh-electro-lab] failed to register declaration solver "${declaration.name}": ${error instanceof Error ? error.message : String(error)}`)
+        log.warn('declaration skipped', { solver: declaration.name, error })
       }
     }
     // Declarations have just been registered: clear the restart dirty bit.
@@ -162,7 +210,7 @@ export function apply(ctx: Context): void {
     disposers.push(ctx.webServer.register({
       kind: 'exact',
       path: RECORDS_INDEX_PATH,
-      handler: (req, res) => {
+      handler: guard(RECORDS_INDEX_PATH, (req, res) => {
         const request = req as RequestLike
         if ((request.method ?? 'GET') !== 'GET') {
           res.statusCode = 405
@@ -171,7 +219,7 @@ export function apply(ctx: Context): void {
         }
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ rows: engine.indexRows() }))
-      },
+      }),
     }))
 
     // Record body: GET /api/dsh-electro-lab/records/<id> — one record's trace
@@ -180,7 +228,7 @@ export function apply(ctx: Context): void {
     disposers.push(ctx.webServer.register({
       kind: 'prefix',
       path: RECORDS_BODY_PREFIX,
-      handler: (req, res) => {
+      handler: guard(RECORDS_BODY_PREFIX, (req, res) => {
         const request = req as RequestLike
         const method = request.method ?? 'GET'
         res.setHeader('content-type', 'application/json')
@@ -225,7 +273,7 @@ export function apply(ctx: Context): void {
           question: meta.question,
           rows: engine.store.readRows(id),
         }))
-      },
+      }),
     }))
 
     // External solver archive management: GET lists + dirty bit; PUT overwrites/adds (base64 JSON query parameter);
@@ -233,7 +281,7 @@ export function apply(ctx: Context): void {
     disposers.push(ctx.webServer.register({
       kind: 'exact',
       path: EXTERNAL_PATH,
-      handler: (req, res) => {
+      handler: guard(EXTERNAL_PATH, (req, res) => {
         const request = req as RequestLike
         const method = request.method ?? 'GET'
         res.setHeader('content-type', 'application/json')
@@ -274,7 +322,7 @@ export function apply(ctx: Context): void {
           return
         }
         res.end(JSON.stringify({ solvers: readDeclarations(recordsHome), restartRequired: restartRequired(recordsHome) }))
-      },
+      }),
     }))
 
     // Article generation subsystem (LLM jobs, file writing, compile, browsing).
@@ -290,9 +338,9 @@ export function apply(ctx: Context): void {
 
   try {
     const synced = installPresets()
-    if (synced.length > 0) ctx.logger?.info(`[dsh-electro-lab] synced packaged preset(s): ${synced.join(', ')}`)
+    if (synced.length > 0) log.info('presets synced', { count: synced.length })
   } catch (error) {
     // A preset that fails to sync must never break the plugin.
-    ctx.logger?.warn(`[dsh-electro-lab] failed to sync packaged preset: ${error instanceof Error ? error.message : String(error)}`)
+    log.warn('preset sync failed', { error })
   }
 }
