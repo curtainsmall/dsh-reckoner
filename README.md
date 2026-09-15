@@ -24,16 +24,6 @@ Settled records are listed in the client panel's **Records** tab (indexed from `
 
 The record detail page's right rail offers **Markdown** and **LaTeX** generation: the host LLM writes a fluent, self-contained solution article from the record's trace (question, established conditions, analysis notes, solver steps with their resolved arguments and results, and the final answer), presented as the model's own calculation — never mentioning ElectroLab, solvers or the generation process. Each button opens its own setup dialog (article language, output directory with a host-driven directory browser, file name; remembered across runs), then runs a cancellable background job whose progress dialog can be minimized to a corner pill that survives navigation. LaTeX articles are proper XeLaTeX documents (ctexart for zh-CN, fontspec + unicode-math + siunitx for en — pure Unicode throughout); **PDF compilation is LaTeX-only** (xelatex, two passes). Markdown output is written flat as `.md` and never compiled. The generated file is the primary artifact: open it or its folder straight from the progress dialog.
 
-## External solvers
-
-Beyond the built-in catalog you can register your own calculation solvers, reached over an **http** transport. A declaration (name, description, parameters, an explicit **returns** shape, transport options) lives in `~/.dsh-electro-lab/external-solvers.jsonl`; at engine start every enabled declaration is registered straight into the solver registry — same signature language as the built-ins, so `solver_info` and `call` work on them unchanged. Changes apply after a host restart (the panel shows a pending-restart notice until then).
-
-Register and manage declarations three ways: the manager tools (`external_solver_add` / `external_solver_update` / `external_solver_delete`), or the **External solvers** tab of the panel, which lists, adds, edits, enables/disables and deletes them. `returns` is required for registration (a spec, or `null` for void); a declaration without it is archived but skipped, with a warning at start.
-
-The wire protocol is a typed envelope, POST only: `{requestId, args}` → `{requestId, result}` (typed value, `null` for void) or `{requestId, error}`. Typed values only — no symbols and no variant/prefix words cross the wire. Failures surface as the same error receipts as local solvers (`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`) and land in the record trace; results are stored as facts and never recomputed on replay.
-
-[`external-solvers-example/`](external-solvers-example/README.md) is an independent npm project with a manual test counterpart — `node src/echo.ts http` echoes the envelope protocol end to end, and the register guide lists every field value to type into the panel form.
-
 ## Logs
 
 The plugin logs one text line per event to stdout and to one file per host run, `~/.dsh-electro-lab/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`.
@@ -47,7 +37,6 @@ See [Contributing](.github/CONTRIBUTING.md) for the development setup, commit co
 ## Docs
 
 - [Engine manual](docs/engine.md) (also in [简体中文](docs/engine.zh-CN.md))
-- [external-solvers-example](external-solvers-example/README.md)
 - [Contributing](.github/CONTRIBUTING.md)
 
 ## License

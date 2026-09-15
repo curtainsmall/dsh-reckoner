@@ -9,13 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **External solvers**: register your own calculation solvers over http. A declaration (name, description, parameters, explicit `returns`, endpoint, timeout) lives in `~/.dsh-electro-lab/external-solvers.jsonl` and is registered into the solver registry at engine start, so `solver_info` and `call` work on it unchanged; changes apply after a host restart. Manage them with `external_solver_add` / `external_solver_update` / `external_solver_delete` or the panel's **External solvers** tab. The protocol is a POST-only typed envelope, `{requestId, args}` → `{requestId, result}` or `{requestId, error}`, with the same error codes as local solvers (`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`).
 - **Logging**: one text line per event, on stdout and in one file per host run (`~/.dsh-electro-lab/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`). `DSH_ELECTRO_LAB_LOG_LEVEL` (default `info`) is the only setting; the newest 20 files up to 50 MB are kept.
 
 ### Changed
 
 - Plugin state is one file, `~/.dsh-electro-lab/state.json` (generation settings + external-declaration restart flag), written through one owner module that replaces the file atomically.
-- Logging keeps no state: a run is described by its own log file.
 
 ## [0.10.0] - 2026-09-06
 
