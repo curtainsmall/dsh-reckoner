@@ -121,6 +121,7 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   const [genFile, setGenFile] = useState('')
   const [genSetupError, setGenSetupError] = useState<string | null>(null)
   const [capability, setCapability] = useState<CapabilityReport | null>(null)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
   const { progress: genProgress } = useGenState()
   const genRunning = genProgress?.status === 'running'
   const [dirBrowserOpen, setDirBrowserOpen] = useState(false)
@@ -135,6 +136,7 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   useEffect(() => {
     if (!open) return
     let alive = true
+    setSettingsLoaded(false)
     fetch(GENERATE_DIR_ENDPOINT)
       .then((r) => r.json() as Promise<{ directory?: string; language?: string; compile?: boolean }>)
       .then((body) => {
@@ -145,23 +147,25 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
         if (typeof body.compile === 'boolean') setGenCompile(body.compile)
       })
       .catch(() => {})
+      .finally(() => { if (alive) setSettingsLoaded(true) })
     return () => { alive = false }
   }, [open])
 
   /**
    * What this machine can compile with (LaTeX only): the host probes for a driver and for the
    * document shell's macros. A missing driver blocks the button; missing macros are only a hint,
-   * because a TeX distribution may install them on demand.
+   * because a TeX distribution may install them on demand. Asked once the remembered settings have
+   * arrived, so the check runs for the language the dialog actually shows.
    */
   useEffect(() => {
-    if (!open || format !== ArticleFormat.Latex) return
+    if (!open || !settingsLoaded || format !== ArticleFormat.Latex) return
     let alive = true
     fetch(`${GENERATE_CAPABILITY_ENDPOINT}?language=${encodeURIComponent(genLanguage)}`)
       .then((r) => r.json() as Promise<CapabilityReport>)
       .then((body) => { if (alive) setCapability(body) })
       .catch(() => { if (alive) setCapability(null) })
     return () => { alive = false }
-  }, [open, format, genLanguage])
+  }, [open, settingsLoaded, format, genLanguage])
 
   /** Default file name placeholder of the dialog. */
   const defaultFileName = `electro-lab-${recordId.slice(0, 8)}.${formatExtension(format)}`

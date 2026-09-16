@@ -477,15 +477,20 @@ async function probePackages(language: ArticleLanguage): Promise<string[]> {
   return missing
 }
 
-const capabilityCache = new Map<string, CapabilityReport>()
+/** The toolchain half of the report: one answer for every language, probed and logged once per TTL. */
+interface Toolchain {
+  ready: boolean
+  driver: string | null
+  drivers: DriverProbe[]
+  engine: DriverProbe
+  checkedAt: number
+}
 
 /**
- * The capability report for one article language, probed at most once per CAPABILITY_TTL_MS. This is the
- * only place that picks a driver: everything after it uses what was picked and reports what happened.
+ * Probe the drivers and the engine they would run. A driver that cannot run is logged here — once,
+ * because this is the only place that looks at them.
  */
-async function readCapability(language: ArticleLanguage): Promise<CapabilityReport> {
-  const cached = capabilityCache.get(language)
-  if (cached !== undefined && Date.now() - cached.checkedAt < CAPABILITY_TTL_MS) return cached
+async function probeToolchain(): Promise<Toolchain> {
   const drivers: DriverProbe[] = []
   for (const driver of LATEX_DRIVERS) {
     const probe = await probeDriver(driver.command)
@@ -494,20 +499,60 @@ async function readCapability(language: ArticleLanguage): Promise<CapabilityRepo
     if (probe.ok) break
   }
   const chosen = drivers.find((probe) => probe.ok)
-  const engine = chosen === undefined ? { command: REQUIRED_ENGINE, ok: false, detail: 'no driver to run it' } : await probeDriver(REQUIRED_ENGINE)
+  const engine = chosen === undefined
+    ? { command: REQUIRED_ENGINE, ok: false, detail: 'no driver to run it' }
+    : await probeDriver(REQUIRED_ENGINE)
   if (chosen !== undefined && !engine.ok) log.warn('latex driver unusable', { driver: engine.command, error: engine.detail })
   const ready = chosen !== undefined && engine.ok
-  const report: CapabilityReport = {
-    ready,
-    driver: ready ? chosen.path ?? chosen.command : null,
-    drivers,
-    engine,
-    // Without a working toolchain the packages decide nothing, and probing them would only add latency.
-    missingPackages: ready ? await probePackages(language) : [],
-    checkedAt: Date.now(),
+  return { ready, driver: ready ? chosen.path ?? chosen.command : null, drivers, engine, checkedAt: Date.now() }
+}
+
+let toolchainCache: Toolchain | null = null
+let toolchainProbe: Promise<Toolchain> | null = null
+
+/** The toolchain, re-probed after CAPABILITY_TTL_MS; callers arriving during a probe share it. */
+async function readToolchain(): Promise<Toolchain> {
+  const cached = toolchainCache
+  if (cached !== null && Date.now() - cached.checkedAt < CAPABILITY_TTL_MS) return cached
+  if (toolchainProbe !== null) return toolchainProbe
+  const probe = probeToolchain()
+  toolchainProbe = probe
+  try {
+    const toolchain = await probe
+    toolchainCache = toolchain
+    return toolchain
+  } finally {
+    toolchainProbe = null
   }
-  capabilityCache.set(language, report)
-  return report
+}
+
+const packageCache = new Map<ArticleLanguage, { checkedAt: number; missing: string[] }>()
+
+/** This language's missing shell macros, probed at most once per CAPABILITY_TTL_MS. */
+async function readPackages(language: ArticleLanguage): Promise<string[]> {
+  const cached = packageCache.get(language)
+  if (cached !== undefined && Date.now() - cached.checkedAt < CAPABILITY_TTL_MS) return cached.missing
+  const missing = await probePackages(language)
+  packageCache.set(language, { checkedAt: Date.now(), missing })
+  return missing
+}
+
+/**
+ * The capability report for one article language. The toolchain is decided once per TTL for the whole
+ * process, so concurrent dialog and job-start checks neither re-probe nor re-log it; only the macros
+ * depend on the language.
+ */
+async function readCapability(language: ArticleLanguage): Promise<CapabilityReport> {
+  const toolchain = await readToolchain()
+  return {
+    ready: toolchain.ready,
+    driver: toolchain.driver,
+    drivers: toolchain.drivers,
+    engine: toolchain.engine,
+    // Without a working toolchain the packages decide nothing, and probing them would only add latency.
+    missingPackages: toolchain.ready ? await readPackages(language) : [],
+    checkedAt: toolchain.checkedAt,
+  }
 }
 
 /** Start a background generation job and return its id; progress is polled via GET /generate-progress. */
