@@ -23,8 +23,8 @@ interface CapabilityReport {
   drivers: Array<{ command: string; ok: boolean; path?: string; detail?: string }>
   engine: { command: string; ok: boolean; path?: string; detail?: string }
   missingPackages: string[]
-  checkedAt: number
 }
+
 const REVEAL_ENDPOINT = '/api/dsh-electro-lab/reveal'
 const LIST_DIRS_ENDPOINT = '/api/dsh-electro-lab/list-dirs'
 const LIST_ROOTS_ENDPOINT = '/api/dsh-electro-lab/list-roots'
@@ -662,7 +662,9 @@ export function GenerationOverlay(): React.JSX.Element | null {
                   )}
                   {progress.compileError !== undefined && progress.pdfPath === undefined && (
                     <div style={{ marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {t('compileFailed')} {progress.compileError}
+                      {progress.compileError.length > 0
+                        ? `${t('compileFailed')} ${progress.compileError}`
+                        : t('compileFailedNoDetail')}
                     </div>
                   )}
                 </>

@@ -315,6 +315,11 @@ interface GenerateJob {
   phase: GenerationPhase
   path?: string
   pdfPath?: string
+  /**
+   * The compile failure's one line, when there is one to quote (the engine's or driver's own words).
+   * An empty string means compilation failed without anything worth quoting; the client then says so
+   * in its own language, and the log holds the technical detail.
+   */
   compileError?: string
   error?: string
   abort: () => void
@@ -322,25 +327,34 @@ interface GenerateJob {
 
 const generateJobs = new Map<string, GenerateJob>()
 
+/** One finished command: its exit code (null = it never started), output tail, and whether it was killed. */
+interface CommandResult {
+  ok: boolean
+  code: number | null
+  output: string
+  timedOut: boolean
+}
+
 /** Run one command and collect its output tail; kills on timeout. */
-function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<{ ok: boolean; code: number | null; output: string }> {
+function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<CommandResult> {
   return new Promise((resolve) => {
     try {
       const child = spawn(command, args, { cwd })
       let output = ''
-      const timer = setTimeout(() => { child.kill() }, timeoutMs)
+      let timedOut = false
+      const timer = setTimeout(() => { timedOut = true; child.kill() }, timeoutMs)
       child.stdout?.on('data', (chunk: Buffer) => { output += String(chunk) })
       child.stderr?.on('data', (chunk: Buffer) => { output += String(chunk) })
       child.on('error', (error) => {
         clearTimeout(timer)
-        resolve({ ok: false, code: null, output: error.message })
+        resolve({ ok: false, code: null, output: error.message, timedOut })
       })
       child.on('close', (code) => {
         clearTimeout(timer)
-        resolve({ ok: code === 0, code, output: output.slice(-4000) })
+        resolve({ ok: code === 0, code, output: output.slice(-4000), timedOut })
       })
     } catch (error) {
-      resolve({ ok: false, code: null, output: error instanceof Error ? error.message : String(error) })
+      resolve({ ok: false, code: null, output: error instanceof Error ? error.message : String(error), timedOut: false })
     }
   })
 }
@@ -402,20 +416,35 @@ function firstLine(text: string): string {
 /**
  * Compile a generated LaTeX source to PDF with the driver the pre-flight chose: one run, no fallback and
  * no choice made here. The driver owns how many times the engine runs; this function only reports what
- * came of it.
+ * came of it — `detail` for the log (the driver's own output, or a description of its silence) and
+ * `quoted` for the dialog (the one line worth showing, empty when the driver said nothing usable).
  */
-async function compileLatexToPdf(directory: string, fileName: string, driver: string): Promise<{ ok: true; pdfPath: string } | { ok: false; detail: string }> {
+async function compileLatexToPdf(directory: string, fileName: string, driver: string): Promise<{ ok: true; pdfPath: string } | { ok: false; detail: string; quoted: string }> {
   const pdfPath = join(directory, fileName.replace(/\.(tex)$/i, '.pdf'))
+  const name = basename(driver)
   const result = await runCommand(driver, [...driverArgs(driver), fileName], directory, COMPILE_TIMEOUT_MS)
-  if (!result.ok) return { ok: false, detail: result.output.trim() }
-  if (!existsSync(pdfPath)) return { ok: false, detail: `${basename(driver)} finished but produced no PDF` }
+  if (!result.ok) {
+    // A driver that never started and one that was killed have nothing of their own to quote.
+    const started = result.code !== null
+    return {
+      ok: false,
+      detail: result.timedOut
+        ? `the driver timed out after ${COMPILE_TIMEOUT_MS / 1000} s`
+        : started
+          ? result.output.trim() || 'the driver failed without any output'
+          : `${name} could not be started: ${result.output.trim()}`,
+      quoted: result.timedOut || !started ? '' : firstLine(result.output),
+    }
+  }
+  if (!existsSync(pdfPath)) {
+    const failure = `${name} finished but produced no PDF`
+    return { ok: false, detail: failure, quoted: failure }
+  }
   return { ok: true, pdfPath }
 }
 
 /* ── Capability pre-flight ─────────────────────────────────────────────────── */
 
-/** How long a capability report is reused before the drivers are probed again. */
-const CAPABILITY_TTL_MS = 30_000
 /** A probe is only a version query; a driver that does not answer quickly is unusable anyway. */
 const PROBE_TIMEOUT_MS = 5_000
 
@@ -443,8 +472,6 @@ export interface CapabilityReport {
   drivers: DriverProbe[]
   engine: DriverProbe
   missingPackages: string[]
-  /** When this report was produced; the host probes again after CAPABILITY_TTL_MS. */
-  checkedAt: number
 }
 
 /** Probe one command by asking for its version: exit 0 means it can run at all. */
@@ -477,13 +504,12 @@ async function probePackages(language: ArticleLanguage): Promise<string[]> {
   return missing
 }
 
-/** The toolchain half of the report: one answer for every language, probed and logged once per TTL. */
+/** The toolchain half of the report: one answer for every language, probed and logged once. */
 interface Toolchain {
   ready: boolean
   driver: string | null
   drivers: DriverProbe[]
   engine: DriverProbe
-  checkedAt: number
 }
 
 /**
@@ -504,16 +530,19 @@ async function probeToolchain(): Promise<Toolchain> {
     : await probeDriver(REQUIRED_ENGINE)
   if (chosen !== undefined && !engine.ok) log.warn('latex driver unusable', { driver: engine.command, error: engine.detail })
   const ready = chosen !== undefined && engine.ok
-  return { ready, driver: ready ? chosen.path ?? chosen.command : null, drivers, engine, checkedAt: Date.now() }
+  return { ready, driver: ready ? chosen.path ?? chosen.command : null, drivers, engine }
 }
 
 let toolchainCache: Toolchain | null = null
 let toolchainProbe: Promise<Toolchain> | null = null
 
-/** The toolchain, re-probed after CAPABILITY_TTL_MS; callers arriving during a probe share it. */
+/**
+ * The toolchain, probed once per plugin mount: neither generating an article nor installing a TeX
+ * distribution is a frequent event, so a host restart — which an installation wants anyway — is the
+ * natural moment to look again. Callers arriving during the first probe share it.
+ */
 async function readToolchain(): Promise<Toolchain> {
-  const cached = toolchainCache
-  if (cached !== null && Date.now() - cached.checkedAt < CAPABILITY_TTL_MS) return cached
+  if (toolchainCache !== null) return toolchainCache
   if (toolchainProbe !== null) return toolchainProbe
   const probe = probeToolchain()
   toolchainProbe = probe
@@ -526,21 +555,20 @@ async function readToolchain(): Promise<Toolchain> {
   }
 }
 
-const packageCache = new Map<ArticleLanguage, { checkedAt: number; missing: string[] }>()
+const packageCache = new Map<ArticleLanguage, string[]>()
 
-/** This language's missing shell macros, probed at most once per CAPABILITY_TTL_MS. */
+/** This language's missing shell macros, probed once per plugin mount like the toolchain. */
 async function readPackages(language: ArticleLanguage): Promise<string[]> {
   const cached = packageCache.get(language)
-  if (cached !== undefined && Date.now() - cached.checkedAt < CAPABILITY_TTL_MS) return cached.missing
+  if (cached !== undefined) return cached
   const missing = await probePackages(language)
-  packageCache.set(language, { checkedAt: Date.now(), missing })
+  packageCache.set(language, missing)
   return missing
 }
 
 /**
- * The capability report for one article language. The toolchain is decided once per TTL for the whole
- * process, so concurrent dialog and job-start checks neither re-probe nor re-log it; only the macros
- * depend on the language.
+ * The capability report for one article language. The toolchain is decided once for the whole process,
+ * so neither a dialog nor a job start re-probes or re-logs it; only the macros depend on the language.
  */
 async function readCapability(language: ArticleLanguage): Promise<CapabilityReport> {
   const toolchain = await readToolchain()
@@ -551,7 +579,6 @@ async function readCapability(language: ArticleLanguage): Promise<CapabilityRepo
     engine: toolchain.engine,
     // Without a working toolchain the packages decide nothing, and probing them would only add latency.
     missingPackages: toolchain.ready ? await readPackages(language) : [],
-    checkedAt: toolchain.checkedAt,
   }
 }
 
@@ -596,16 +623,16 @@ function startGenerateJob(
         if (driver === null) {
           // The pre-flight refuses this combination, so this only happens if it changed mid-run.
           log.warn('latex compile failed', { file: target, error: NO_DRIVER_MESSAGE })
-          job.compileError = NO_DRIVER_MESSAGE
+          job.compileError = ''
         } else {
           const compiled = await compileLatexToPdf(targetDir, fileName, driver)
           if (compiled.ok) {
             job.pdfPath = compiled.pdfPath
           } else {
-            // The article is written; report the driver's own first line to the dialog and its full
-            // output to the log, where length costs nothing.
+            // The article is written: the log gets the driver's own output (length costs nothing there)
+            // and the dialog gets the one line worth quoting, or nothing when there is none.
             log.warn('latex compile failed', { file: target, error: compiled.detail })
-            job.compileError = firstLine(compiled.detail)
+            job.compileError = compiled.quoted
           }
         }
       }
