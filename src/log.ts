@@ -2,14 +2,11 @@
  * Plugin logging: one text line per event, two sinks (stdout, one file per host run).
  *
  * The file sink writes `<home>/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log` — one file per plugin mount, that
- * is per host run — and the file is the run's whole record: the name is the start instant, the last
- * line's timestamp is the end, and a file whose last line is not `plugin unmounted` is a run that
- * died instead of finishing. Nothing about a run is written anywhere else: logging touches the state
- * file not at all, because a log fact belongs to the log, not to the plugin's state.
+ * is per host run — and nothing about a run is written anywhere else: logging does not touch the
+ * state file, because a log fact belongs to the log, not to the plugin's state.
  *
- * A line is `<timestamp> <LEVEL> <message>[ k=v …]`:
- *
- *   2025-06-14 12:03:41.882 WARN  external call failed solver=echo ep=http://127.0.0.1:8787 took_ms=1523 code=EXTERNAL_TIMEOUT
+ * A line is `<timestamp> <LEVEL> <message>[ k=v …]`, for example
+ * `2025-06-14 12:03:41.882 WARN  something happened a=1 b="two words"`.
  *
  * The head is positional (timestamp, level label padded to 5, message); the tail is the
  * `key=value` rendering of the object handed to the log call. Field values are JSON
@@ -30,15 +27,8 @@
  * unescaped `"` — otherwise read to the next whitespace. A value therefore carries no
  * whitespace unless quoted, and a message never contains `=`.
  *
- * Messages are a fixed English vocabulary, one per event — they are the only grep anchor:
- *   plugin mounted · plugin unmounted · declaration skipped · presets synced ·
- *   preset sync failed · skill not registered · restart flag not cleared · endpoint failed ·
- *   log file sink unavailable · engine op failed · external call ok · external call failed ·
- *   article generation started · article generation finished · article generation failed ·
- *   latex compile failed
- *
- * Unit suffixes belong to the call site (`took_ms=1523`, never `ms=1523`): a key names a
- * quantity and carries its unit, so a unit change is a new key instead of a silent shift.
+ * Which messages a call site logs, and which fields it passes, are the call site's business —
+ * this module defines only the shape of a line and its file.
  *
  * Logging is disposable run-time diagnostics, never the engine's bookkeeping: the record
  * trace is the authoritative account of a calculation, no record field is derived from a
