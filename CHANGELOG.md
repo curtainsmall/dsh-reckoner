@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-09-16
+
+### Breaking
+
+- PDF compilation now needs a LaTeX **driver**: latexmk (TeX Live) or MiKTeX's texify. A machine with only `xelatex` installed no longer produces a PDF — the setup dialog says so before the run, and the `.tex` is written either way.
+
+### Changed
+
+- PDF compilation is delegated to a LaTeX driver — **latexmk**, else MiKTeX's **texify** — which decides how often the engine runs; the host never runs an engine itself. The LaTeX setup dialog checks the toolchain once per host start: without a usable driver and `xelatex` the Generate button is disabled with the reason shown, missing macros are only a warning, and such a request is refused before any model call.
+- A run compiles with that driver and reports the result: the PDF path, or one failure line with the `.tex` kept. No fallback at run time.
+- The failure line quotes the compiler when it says something, and is otherwise a localized note pointing at the log, which holds the driver's full output.
+
+### Fixed
+
+- The pending-restart flag is cleared at every host start, whether or not external solvers are enabled; a state file that cannot be written is logged as `restart flag not cleared` instead of failing the mount.
+
 ## [0.11.0] - 2026-09-15
 
 ### Added
@@ -207,6 +223,7 @@ oiseFigureDb`, `gainDb`, `magnitudeDb`, `returnLossDb`…) — dB is a log scale
 
 - First public beta of ElectroLab: the complete feature set listed under [0.1.0] above, published to npm under the `beta` dist-tag.
 
+[0.12.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.12.0
 [0.11.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.11.0
 [0.9.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.9.0
 [0.8.1]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.8.1

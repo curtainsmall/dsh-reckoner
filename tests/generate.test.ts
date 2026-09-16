@@ -16,7 +16,7 @@ const sample: Record = {
   id: 'rec-12345678',
   startedAt: 1700000000000,
   settledAt: 1700000001000,
-  question: '给定 R = 100 Ω 与 C = 100 mF，初始电压 100 V，求 1 秒后电压。（根据补充：串联改为并联）',
+  question: '给定 R = 100 Ω 与 C = 100 mF，初始电压 100 V，求 1 秒后电压。',
   analyse: 'RC 放电：τ = R·C，v(t) = V₀·e^(−t/τ)。',
   answer: 'v(1 s) ≈ 90.48 V。',
   calls: [

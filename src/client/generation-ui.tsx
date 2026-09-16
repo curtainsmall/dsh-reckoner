@@ -10,10 +10,21 @@ import { useEffect, useRef, useState } from 'react'
 import { t, useAppLocale, type LocaleKey } from './locales.ts'
 import { Dialog, GhostButton, PrimaryButton } from './ui.tsx'
 import { IconArrowUp, IconFile, IconFolder, IconMinus } from './icons.tsx'
-import { useGenState, startGenerate, cancelGenerate, clearProgress, setMinimized } from './generation.ts'
+import { useGenState, startGenerate, cancelGenerate, clearProgress, setMinimized, type GenProgress } from './generation.ts'
 import { ArticleFormat, ArticleLanguage, GenerationPhase } from '../generate.ts'
 
 const GENERATE_DIR_ENDPOINT = '/api/dsh-electro-lab/generate-dir'
+const GENERATE_CAPABILITY_ENDPOINT = '/api/dsh-electro-lab/generate-capability'
+
+/** What the host can compile with, mirrored from the capability endpoint (LaTeX setup only). */
+interface CapabilityReport {
+  ready: boolean
+  driver: string | null
+  drivers: Array<{ command: string; ok: boolean; path?: string; detail?: string }>
+  engine: { command: string; ok: boolean; path?: string; detail?: string }
+  missingPackages: string[]
+}
+
 const REVEAL_ENDPOINT = '/api/dsh-electro-lab/reveal'
 const LIST_DIRS_ENDPOINT = '/api/dsh-electro-lab/list-dirs'
 const LIST_ROOTS_ENDPOINT = '/api/dsh-electro-lab/list-roots'
@@ -109,6 +120,8 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   const [genCompile, setGenCompile] = useState(false)
   const [genFile, setGenFile] = useState('')
   const [genSetupError, setGenSetupError] = useState<string | null>(null)
+  const [capability, setCapability] = useState<CapabilityReport | null>(null)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
   const { progress: genProgress } = useGenState()
   const genRunning = genProgress?.status === 'running'
   const [dirBrowserOpen, setDirBrowserOpen] = useState(false)
@@ -123,6 +136,7 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   useEffect(() => {
     if (!open) return
     let alive = true
+    setSettingsLoaded(false)
     fetch(GENERATE_DIR_ENDPOINT)
       .then((r) => r.json() as Promise<{ directory?: string; language?: string; compile?: boolean }>)
       .then((body) => {
@@ -133,11 +147,38 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
         if (typeof body.compile === 'boolean') setGenCompile(body.compile)
       })
       .catch(() => {})
+      .finally(() => { if (alive) setSettingsLoaded(true) })
     return () => { alive = false }
   }, [open])
 
+  /**
+   * What this machine can compile with (LaTeX only): the host probes for a driver and for the
+   * document shell's macros. A missing driver blocks the button; missing macros are only a hint,
+   * because a TeX distribution may install them on demand. Asked once the remembered settings have
+   * arrived, so the check runs for the language the dialog actually shows.
+   */
+  useEffect(() => {
+    if (!open || !settingsLoaded || format !== ArticleFormat.Latex) return
+    let alive = true
+    fetch(`${GENERATE_CAPABILITY_ENDPOINT}?language=${encodeURIComponent(genLanguage)}`)
+      .then((r) => r.json() as Promise<CapabilityReport>)
+      .then((body) => { if (alive) setCapability(body) })
+      .catch(() => { if (alive) setCapability(null) })
+    return () => { alive = false }
+  }, [open, settingsLoaded, format, genLanguage])
+
   /** Default file name placeholder of the dialog. */
   const defaultFileName = `electro-lab-${recordId.slice(0, 8)}.${formatExtension(format)}`
+
+  /** The host checked and cannot compile: the run would fail, so refuse it here. */
+  const toolchainMissing = format === ArticleFormat.Latex && capability !== null && !capability.ready
+  const compileBlocked = toolchainMissing && genCompile
+  const toolchainDetail = capability === null
+    ? ''
+    : capability.driver === null
+      ? capability.drivers.find((probe) => !probe.ok && probe.detail !== undefined)?.detail ?? ''
+      : capability.engine.ok ? '' : capability.engine.detail ?? ''
+  const missingPackages = genCompile && capability !== null && capability.ready ? capability.missingPackages : []
 
   /** Persist the directory and language, and — LaTeX only — the PDF-compile toggle. */
   const saveGenState = (): void => {
@@ -400,7 +441,7 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
         onClose={closeDialog}
         footer={[
           <GhostButton key="cancel" onClick={closeDialog}>{t('cancel')}</GhostButton>,
-          <PrimaryButton key="generate" disabled={genRunning} onClick={runGenerate}>{t('generate')}</PrimaryButton>,
+          <PrimaryButton key="generate" disabled={genRunning || compileBlocked} onClick={runGenerate}>{t('generate')}</PrimaryButton>,
         ]}
       >
         <div style={{ display: 'grid', gridTemplateColumns: '104px 1fr', gap: '12px 10px', alignItems: 'center' }}>
@@ -444,6 +485,19 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
               onChange={(e) => setGenCompile(e.target.checked)}
               style={{ width: 14, height: 14, accentColor: 'var(--dsw-alias-state-business-primary)', cursor: 'pointer' }}
             />
+          )}
+          {compileBlocked && (
+            <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-state-error-primary)' }}>
+              {t('toolchainMissing')}
+              {toolchainDetail.length > 0 && (
+                <div style={{ marginTop: 2, color: 'var(--dsw-alias-label-tertiary)', wordBreak: 'break-word' }}>{toolchainDetail}</div>
+              )}
+            </div>
+          )}
+          {missingPackages.length > 0 && (
+            <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-state-warn-primary)', wordBreak: 'break-word' }}>
+              {t('macroHint')} {missingPackages.join(', ')}
+            </div>
           )}
         </div>
         {genSetupError !== null && (
@@ -510,6 +564,17 @@ async function launchPath(path: string, action: 'open' | 'reveal'): Promise<void
 }
 
 /**
+ * The title of the progress dialog and of the minimized pill: one word per job status.
+ */
+function statusTitle(status: GenProgress['status']): string {
+  switch (status) {
+    case 'done': return t('generateDone')
+    case 'error': return t('generateFailed')
+    default: return t('generating')
+  }
+}
+
+/**
  * The generation overlay: the progress dialog and the minimized status pill,
  * rendered in a body-level React root (panel.tsx). Driven by the module-level
  * generation store, so a running job survives any navigation.
@@ -529,7 +594,7 @@ export function GenerationOverlay(): React.JSX.Element | null {
       {!minimized && (
         <Dialog
           open
-          title={progress.status === 'done' ? t('generateDone') : progress.status === 'error' ? t('generateFailed') : t('generating')}
+          title={statusTitle(progress.status)}
           width={380}
           height={190}
           dismissible={false}
@@ -597,7 +662,9 @@ export function GenerationOverlay(): React.JSX.Element | null {
                   )}
                   {progress.compileError !== undefined && progress.pdfPath === undefined && (
                     <div style={{ marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {t('compileFailed')} {progress.compileError}
+                      {progress.compileError.length > 0
+                        ? `${t('compileFailed')} ${progress.compileError}`
+                        : t('compileFailedNoDetail')}
                     </div>
                   )}
                 </>
@@ -615,7 +682,7 @@ export function GenerationOverlay(): React.JSX.Element | null {
         <button
           type="button"
           onClick={() => setMinimized(false)}
-          title={progress.status === 'running' ? t('generating') : progress.status === 'error' ? t('generateFailed') : t('generateDone')}
+          title={statusTitle(progress.status)}
           style={{
             position: 'fixed',
             right: 16,
@@ -647,7 +714,7 @@ export function GenerationOverlay(): React.JSX.Element | null {
                 : 'var(--dsw-alias-label-secondary)',
           }} />
           <span>
-            {progress.status === 'done' ? t('generateDone') : progress.status === 'error' ? t('generateFailed') : t('generating')}
+            {statusTitle(progress.status)}
           </span>
           {progress.status === 'running' && (
             <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--dsw-alias-label-secondary)' }}>{formatElapsed(elapsed)}</span>

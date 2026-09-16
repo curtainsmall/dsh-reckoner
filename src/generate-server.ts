@@ -1,13 +1,13 @@
 /**
  * Host article generation subsystem: LLM article jobs, file writing, optional
- * PDF compilation for LaTeX (xelatex), OS reveal/open, host-driven directory
- * browsing and the remembered generation settings. Ported from the v0.9.0
+ * PDF compilation for LaTeX (delegated to latexmk), OS reveal/open, host-driven
+ * directory browsing and the remembered generation settings. Ported from the v0.9.0
  * generation feature and wired to the engine record store through the
  * `loadRecord` dependency — this module has no Cordis imports; `register`
  * takes the services it needs (web server, optional llm/agentDefaultModel).
  */
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, basename } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -84,6 +84,7 @@ export const LIST_DIRS_PATH = '/api/dsh-electro-lab/list-dirs'
 export const LIST_ROOTS_PATH = '/api/dsh-electro-lab/list-roots'
 export const DIRECTORY_TREE_CSS_PATH = '/api/dsh-electro-lab/directory-tree.css'
 export const GENERATE_DIR_PATH = '/api/dsh-electro-lab/generate-dir'
+export const GENERATE_CAPABILITY_PATH = '/api/dsh-electro-lab/generate-capability'
 
 /** Legacy plain-text location of the remembered directory (migrated on read). */
 const LEGACY_GENERATE_DIR_FILE = 'generate-dir.txt'
@@ -314,6 +315,11 @@ interface GenerateJob {
   phase: GenerationPhase
   path?: string
   pdfPath?: string
+  /**
+   * The compile failure's one line, when there is one to quote (the engine's or driver's own words).
+   * An empty string means compilation failed without anything worth quoting; the client then says so
+   * in its own language, and the log holds the technical detail.
+   */
   compileError?: string
   error?: string
   abort: () => void
@@ -321,64 +327,259 @@ interface GenerateJob {
 
 const generateJobs = new Map<string, GenerateJob>()
 
+/** One finished command: its exit code (null = it never started), output tail, and whether it was killed. */
+interface CommandResult {
+  ok: boolean
+  code: number | null
+  output: string
+  timedOut: boolean
+}
+
 /** Run one command and collect its output tail; kills on timeout. */
-function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<{ ok: boolean; code: number | null; output: string }> {
+function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<CommandResult> {
   return new Promise((resolve) => {
     try {
       const child = spawn(command, args, { cwd })
       let output = ''
-      const timer = setTimeout(() => { child.kill() }, timeoutMs)
+      let timedOut = false
+      const timer = setTimeout(() => { timedOut = true; child.kill() }, timeoutMs)
       child.stdout?.on('data', (chunk: Buffer) => { output += String(chunk) })
       child.stderr?.on('data', (chunk: Buffer) => { output += String(chunk) })
       child.on('error', (error) => {
         clearTimeout(timer)
-        resolve({ ok: false, code: null, output: error.message })
+        resolve({ ok: false, code: null, output: error.message, timedOut })
       })
       child.on('close', (code) => {
         clearTimeout(timer)
-        resolve({ ok: code === 0, code, output: output.slice(-4000) })
+        resolve({ ok: code === 0, code, output: output.slice(-4000), timedOut })
       })
     } catch (error) {
-      resolve({ ok: false, code: null, output: error instanceof Error ? error.message : String(error) })
+      resolve({ ok: false, code: null, output: error instanceof Error ? error.message : String(error), timedOut: false })
     }
   })
 }
 
-/** Candidate xelatex commands: PATH first, then known MiKTeX install locations on Windows. */
-function xelatexCandidates(): string[] {
-  const candidates = ['xelatex']
+/**
+ * The LaTeX drivers compilation can be delegated to, in preference order: latexmk (TeX Live, and MiKTeX
+ * with its Perl runtime), then texify (MiKTeX's own driver, no Perl). Both decide themselves how many
+ * engine passes a document needs. Which one a run uses is settled before the run starts.
+ */
+const LATEX_DRIVERS: Array<{ command: string; args: string[] }> = [
+  { command: 'latexmk', args: ['-pdfxe', '-interaction=nonstopmode', '-halt-on-error', '-synctex=1'] },
+  { command: 'texify', args: ['--pdf', '--engine=xetex', '--synctex=1', '--tex-option=--interaction=nonstopmode'] },
+]
+/** Both drivers run this engine; a distribution without it cannot produce a PDF however good the driver is. */
+const REQUIRED_ENGINE = 'xelatex'
+/** One driver's own budget; it runs the engine as often as it needs inside it. */
+const COMPILE_TIMEOUT_MS = 120_000
+/** What the dialog says when no driver is installed at all. */
+const NO_DRIVER_MESSAGE = 'no LaTeX driver found (latexmk or texify)'
+/** What it says when a driver exists but the engine it would run does not. */
+const NO_ENGINE_MESSAGE = 'no xelatex engine found'
+/** The argument set of a driver the pre-flight chose; the run only uses it and never picks one itself. */
+function driverArgs(command: string): string[] {
+  const known = LATEX_DRIVERS.find((driver) => command.toLowerCase().includes(driver.command))
+  if (known === undefined) throw new Error(`unknown LaTeX driver "${command}"`)
+  return known.args
+}
+
+/** Where one driver binary is looked for: PATH first, then the known MiKTeX install locations on Windows. */
+function driverCandidates(command: string): string[] {
+  const candidates = [command]
   if (process.platform === 'win32') {
     for (const root of listDriveRoots()) {
-      candidates.push(join(root, 'MiKTeX', 'miktex', 'bin', 'x64', 'xelatex.exe'))
+      candidates.push(join(root, 'MiKTeX', 'miktex', 'bin', 'x64', `${command}.exe`))
     }
     const local = process.env.LOCALAPPDATA
-    if (local !== undefined) candidates.push(join(local, 'Programs', 'MiKTeX', 'miktex', 'bin', 'x64', 'xelatex.exe'))
-    candidates.push('C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\xelatex.exe')
-    candidates.push('C:\\Program Files (x86)\\MiKTeX\\miktex\\bin\\x64\\xelatex.exe')
+    if (local !== undefined) candidates.push(join(local, 'Programs', 'MiKTeX', 'miktex', 'bin', 'x64', `${command}.exe`))
+    candidates.push(`C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\${command}.exe`)
+    candidates.push(`C:\\Program Files (x86)\\MiKTeX\\miktex\\bin\\x64\\${command}.exe`)
   }
   return candidates
 }
 
-/** Compile a generated LaTeX source to PDF with xelatex (two passes so \label/\ref resolve). */
-async function compileLatexToPdf(directory: string, fileName: string): Promise<{ ok: true; pdfPath: string } | { ok: false; error: string }> {
+/**
+ * One short line for the dialog; a driver's full output goes to the log, where length costs nothing.
+ * A TeX error line (the engine marks those with `!`) says the most, then a line naming a cause, and
+ * only then the driver's own wrapper line — its banner is worth nothing to the reader.
+ */
+function firstLine(text: string): string {
+  const lines = text.split('\n').map((line) => line.trim()).filter((line) => line.length > 0)
+  const line = lines.find((part) => part.startsWith('!'))
+    ?? lines.find((part) => /error|could not|can't|cannot|not found/i.test(part))
+    ?? lines.find((part) => /did not succeed/i.test(part))
+    ?? lines[0]
+    ?? ''
+  return line.length > 120 ? `${line.slice(0, 120)}…` : line
+}
+
+/**
+ * Compile a generated LaTeX source to PDF with the driver the pre-flight chose: one run, no fallback and
+ * no choice made here. The driver owns how many times the engine runs; this function only reports what
+ * came of it — `detail` for the log (the driver's own output, or a description of its silence) and
+ * `quoted` for the dialog (the one line worth showing, empty when the driver said nothing usable).
+ */
+async function compileLatexToPdf(directory: string, fileName: string, driver: string): Promise<{ ok: true; pdfPath: string } | { ok: false; detail: string; quoted: string }> {
   const pdfPath = join(directory, fileName.replace(/\.(tex)$/i, '.pdf'))
-  const args = ['-interaction=nonstopmode', '-halt-on-error', '-synctex=1']
-  if (process.platform === 'win32') args.push('--enable-installer')
-  args.push(fileName)
-  let firstFailure: string | undefined
-  for (const command of xelatexCandidates()) {
-    const first = await runCommand(command, args, directory, 100_000)
-    if (!first.ok) {
-      if (first.code !== null || !first.output.includes('ENOENT')) {
-        firstFailure = `xelatex failed: ${first.output.trim()}`
-      }
-      continue
+  const name = basename(driver)
+  const result = await runCommand(driver, [...driverArgs(driver), fileName], directory, COMPILE_TIMEOUT_MS)
+  if (!result.ok) {
+    // A driver that never started and one that was killed have nothing of their own to quote.
+    const started = result.code !== null
+    return {
+      ok: false,
+      detail: result.timedOut
+        ? `the driver timed out after ${COMPILE_TIMEOUT_MS / 1000} s`
+        : started
+          ? result.output.trim() || 'the driver failed without any output'
+          : `${name} could not be started: ${result.output.trim()}`,
+      quoted: result.timedOut || !started ? '' : firstLine(result.output),
     }
-    await runCommand(command, args, directory, 100_000)
-    if (!existsSync(pdfPath)) return { ok: false, error: 'xelatex finished but produced no PDF' }
-    return { ok: true, pdfPath }
   }
-  return { ok: false, error: firstFailure ?? 'xelatex was not found on this machine' }
+  if (!existsSync(pdfPath)) {
+    const failure = `${name} finished but produced no PDF`
+    return { ok: false, detail: failure, quoted: failure }
+  }
+  return { ok: true, pdfPath }
+}
+
+/* ── Capability pre-flight ─────────────────────────────────────────────────── */
+
+/** A probe is only a version query; a driver that does not answer quickly is unusable anyway. */
+const PROBE_TIMEOUT_MS = 5_000
+
+/** The macros each document shell needs (a missing one is a hint, never a block: MiKTeX installs on demand). */
+const SHELL_PACKAGES: { [language in TemplateLanguage]: string[] } = {
+  [TemplateLanguage.ZhCN]: ['ctexart.cls'],
+  [TemplateLanguage.En]: ['fontspec.sty', 'unicode-math.sty', 'siunitx.sty'],
+}
+
+interface DriverProbe {
+  command: string
+  ok: boolean
+  /** The command to run, when it answered (a resolved path when the probe had to look one up). */
+  path?: string
+  /** Why it cannot be used, in one short line, when it cannot. */
+  detail?: string
+}
+
+/** What this machine can compile with, and what its shells may be missing. */
+export interface CapabilityReport {
+  /** True when a driver and the engine it runs are both usable: the run may start. */
+  ready: boolean
+  /** The command the run will compile with, or null when nothing can. */
+  driver: string | null
+  drivers: DriverProbe[]
+  engine: DriverProbe
+  missingPackages: string[]
+}
+
+/** Probe one command by asking for its version: exit 0 means it can run at all. */
+async function probeDriver(command: string): Promise<DriverProbe> {
+  for (const candidate of driverCandidates(command)) {
+    const result = await runCommand(candidate, ['--version'], homedir(), PROBE_TIMEOUT_MS)
+    if (!result.ok) {
+      if (result.code === null) continue
+      return { command, ok: false, detail: firstLine(result.output) }
+    }
+    return { command, ok: true, path: candidate }
+  }
+  return { command, ok: false, detail: 'not installed' }
+}
+
+/** Which of the asked languages' shell macros kpsewhich cannot find; no kpsewhich at all means all of them. */
+async function probePackages(language: ArticleLanguage): Promise<string[]> {
+  const templates = language === ArticleLanguage.ZhCN
+    ? [TemplateLanguage.ZhCN]
+    : language === ArticleLanguage.En
+      ? [TemplateLanguage.En]
+      : [TemplateLanguage.ZhCN, TemplateLanguage.En]
+  const missing: string[] = []
+  for (const template of templates) {
+    for (const file of SHELL_PACKAGES[template]) {
+      const found = await runCommand('kpsewhich', [file], homedir(), PROBE_TIMEOUT_MS)
+      if (!found.ok || found.output.trim().length === 0) missing.push(file)
+    }
+  }
+  return missing
+}
+
+/** The toolchain half of the report: one answer for every language, probed and logged once. */
+interface Toolchain {
+  ready: boolean
+  driver: string | null
+  drivers: DriverProbe[]
+  engine: DriverProbe
+}
+
+/**
+ * Probe the drivers and the engine they would run. A driver that cannot run is logged here — once,
+ * because this is the only place that looks at them.
+ */
+async function probeToolchain(): Promise<Toolchain> {
+  const drivers: DriverProbe[] = []
+  for (const driver of LATEX_DRIVERS) {
+    const probe = await probeDriver(driver.command)
+    drivers.push(probe)
+    if (!probe.ok) log.warn('latex driver unusable', { driver: probe.command, error: probe.detail })
+    if (probe.ok) break
+  }
+  const chosen = drivers.find((probe) => probe.ok)
+  const engine = chosen === undefined
+    ? { command: REQUIRED_ENGINE, ok: false, detail: 'no driver to run it' }
+    : await probeDriver(REQUIRED_ENGINE)
+  if (chosen !== undefined && !engine.ok) log.warn('latex driver unusable', { driver: engine.command, error: engine.detail })
+  const ready = chosen !== undefined && engine.ok
+  return { ready, driver: ready ? chosen.path ?? chosen.command : null, drivers, engine }
+}
+
+let toolchainCache: Toolchain | null = null
+let toolchainProbe: Promise<Toolchain> | null = null
+
+/**
+ * The toolchain, probed once per plugin mount: neither generating an article nor installing a TeX
+ * distribution is a frequent event, so a host restart — which an installation wants anyway — is the
+ * natural moment to look again. Callers arriving during the first probe share it.
+ */
+async function readToolchain(): Promise<Toolchain> {
+  if (toolchainCache !== null) return toolchainCache
+  if (toolchainProbe !== null) return toolchainProbe
+  const probe = probeToolchain()
+  toolchainProbe = probe
+  try {
+    const toolchain = await probe
+    toolchainCache = toolchain
+    return toolchain
+  } finally {
+    toolchainProbe = null
+  }
+}
+
+const packageCache = new Map<ArticleLanguage, string[]>()
+
+/** This language's missing shell macros, probed once per plugin mount like the toolchain. */
+async function readPackages(language: ArticleLanguage): Promise<string[]> {
+  const cached = packageCache.get(language)
+  if (cached !== undefined) return cached
+  const missing = await probePackages(language)
+  packageCache.set(language, missing)
+  return missing
+}
+
+/**
+ * The capability report for one article language. The toolchain is decided once for the whole process,
+ * so neither a dialog nor a job start re-probes or re-logs it; only the macros depend on the language.
+ */
+async function readCapability(language: ArticleLanguage): Promise<CapabilityReport> {
+  const toolchain = await readToolchain()
+  return {
+    ready: toolchain.ready,
+    driver: toolchain.driver,
+    drivers: toolchain.drivers,
+    engine: toolchain.engine,
+    // Without a working toolchain the packages decide nothing, and probing them would only add latency.
+    missingPackages: toolchain.ready ? await readPackages(language) : [],
+  }
 }
 
 /** Start a background generation job and return its id; progress is polled via GET /generate-progress. */
@@ -391,6 +592,8 @@ function startGenerateJob(
   language: ArticleLanguage,
   format: ArticleFormat,
   compile: boolean,
+  /** The driver the pre-flight chose for this request; LaTeX + compile always arrives with one. */
+  driver: string | null,
 ): string {
   const jobId = randomUUID()
   const controller = new AbortController()
@@ -417,11 +620,20 @@ function startGenerateJob(
       if (compile && isLatex) {
         job.phase = GenerationPhase.Compile
         job.percent = 96
-        const compiled = await compileLatexToPdf(targetDir, fileName)
-        if (compiled.ok) job.pdfPath = compiled.pdfPath
-        else {
-          job.compileError = compiled.error
-          log.warn('latex compile failed', { file: target, error: compiled.error })
+        if (driver === null) {
+          // The pre-flight refuses this combination, so this only happens if it changed mid-run.
+          log.warn('latex compile failed', { file: target, error: NO_DRIVER_MESSAGE })
+          job.compileError = ''
+        } else {
+          const compiled = await compileLatexToPdf(targetDir, fileName, driver)
+          if (compiled.ok) {
+            job.pdfPath = compiled.pdfPath
+          } else {
+            // The article is written: the log gets the driver's own output (length costs nothing there)
+            // and the dialog gets the one line worth quoting, or nothing when there is none.
+            log.warn('latex compile failed', { file: target, error: compiled.detail })
+            job.compileError = compiled.quoted
+          }
         }
       }
       job.status = 'done'
@@ -441,7 +653,7 @@ function startGenerateJob(
 }
 
 /** Validate the generation request and start the job; throws on bad input. */
-function beginGenerate(ctx: GenerateContext, deps: GenerateDeps, url: string): { jobId: string } {
+async function beginGenerate(ctx: GenerateContext, deps: GenerateDeps, url: string): Promise<{ jobId: string }> {
   const params = new URL(url, 'http://dsh.local').searchParams
   const recordId = params.get('recordId') ?? ''
   const formatParam = params.get('format') ?? ArticleFormat.Markdown
@@ -459,8 +671,19 @@ function beginGenerate(ctx: GenerateContext, deps: GenerateDeps, url: string): {
     : normalizeFileName(rawName, formatParam)
 
   const compile = params.get('compile') === 'true'
+  // Pre-flight: an article that cannot be compiled is never generated, and the driver it would use is
+  // settled here — the run below only uses it.
+  let driver: string | null = null
+  if (compile && formatParam === ArticleFormat.Latex) {
+    const capability = await readCapability(languageParam)
+    if (capability.driver === null) {
+      // Name whichever half is missing: a driver, or the engine that driver would run.
+      throw new Error(capability.drivers.some((probe) => probe.ok) ? NO_ENGINE_MESSAGE : NO_DRIVER_MESSAGE)
+    }
+    driver = capability.driver
+  }
 
-  return { jobId: startGenerateJob(ctx, deps, record, directory, fileName, languageParam, formatParam, compile) }
+  return { jobId: startGenerateJob(ctx, deps, record, directory, fileName, languageParam, formatParam, compile, driver) }
 }
 
 /** Register every generation endpoint; returns one disposer for all of them. */
@@ -471,7 +694,7 @@ export function registerGenerateEndpoints(ctx: GenerateContext, deps: GenerateDe
   disposers.push(ctx.webServer.register({
     kind: 'exact',
     path: GENERATE_PATH,
-    handler: (req, res) => {
+    handler: async (req, res) => {
       const request = req as RequestLike
       if ((request.method ?? 'GET') !== 'POST') {
         res.statusCode = 405
@@ -479,7 +702,7 @@ export function registerGenerateEndpoints(ctx: GenerateContext, deps: GenerateDe
         return
       }
       try {
-        const { jobId } = beginGenerate(ctx, deps, request.url ?? '')
+        const { jobId } = await beginGenerate(ctx, deps, request.url ?? '')
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ jobId }))
       } catch (error) {
@@ -487,6 +710,24 @@ export function registerGenerateEndpoints(ctx: GenerateContext, deps: GenerateDe
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
       }
+    },
+  }))
+
+  // Capability pre-flight for the setup dialog: which driver can run here, which shell macros are missing.
+  disposers.push(ctx.webServer.register({
+    kind: 'exact',
+    path: GENERATE_CAPABILITY_PATH,
+    handler: async (req, res) => {
+      const request = req as RequestLike
+      if ((request.method ?? 'GET') !== 'GET') {
+        res.statusCode = 405
+        res.end('method not allowed')
+        return
+      }
+      const languageParam = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('language')
+      const language = languageParam !== null && isArticleLanguage(languageParam) ? languageParam : ArticleLanguage.Auto
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify(await readCapability(language)))
     },
   }))
 

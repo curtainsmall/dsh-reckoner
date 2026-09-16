@@ -196,8 +196,14 @@ export function apply(ctx: Context): void {
           log.warn('declaration skipped', { solver: declaration.name, error })
         }
       }
-      // Declarations have just been registered: clear the restart dirty bit.
+    }
+    // A host restart consumes the pending-changes flag: whatever the archive held has been loaded by
+    // now, or the feature is off and nothing is pending. Unconditional, and never fatal — a state
+    // file that cannot be written must not keep the plugin from mounting.
+    try {
       clearRestartRequired(recordsHome)
+    } catch (error) {
+      log.warn('restart flag not cleared', { home: recordsHome, error })
     }
 
     // LLM tool surface: engine primitives + markers.
