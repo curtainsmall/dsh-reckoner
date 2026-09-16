@@ -17,7 +17,7 @@
  *   capacitance) and the component magnitude as a kind-None value.
  */
 import { Complex } from 'complex.js'
-import { ElementKind } from '../../math/circuits.ts'
+import { ElementKind } from '../math/circuits.ts'
 import {
   MatchTopology,
   MatchVariant,
@@ -29,10 +29,10 @@ import {
   convertReflectionToVswr,
   designMatch,
   type MatchElement,
-} from '../../math/smith.ts'
-import { toComplex, toScalar, serializeComplex, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+} from '../math/smith.ts'
+import { toComplex, toScalar, serializeComplex, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 /** Kernel complex value → engine-native rect (finite-checked, -0 folded). */
 function rectOf(value: Complex): { re: number; im: number } {

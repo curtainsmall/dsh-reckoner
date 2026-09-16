@@ -4,10 +4,10 @@
  * quantities; variable/symbol bindings are kind-none quantities too.
  */
 import type { Complex } from 'complex.js'
-import { calcExpression, reduceRational } from '../../math/expression.ts'
-import { serializeComplex, toComplex, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+import { calcExpression, reduceRational } from '../math/expression.ts'
+import { serializeComplex, toComplex, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 /** Kernel complex value → engine-native rect (finite-checked, -0 folded). */
 function rectOf(value: Complex): { re: number; im: number } {

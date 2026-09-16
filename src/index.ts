@@ -13,7 +13,7 @@ import { Engine } from './engine/engine.ts'
 import { createEngineTools } from './tools/engine-tools.ts'
 import { createDeclarationTools } from './tools/declaration-tools.ts'
 import { compileExternalSolver } from './engine/external-solvers.ts'
-import { registerKernelSolvers } from './engine/solvers/index.ts'
+import { registerKernelSolvers } from './solvers/index.ts'
 import type { GenerationCall, GenerationResult, Record } from './generate.ts'
 import {
   clearRestartRequired,

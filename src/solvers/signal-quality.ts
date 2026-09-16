@@ -3,10 +3,10 @@
  * clock-jitter SNR ceiling, and the combined ADC noise budget. Kinds mirror
  * the old tool declarations (thd is a fraction → none, SNR values → log).
  */
-import { calcAdcBudget, calcJitterSnr, calcThd } from '../../math/signal-quality.ts'
-import { toScalar, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+import { calcAdcBudget, calcJitterSnr, calcThd } from '../math/signal-quality.ts'
+import { toScalar, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 export const signalQualitySolvers: SolverDef[] = [
   {

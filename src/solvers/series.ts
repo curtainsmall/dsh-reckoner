@@ -11,10 +11,10 @@
  * geometric case (the limit of its general term) and count^p for power sums
  * (the last summed term).
  */
-import { PowerSumKind, calcArithmeticSeries, calcGeometricSeries, calcPowerSum } from '../../math/series.ts'
-import { toScalar, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+import { PowerSumKind, calcArithmeticSeries, calcGeometricSeries, calcPowerSum } from '../math/series.ts'
+import { toScalar, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 /** Last summed term of a power sum Σk^p over the first n naturals = n^p. */
 function powerLastTerm(power: PowerSumKind, count: number): number {

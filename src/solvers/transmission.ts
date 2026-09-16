@@ -8,10 +8,10 @@ import {
   calcCoaxialParameters,
   calcRiseTimeFromBandwidth,
   calcWavelength,
-} from '../../math/transmission.ts'
-import { toScalar, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+} from '../math/transmission.ts'
+import { toScalar, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 export const transmissionSolvers: SolverDef[] = [
   {

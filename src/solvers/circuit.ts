@@ -35,10 +35,10 @@ import {
   combineParallelImpedances,
   combineSeriesImpedances,
   type NetworkElement,
-} from '../../math/circuits.ts'
-import { toComplex, toScalar, serializeComplex, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+} from '../math/circuits.ts'
+import { toComplex, toScalar, serializeComplex, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 /** Element kind → quantity kind: the leaf value object's kind must match. */
 const ELEMENT_QUANTITY_KINDS: Record<ElementKind, QuantityKind> = {

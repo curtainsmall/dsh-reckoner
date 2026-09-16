@@ -14,10 +14,10 @@
  *   element kind alternates, so the magnitude is declared kind None and the
  *   unit is carried by the element kind string.
  */
-import { designButterworthLowpass, calcButterworthAttenuation } from '../../math/filter.ts'
-import { toScalar, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+import { designButterworthLowpass, calcButterworthAttenuation } from '../math/filter.ts'
+import { toScalar, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 export const filterSolvers: SolverDef[] = [
   {

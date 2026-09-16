@@ -4,10 +4,10 @@
  * arrays are kind-none quantities in descending power order.
  */
 import type { Complex } from 'complex.js'
-import { expandPowerSeries, findPolesZeros } from '../../math/polynomial.ts'
-import { serializeComplex, toComplex, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+import { expandPowerSeries, findPolesZeros } from '../math/polynomial.ts'
+import { serializeComplex, toComplex, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 /** Kernel complex value → engine-native rect (finite-checked, -0 folded). */
 function rectOf(value: Complex): { re: number; im: number } {

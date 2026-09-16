@@ -8,10 +8,10 @@ import {
   calcCascadeNoiseFigure,
   calcQuantizationSnr,
   calcThermalNoisePower,
-} from '../../math/noise.ts'
-import { toScalar, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+} from '../math/noise.ts'
+import { toScalar, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 export const noiseSolvers: SolverDef[] = [
   {
