@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- PDF compilation is delegated to a LaTeX driver — **latexmk** when it can run, else MiKTeX's **texify** — which owns how many engine passes a document needs; the host never runs an engine itself. The driver is settled **before** the run: the LaTeX setup dialog checks the toolchain, disables **Generate** when there is no usable driver and `xelatex`, shows why, and warns about missing document-shell macros (a hint only — MiKTeX installs them on demand). A request that would need a missing toolchain is refused before any model call.
-- A run then uses the driver that check settled on and only reports what came of it: the PDF path, or the compile failure as one short line (the driver's full output goes to the log) with the written `.tex` kept. No fallback and no second driver at run time.
+- PDF compilation is delegated to a LaTeX driver — **latexmk**, else MiKTeX's **texify** — which decides how often the engine runs; the host never runs an engine itself. The LaTeX setup dialog checks the toolchain once per host start: without a usable driver and `xelatex` the Generate button is disabled with the reason shown, missing macros are only a warning, and such a request is refused before any model call.
+- A run compiles with that driver and reports the result: the PDF path, or one failure line with the `.tex` kept. No fallback at run time.
+- The failure line quotes the compiler when it says something, and is otherwise a localized note pointing at the log, which holds the driver's full output.
 
 ### Fixed
 
-- The pending-restart flag is cleared at every host start, whether or not external solvers are enabled: the flag describes a restart, so nothing but a restart should decide it. A state file that cannot be written is reported as `restart flag not cleared` instead of failing the mount.
+- The pending-restart flag is cleared at every host start, whether or not external solvers are enabled; a state file that cannot be written is logged as `restart flag not cleared` instead of failing the mount.
 
 ## [0.11.0] - 2026-09-15
 
