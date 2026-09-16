@@ -32,8 +32,8 @@
  *
  * Messages are a fixed English vocabulary, one per event — they are the only grep anchor:
  *   plugin mounted · plugin unmounted · declaration skipped · presets synced ·
- *   preset sync failed · skill not registered · endpoint failed · log file sink unavailable ·
- *   engine op failed · external call ok · external call failed ·
+ *   preset sync failed · skill not registered · restart flag not cleared · endpoint failed ·
+ *   log file sink unavailable · engine op failed · external call ok · external call failed ·
  *   article generation started · article generation finished · article generation failed ·
  *   latex compile failed
  *
