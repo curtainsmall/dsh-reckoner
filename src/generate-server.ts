@@ -84,6 +84,7 @@ export const LIST_DIRS_PATH = '/api/dsh-electro-lab/list-dirs'
 export const LIST_ROOTS_PATH = '/api/dsh-electro-lab/list-roots'
 export const DIRECTORY_TREE_CSS_PATH = '/api/dsh-electro-lab/directory-tree.css'
 export const GENERATE_DIR_PATH = '/api/dsh-electro-lab/generate-dir'
+export const GENERATE_CAPABILITY_PATH = '/api/dsh-electro-lab/generate-capability'
 
 /** Legacy plain-text location of the remembered directory (migrated on read). */
 const LEGACY_GENERATE_DIR_FILE = 'generate-dir.txt'
@@ -375,13 +376,14 @@ function driverCandidates(command: string): string[] {
 
 /**
  * One short line for the dialog; a driver's full output goes to the log, where length costs nothing.
- * A TeX error line (the engine marks those with `!`) says the most, then any line naming a cause, and
- * only then the driver's first line — its banner is worth nothing to the reader.
+ * A TeX error line (the engine marks those with `!`) says the most, then a line naming a cause, and
+ * only then the driver's own wrapper line — its banner is worth nothing to the reader.
  */
 function firstLine(text: string): string {
   const lines = text.split('\n').map((line) => line.trim()).filter((line) => line.length > 0)
   const line = lines.find((part) => part.startsWith('!'))
-    ?? lines.find((part) => /error|could not|can't|cannot|not found|did not succeed/i.test(part))
+    ?? lines.find((part) => /error|could not|can't|cannot|not found/i.test(part))
+    ?? lines.find((part) => /did not succeed/i.test(part))
     ?? lines[0]
     ?? ''
   return line.length > 120 ? `${line.slice(0, 120)}…` : line
@@ -414,6 +416,90 @@ async function compileLatexToPdf(directory: string, fileName: string): Promise<{
   return failure === undefined
     ? { ok: false, kind: 'missing', detail: 'neither latexmk nor texify is installed' }
     : { ok: false, kind: 'failed', detail: failure }
+}
+
+/* ── Capability pre-flight ─────────────────────────────────────────────────── */
+
+/** How long a capability report is reused before the drivers are probed again. */
+const CAPABILITY_TTL_MS = 30_000
+/** A probe is only a version query; a driver that does not answer quickly is unusable anyway. */
+const PROBE_TIMEOUT_MS = 5_000
+
+/** The macros each document shell needs (a missing one is a hint, never a block: MiKTeX installs on demand). */
+const SHELL_PACKAGES: { [language in TemplateLanguage]: string[] } = {
+  [TemplateLanguage.ZhCN]: ['ctexart.cls'],
+  [TemplateLanguage.En]: ['fontspec.sty', 'unicode-math.sty', 'siunitx.sty'],
+}
+
+interface DriverProbe {
+  command: string
+  ok: boolean
+  /** Why the driver cannot be used, in one short line, when it cannot. */
+  detail?: string
+}
+
+/** What this machine can compile with, and what its shells may be missing. */
+export interface CapabilityReport {
+  /** The driver compilation will use, or null when this machine has none. */
+  driver: string | null
+  drivers: DriverProbe[]
+  missingPackages: string[]
+  /** When this report was produced; the host probes again after CAPABILITY_TTL_MS. */
+  checkedAt: number
+}
+
+/** Probe one driver by asking for its version: exit 0 means it can run at all. */
+async function probeDriver(command: string): Promise<DriverProbe> {
+  for (const candidate of driverCandidates(command)) {
+    const result = await runCommand(candidate, ['--version'], homedir(), PROBE_TIMEOUT_MS)
+    if (!result.ok) {
+      if (result.code === null) continue
+      return { command, ok: false, detail: firstLine(result.output) }
+    }
+    return { command, ok: true }
+  }
+  return { command, ok: false, detail: 'not installed' }
+}
+
+/** Which of the asked languages' shell macros kpsewhich cannot find; no kpsewhich at all means all of them. */
+async function probePackages(language: ArticleLanguage): Promise<string[]> {
+  const templates = language === ArticleLanguage.ZhCN
+    ? [TemplateLanguage.ZhCN]
+    : language === ArticleLanguage.En
+      ? [TemplateLanguage.En]
+      : [TemplateLanguage.ZhCN, TemplateLanguage.En]
+  const missing: string[] = []
+  for (const template of templates) {
+    for (const file of SHELL_PACKAGES[template]) {
+      const found = await runCommand('kpsewhich', [file], homedir(), PROBE_TIMEOUT_MS)
+      if (!found.ok || found.output.trim().length === 0) missing.push(file)
+    }
+  }
+  return missing
+}
+
+const capabilityCache = new Map<string, CapabilityReport>()
+
+/** The capability report for one article language, probed at most once per CAPABILITY_TTL_MS. */
+async function readCapability(language: ArticleLanguage): Promise<CapabilityReport> {
+  const cached = capabilityCache.get(language)
+  if (cached !== undefined && Date.now() - cached.checkedAt < CAPABILITY_TTL_MS) return cached
+  const drivers: DriverProbe[] = []
+  for (const driver of LATEX_DRIVERS) {
+    const probe = await probeDriver(driver.command)
+    drivers.push(probe)
+    if (probe.ok) break
+  }
+  const driver = drivers.find((probe) => probe.ok)?.command ?? null
+  const report: CapabilityReport = {
+    driver,
+    drivers,
+    // With no driver at all the packages decide nothing, and probing them would only add latency.
+    missingPackages: driver === null ? [] : await probePackages(language),
+    checkedAt: Date.now(),
+  }
+  capabilityCache.set(language, report)
+  return report
 }
 
 /** Start a background generation job and return its id; progress is polled via GET /generate-progress. */
@@ -488,7 +574,7 @@ function startGenerateJob(
 }
 
 /** Validate the generation request and start the job; throws on bad input. */
-function beginGenerate(ctx: GenerateContext, deps: GenerateDeps, url: string): { jobId: string } {
+async function beginGenerate(ctx: GenerateContext, deps: GenerateDeps, url: string): Promise<{ jobId: string }> {
   const params = new URL(url, 'http://dsh.local').searchParams
   const recordId = params.get('recordId') ?? ''
   const formatParam = params.get('format') ?? ArticleFormat.Markdown
@@ -506,6 +592,10 @@ function beginGenerate(ctx: GenerateContext, deps: GenerateDeps, url: string): {
     : normalizeFileName(rawName, formatParam)
 
   const compile = params.get('compile') === 'true'
+  // Pre-flight: never spend a model call on an article that cannot be compiled. The job checks again.
+  if (compile && formatParam === ArticleFormat.Latex && (await readCapability(languageParam)).driver === null) {
+    throw new Error(NO_DRIVER_MESSAGE)
+  }
 
   return { jobId: startGenerateJob(ctx, deps, record, directory, fileName, languageParam, formatParam, compile) }
 }
@@ -518,7 +608,7 @@ export function registerGenerateEndpoints(ctx: GenerateContext, deps: GenerateDe
   disposers.push(ctx.webServer.register({
     kind: 'exact',
     path: GENERATE_PATH,
-    handler: (req, res) => {
+    handler: async (req, res) => {
       const request = req as RequestLike
       if ((request.method ?? 'GET') !== 'POST') {
         res.statusCode = 405
@@ -526,7 +616,7 @@ export function registerGenerateEndpoints(ctx: GenerateContext, deps: GenerateDe
         return
       }
       try {
-        const { jobId } = beginGenerate(ctx, deps, request.url ?? '')
+        const { jobId } = await beginGenerate(ctx, deps, request.url ?? '')
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ jobId }))
       } catch (error) {
@@ -534,6 +624,24 @@ export function registerGenerateEndpoints(ctx: GenerateContext, deps: GenerateDe
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
       }
+    },
+  }))
+
+  // Capability pre-flight for the setup dialog: which driver can run here, which shell macros are missing.
+  disposers.push(ctx.webServer.register({
+    kind: 'exact',
+    path: GENERATE_CAPABILITY_PATH,
+    handler: async (req, res) => {
+      const request = req as RequestLike
+      if ((request.method ?? 'GET') !== 'GET') {
+        res.statusCode = 405
+        res.end('method not allowed')
+        return
+      }
+      const languageParam = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('language')
+      const language = languageParam !== null && isArticleLanguage(languageParam) ? languageParam : ArticleLanguage.Auto
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify(await readCapability(language)))
     },
   }))
 

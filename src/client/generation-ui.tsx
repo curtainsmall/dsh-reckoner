@@ -14,6 +14,15 @@ import { useGenState, startGenerate, cancelGenerate, clearProgress, setMinimized
 import { ArticleFormat, ArticleLanguage, GenerationPhase } from '../generate.ts'
 
 const GENERATE_DIR_ENDPOINT = '/api/dsh-electro-lab/generate-dir'
+const GENERATE_CAPABILITY_ENDPOINT = '/api/dsh-electro-lab/generate-capability'
+
+/** What the host can compile with, mirrored from the capability endpoint (LaTeX setup only). */
+interface CapabilityReport {
+  driver: string | null
+  drivers: Array<{ command: string; ok: boolean; detail?: string }>
+  missingPackages: string[]
+  checkedAt: number
+}
 const REVEAL_ENDPOINT = '/api/dsh-electro-lab/reveal'
 const LIST_DIRS_ENDPOINT = '/api/dsh-electro-lab/list-dirs'
 const LIST_ROOTS_ENDPOINT = '/api/dsh-electro-lab/list-roots'
@@ -109,6 +118,7 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   const [genCompile, setGenCompile] = useState(false)
   const [genFile, setGenFile] = useState('')
   const [genSetupError, setGenSetupError] = useState<string | null>(null)
+  const [capability, setCapability] = useState<CapabilityReport | null>(null)
   const { progress: genProgress } = useGenState()
   const genRunning = genProgress?.status === 'running'
   const [dirBrowserOpen, setDirBrowserOpen] = useState(false)
@@ -136,8 +146,29 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
     return () => { alive = false }
   }, [open])
 
+  /**
+   * What this machine can compile with (LaTeX only): the host probes for a driver and for the
+   * document shell's macros. A missing driver blocks the button; missing macros are only a hint,
+   * because a TeX distribution may install them on demand.
+   */
+  useEffect(() => {
+    if (!open || format !== ArticleFormat.Latex) return
+    let alive = true
+    fetch(`${GENERATE_CAPABILITY_ENDPOINT}?language=${encodeURIComponent(genLanguage)}`)
+      .then((r) => r.json() as Promise<CapabilityReport>)
+      .then((body) => { if (alive) setCapability(body) })
+      .catch(() => { if (alive) setCapability(null) })
+    return () => { alive = false }
+  }, [open, format, genLanguage])
+
   /** Default file name placeholder of the dialog. */
   const defaultFileName = `electro-lab-${recordId.slice(0, 8)}.${formatExtension(format)}`
+
+  /** No driver, and the user asked for a PDF: the run would be interrupted, so refuse it here. */
+  const driverMissing = format === ArticleFormat.Latex && capability !== null && capability.driver === null
+  const compileBlocked = driverMissing && genCompile
+  const driverDetail = capability?.drivers.find((probe) => !probe.ok && probe.detail !== undefined)?.detail ?? ''
+  const missingPackages = genCompile && capability !== null && capability.driver !== null ? capability.missingPackages : []
 
   /** Persist the directory and language, and — LaTeX only — the PDF-compile toggle. */
   const saveGenState = (): void => {
@@ -400,7 +431,7 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
         onClose={closeDialog}
         footer={[
           <GhostButton key="cancel" onClick={closeDialog}>{t('cancel')}</GhostButton>,
-          <PrimaryButton key="generate" disabled={genRunning} onClick={runGenerate}>{t('generate')}</PrimaryButton>,
+          <PrimaryButton key="generate" disabled={genRunning || compileBlocked} onClick={runGenerate}>{t('generate')}</PrimaryButton>,
         ]}
       >
         <div style={{ display: 'grid', gridTemplateColumns: '104px 1fr', gap: '12px 10px', alignItems: 'center' }}>
@@ -444,6 +475,19 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
               onChange={(e) => setGenCompile(e.target.checked)}
               style={{ width: 14, height: 14, accentColor: 'var(--dsw-alias-state-business-primary)', cursor: 'pointer' }}
             />
+          )}
+          {compileBlocked && (
+            <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-state-error-primary)' }}>
+              {t('driverMissing')}
+              {driverDetail.length > 0 && (
+                <div style={{ marginTop: 2, color: 'var(--dsw-alias-label-tertiary)', wordBreak: 'break-word' }}>{driverDetail}</div>
+              )}
+            </div>
+          )}
+          {missingPackages.length > 0 && (
+            <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-state-warn-primary)', wordBreak: 'break-word' }}>
+              {t('macroHint')} {missingPackages.join(', ')}
+            </div>
           )}
         </div>
         {genSetupError !== null && (
