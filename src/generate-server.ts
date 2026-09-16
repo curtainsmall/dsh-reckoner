@@ -7,7 +7,7 @@
  * takes the services it needs (web server, optional llm/agentDefaultModel).
  */
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, basename } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -310,7 +310,7 @@ async function generateArticle(
 
 /** One in-memory generation job (never persisted — no generation log). */
 interface GenerateJob {
-  status: 'running' | 'done' | 'error' | 'interrupted'
+  status: 'running' | 'done' | 'error'
   percent: number
   phase: GenerationPhase
   path?: string
@@ -346,18 +346,28 @@ function runCommand(command: string, args: string[], cwd: string, timeoutMs: num
 }
 
 /**
- * The LaTeX drivers compilation is delegated to, in order: latexmk (TeX Live, and MiKTeX with its Perl
- * runtime), then texify (MiKTeX's own driver, no Perl). Both decide themselves how many engine passes
- * a document needs.
+ * The LaTeX drivers compilation can be delegated to, in preference order: latexmk (TeX Live, and MiKTeX
+ * with its Perl runtime), then texify (MiKTeX's own driver, no Perl). Both decide themselves how many
+ * engine passes a document needs. Which one a run uses is settled before the run starts.
  */
 const LATEX_DRIVERS: Array<{ command: string; args: string[] }> = [
   { command: 'latexmk', args: ['-pdfxe', '-interaction=nonstopmode', '-halt-on-error', '-synctex=1'] },
   { command: 'texify', args: ['--pdf', '--engine=xetex', '--synctex=1', '--tex-option=--interaction=nonstopmode'] },
 ]
+/** Both drivers run this engine; a distribution without it cannot produce a PDF however good the driver is. */
+const REQUIRED_ENGINE = 'xelatex'
 /** One driver's own budget; it runs the engine as often as it needs inside it. */
 const COMPILE_TIMEOUT_MS = 120_000
 /** What the dialog says when no driver is installed at all. */
 const NO_DRIVER_MESSAGE = 'no LaTeX driver found (latexmk or texify)'
+/** What it says when a driver exists but the engine it would run does not. */
+const NO_ENGINE_MESSAGE = 'no xelatex engine found'
+/** The argument set of a driver the pre-flight chose; the run only uses it and never picks one itself. */
+function driverArgs(command: string): string[] {
+  const known = LATEX_DRIVERS.find((driver) => command.toLowerCase().includes(driver.command))
+  if (known === undefined) throw new Error(`unknown LaTeX driver "${command}"`)
+  return known.args
+}
 
 /** Where one driver binary is looked for: PATH first, then the known MiKTeX install locations on Windows. */
 function driverCandidates(command: string): string[] {
@@ -390,32 +400,16 @@ function firstLine(text: string): string {
 }
 
 /**
- * Compile a generated LaTeX source to PDF by handing it to a driver, which owns how many times a TeX
- * engine runs (cross-references, page numbers, bibliographies) — this module never decides that, and
- * never runs an engine itself as a substitute. `missing` means no driver was installed; `failed` means
- * one ran and did not produce a PDF, with its own message as the detail.
+ * Compile a generated LaTeX source to PDF with the driver the pre-flight chose: one run, no fallback and
+ * no choice made here. The driver owns how many times the engine runs; this function only reports what
+ * came of it.
  */
-async function compileLatexToPdf(directory: string, fileName: string): Promise<{ ok: true; pdfPath: string } | { ok: false; kind: 'missing' | 'failed'; detail: string }> {
+async function compileLatexToPdf(directory: string, fileName: string, driver: string): Promise<{ ok: true; pdfPath: string } | { ok: false; detail: string }> {
   const pdfPath = join(directory, fileName.replace(/\.(tex)$/i, '.pdf'))
-  let failure: string | undefined
-  for (const driver of LATEX_DRIVERS) {
-    for (const command of driverCandidates(driver.command)) {
-      const result = await runCommand(command, [...driver.args, fileName], directory, COMPILE_TIMEOUT_MS)
-      if (!result.ok) {
-        // ENOENT means this location holds no driver; anything else means it ran and complained, so
-        // there is no point trying its other locations — record it and move on to the next driver.
-        if (result.code === null) continue
-        failure = result.output.trim()
-        log.warn('latex driver failed', { driver: driver.command, error: failure })
-        break
-      }
-      if (!existsSync(pdfPath)) return { ok: false, kind: 'failed', detail: `${driver.command} finished but produced no PDF` }
-      return { ok: true, pdfPath }
-    }
-  }
-  return failure === undefined
-    ? { ok: false, kind: 'missing', detail: 'neither latexmk nor texify is installed' }
-    : { ok: false, kind: 'failed', detail: failure }
+  const result = await runCommand(driver, [...driverArgs(driver), fileName], directory, COMPILE_TIMEOUT_MS)
+  if (!result.ok) return { ok: false, detail: result.output.trim() }
+  if (!existsSync(pdfPath)) return { ok: false, detail: `${basename(driver)} finished but produced no PDF` }
+  return { ok: true, pdfPath }
 }
 
 /* ── Capability pre-flight ─────────────────────────────────────────────────── */
@@ -434,21 +428,26 @@ const SHELL_PACKAGES: { [language in TemplateLanguage]: string[] } = {
 interface DriverProbe {
   command: string
   ok: boolean
-  /** Why the driver cannot be used, in one short line, when it cannot. */
+  /** The command to run, when it answered (a resolved path when the probe had to look one up). */
+  path?: string
+  /** Why it cannot be used, in one short line, when it cannot. */
   detail?: string
 }
 
 /** What this machine can compile with, and what its shells may be missing. */
 export interface CapabilityReport {
-  /** The driver compilation will use, or null when this machine has none. */
+  /** True when a driver and the engine it runs are both usable: the run may start. */
+  ready: boolean
+  /** The command the run will compile with, or null when nothing can. */
   driver: string | null
   drivers: DriverProbe[]
+  engine: DriverProbe
   missingPackages: string[]
   /** When this report was produced; the host probes again after CAPABILITY_TTL_MS. */
   checkedAt: number
 }
 
-/** Probe one driver by asking for its version: exit 0 means it can run at all. */
+/** Probe one command by asking for its version: exit 0 means it can run at all. */
 async function probeDriver(command: string): Promise<DriverProbe> {
   for (const candidate of driverCandidates(command)) {
     const result = await runCommand(candidate, ['--version'], homedir(), PROBE_TIMEOUT_MS)
@@ -456,7 +455,7 @@ async function probeDriver(command: string): Promise<DriverProbe> {
       if (result.code === null) continue
       return { command, ok: false, detail: firstLine(result.output) }
     }
-    return { command, ok: true }
+    return { command, ok: true, path: candidate }
   }
   return { command, ok: false, detail: 'not installed' }
 }
@@ -480,7 +479,10 @@ async function probePackages(language: ArticleLanguage): Promise<string[]> {
 
 const capabilityCache = new Map<string, CapabilityReport>()
 
-/** The capability report for one article language, probed at most once per CAPABILITY_TTL_MS. */
+/**
+ * The capability report for one article language, probed at most once per CAPABILITY_TTL_MS. This is the
+ * only place that picks a driver: everything after it uses what was picked and reports what happened.
+ */
 async function readCapability(language: ArticleLanguage): Promise<CapabilityReport> {
   const cached = capabilityCache.get(language)
   if (cached !== undefined && Date.now() - cached.checkedAt < CAPABILITY_TTL_MS) return cached
@@ -488,14 +490,20 @@ async function readCapability(language: ArticleLanguage): Promise<CapabilityRepo
   for (const driver of LATEX_DRIVERS) {
     const probe = await probeDriver(driver.command)
     drivers.push(probe)
+    if (!probe.ok) log.warn('latex driver unusable', { driver: probe.command, error: probe.detail })
     if (probe.ok) break
   }
-  const driver = drivers.find((probe) => probe.ok)?.command ?? null
+  const chosen = drivers.find((probe) => probe.ok)
+  const engine = chosen === undefined ? { command: REQUIRED_ENGINE, ok: false, detail: 'no driver to run it' } : await probeDriver(REQUIRED_ENGINE)
+  if (chosen !== undefined && !engine.ok) log.warn('latex driver unusable', { driver: engine.command, error: engine.detail })
+  const ready = chosen !== undefined && engine.ok
   const report: CapabilityReport = {
-    driver,
+    ready,
+    driver: ready ? chosen.path ?? chosen.command : null,
     drivers,
-    // With no driver at all the packages decide nothing, and probing them would only add latency.
-    missingPackages: driver === null ? [] : await probePackages(language),
+    engine,
+    // Without a working toolchain the packages decide nothing, and probing them would only add latency.
+    missingPackages: ready ? await probePackages(language) : [],
     checkedAt: Date.now(),
   }
   capabilityCache.set(language, report)
@@ -512,6 +520,8 @@ function startGenerateJob(
   language: ArticleLanguage,
   format: ArticleFormat,
   compile: boolean,
+  /** The driver the pre-flight chose for this request; LaTeX + compile always arrives with one. */
+  driver: string | null,
 ): string {
   const jobId = randomUUID()
   const controller = new AbortController()
@@ -538,23 +548,20 @@ function startGenerateJob(
       if (compile && isLatex) {
         job.phase = GenerationPhase.Compile
         job.percent = 96
-        const compiled = await compileLatexToPdf(targetDir, fileName)
-        if (compiled.ok) {
-          job.pdfPath = compiled.pdfPath
-        } else if (compiled.kind === 'missing') {
-          // No driver installed: the source is written, but the run stops here. The dialog gets one
-          // short line; the driver's own message (long install instructions) goes to the log.
-          log.warn('latex compile failed', { file: target, error: compiled.detail })
-          job.status = 'interrupted'
-          job.percent = 100
-          job.path = target
-          job.error = NO_DRIVER_MESSAGE
-          return
+        if (driver === null) {
+          // The pre-flight refuses this combination, so this only happens if it changed mid-run.
+          log.warn('latex compile failed', { file: target, error: NO_DRIVER_MESSAGE })
+          job.compileError = NO_DRIVER_MESSAGE
         } else {
-          // The source is fine as far as we know and the article was written: report the driver's first
-          // line (the full output is in the log) and keep the run's outcome as done.
-          log.warn('latex compile failed', { file: target, error: compiled.detail })
-          job.compileError = firstLine(compiled.detail)
+          const compiled = await compileLatexToPdf(targetDir, fileName, driver)
+          if (compiled.ok) {
+            job.pdfPath = compiled.pdfPath
+          } else {
+            // The article is written; report the driver's own first line to the dialog and its full
+            // output to the log, where length costs nothing.
+            log.warn('latex compile failed', { file: target, error: compiled.detail })
+            job.compileError = firstLine(compiled.detail)
+          }
         }
       }
       job.status = 'done'
@@ -592,12 +599,19 @@ async function beginGenerate(ctx: GenerateContext, deps: GenerateDeps, url: stri
     : normalizeFileName(rawName, formatParam)
 
   const compile = params.get('compile') === 'true'
-  // Pre-flight: never spend a model call on an article that cannot be compiled. The job checks again.
-  if (compile && formatParam === ArticleFormat.Latex && (await readCapability(languageParam)).driver === null) {
-    throw new Error(NO_DRIVER_MESSAGE)
+  // Pre-flight: an article that cannot be compiled is never generated, and the driver it would use is
+  // settled here — the run below only uses it.
+  let driver: string | null = null
+  if (compile && formatParam === ArticleFormat.Latex) {
+    const capability = await readCapability(languageParam)
+    if (capability.driver === null) {
+      // Name whichever half is missing: a driver, or the engine that driver would run.
+      throw new Error(capability.drivers.some((probe) => probe.ok) ? NO_ENGINE_MESSAGE : NO_DRIVER_MESSAGE)
+    }
+    driver = capability.driver
   }
 
-  return { jobId: startGenerateJob(ctx, deps, record, directory, fileName, languageParam, formatParam, compile) }
+  return { jobId: startGenerateJob(ctx, deps, record, directory, fileName, languageParam, formatParam, compile, driver) }
 }
 
 /** Register every generation endpoint; returns one disposer for all of them. */

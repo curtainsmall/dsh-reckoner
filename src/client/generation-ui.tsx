@@ -18,8 +18,10 @@ const GENERATE_CAPABILITY_ENDPOINT = '/api/dsh-electro-lab/generate-capability'
 
 /** What the host can compile with, mirrored from the capability endpoint (LaTeX setup only). */
 interface CapabilityReport {
+  ready: boolean
   driver: string | null
-  drivers: Array<{ command: string; ok: boolean; detail?: string }>
+  drivers: Array<{ command: string; ok: boolean; path?: string; detail?: string }>
+  engine: { command: string; ok: boolean; path?: string; detail?: string }
   missingPackages: string[]
   checkedAt: number
 }
@@ -164,11 +166,15 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   /** Default file name placeholder of the dialog. */
   const defaultFileName = `electro-lab-${recordId.slice(0, 8)}.${formatExtension(format)}`
 
-  /** No driver, and the user asked for a PDF: the run would be interrupted, so refuse it here. */
-  const driverMissing = format === ArticleFormat.Latex && capability !== null && capability.driver === null
-  const compileBlocked = driverMissing && genCompile
-  const driverDetail = capability?.drivers.find((probe) => !probe.ok && probe.detail !== undefined)?.detail ?? ''
-  const missingPackages = genCompile && capability !== null && capability.driver !== null ? capability.missingPackages : []
+  /** The host checked and cannot compile: the run would fail, so refuse it here. */
+  const toolchainMissing = format === ArticleFormat.Latex && capability !== null && !capability.ready
+  const compileBlocked = toolchainMissing && genCompile
+  const toolchainDetail = capability === null
+    ? ''
+    : capability.driver === null
+      ? capability.drivers.find((probe) => !probe.ok && probe.detail !== undefined)?.detail ?? ''
+      : capability.engine.ok ? '' : capability.engine.detail ?? ''
+  const missingPackages = genCompile && capability !== null && capability.ready ? capability.missingPackages : []
 
   /** Persist the directory and language, and — LaTeX only — the PDF-compile toggle. */
   const saveGenState = (): void => {
@@ -478,9 +484,9 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
           )}
           {compileBlocked && (
             <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-state-error-primary)' }}>
-              {t('driverMissing')}
-              {driverDetail.length > 0 && (
-                <div style={{ marginTop: 2, color: 'var(--dsw-alias-label-tertiary)', wordBreak: 'break-word' }}>{driverDetail}</div>
+              {t('toolchainMissing')}
+              {toolchainDetail.length > 0 && (
+                <div style={{ marginTop: 2, color: 'var(--dsw-alias-label-tertiary)', wordBreak: 'break-word' }}>{toolchainDetail}</div>
               )}
             </div>
           )}
@@ -559,7 +565,6 @@ async function launchPath(path: string, action: 'open' | 'reveal'): Promise<void
 function statusTitle(status: GenProgress['status']): string {
   switch (status) {
     case 'done': return t('generateDone')
-    case 'interrupted': return t('generateInterrupted')
     case 'error': return t('generateFailed')
     default: return t('generating')
   }
@@ -629,12 +634,6 @@ export function GenerationOverlay(): React.JSX.Element | null {
                 <GhostButton key="opendir" onClick={() => void launchPath(progress.path!, 'reveal')}>{t('openDirectory')}</GhostButton>
               </>
             ),
-            progress.status === 'interrupted' && progress.path !== undefined && (
-              <>
-                <GhostButton key="openfile" onClick={() => void launchPath(progress.path!, 'open')}>{t('openFile')}</GhostButton>
-                <GhostButton key="opendir" onClick={() => void launchPath(progress.path!, 'reveal')}>{t('openDirectory')}</GhostButton>
-              </>
-            ),
             <PrimaryButton key="confirm" disabled={progress.status === 'running'} onClick={clearProgress}>
               {t('confirm')}
             </PrimaryButton>,
@@ -668,16 +667,6 @@ export function GenerationOverlay(): React.JSX.Element | null {
                 <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {progress.error ?? 'unknown error'}
                 </div>
-              )}
-              {progress.status === 'interrupted' && (
-                <>
-                  <div style={{ fontSize: 13, color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-all' }}>
-                    {t('generatedAt')} {progress.path ?? ''}
-                  </div>
-                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-state-warn-primary)', wordBreak: 'break-word' }}>
-                    {progress.error ?? 'unknown error'}
-                  </div>
-                </>
               )}
             </div>
           </div>
@@ -716,9 +705,7 @@ export function GenerationOverlay(): React.JSX.Element | null {
               ? 'var(--dsw-alias-state-error-primary)'
               : progress.status === 'done'
                 ? 'var(--dsw-alias-state-success-primary)'
-                : progress.status === 'interrupted'
-                  ? 'var(--dsw-alias-state-warn-primary)'
-                  : 'var(--dsw-alias-label-secondary)',
+                : 'var(--dsw-alias-label-secondary)',
           }} />
           <span>
             {statusTitle(progress.status)}

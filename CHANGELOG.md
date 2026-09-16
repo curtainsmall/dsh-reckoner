@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- PDF compilation is delegated to a LaTeX driver — **latexmk**, else MiKTeX's **texify** — which owns how many engine passes a document needs; the host never runs an engine itself. A driver that fails is logged and the next is tried, and a compile failure appears as one short line (the driver's full output goes to the log). When no driver is installed the generation is **interrupted** instead of finishing without a PDF: the dialog says *generation interrupted* and keeps the written `.tex`.
-- The LaTeX setup dialog checks the machine before starting: with no usable driver the **Generate button is disabled** and the reason is shown, missing document-shell macros are warned about (MiKTeX installs them on demand, so that is a hint), and a request that would need a missing driver is refused before any model call.
+- PDF compilation is delegated to a LaTeX driver — **latexmk** when it can run, else MiKTeX's **texify** — which owns how many engine passes a document needs; the host never runs an engine itself. The driver is settled **before** the run: the LaTeX setup dialog checks the toolchain, disables **Generate** when there is no usable driver and `xelatex`, shows why, and warns about missing document-shell macros (a hint only — MiKTeX installs them on demand). A request that would need a missing toolchain is refused before any model call.
+- A run then uses the driver that check settled on and only reports what came of it: the PDF path, or the compile failure as one short line (the driver's full output goes to the log) with the written `.tex` kept. No fallback and no second driver at run time.
 
 ### Fixed
 
