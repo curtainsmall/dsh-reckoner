@@ -14,7 +14,8 @@ import { GenerationPhase, type ArticleFormat, type ArticleLanguage } from '../ge
 export interface GenProgress {
   percent: number
   phase: GenerationPhase
-  status: 'running' | 'done' | 'error'
+  /** `interrupted` = the article was written but the run stopped early (no LaTeX driver to compile with). */
+  status: 'running' | 'done' | 'error' | 'interrupted'
   path?: string
   pdfPath?: string
   compileError?: string
@@ -133,6 +134,16 @@ export function startGenerate(request: GenerateRequest): void {
             path: job.path,
             ...(job.pdfPath === undefined ? {} : { pdfPath: job.pdfPath }),
             ...(job.compileError === undefined ? {} : { compileError: job.compileError }),
+          })
+          return
+        }
+        if (job.status === 'interrupted') {
+          setProgress({
+            percent: 100,
+            phase: parsePhase(job.phase),
+            status: 'interrupted',
+            ...(job.path === undefined ? {} : { path: job.path }),
+            error: job.error ?? 'unknown error',
           })
           return
         }

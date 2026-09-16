@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { t, useAppLocale, type LocaleKey } from './locales.ts'
 import { Dialog, GhostButton, PrimaryButton } from './ui.tsx'
 import { IconArrowUp, IconFile, IconFolder, IconMinus } from './icons.tsx'
-import { useGenState, startGenerate, cancelGenerate, clearProgress, setMinimized } from './generation.ts'
+import { useGenState, startGenerate, cancelGenerate, clearProgress, setMinimized, type GenProgress } from './generation.ts'
 import { ArticleFormat, ArticleLanguage, GenerationPhase } from '../generate.ts'
 
 const GENERATE_DIR_ENDPOINT = '/api/dsh-electro-lab/generate-dir'
@@ -510,6 +510,18 @@ async function launchPath(path: string, action: 'open' | 'reveal'): Promise<void
 }
 
 /**
+ * The title of the progress dialog and of the minimized pill: one word per job status.
+ */
+function statusTitle(status: GenProgress['status']): string {
+  switch (status) {
+    case 'done': return t('generateDone')
+    case 'interrupted': return t('generateInterrupted')
+    case 'error': return t('generateFailed')
+    default: return t('generating')
+  }
+}
+
+/**
  * The generation overlay: the progress dialog and the minimized status pill,
  * rendered in a body-level React root (panel.tsx). Driven by the module-level
  * generation store, so a running job survives any navigation.
@@ -529,7 +541,7 @@ export function GenerationOverlay(): React.JSX.Element | null {
       {!minimized && (
         <Dialog
           open
-          title={progress.status === 'done' ? t('generateDone') : progress.status === 'error' ? t('generateFailed') : t('generating')}
+          title={statusTitle(progress.status)}
           width={380}
           height={190}
           dismissible={false}
@@ -573,6 +585,12 @@ export function GenerationOverlay(): React.JSX.Element | null {
                 <GhostButton key="opendir" onClick={() => void launchPath(progress.path!, 'reveal')}>{t('openDirectory')}</GhostButton>
               </>
             ),
+            progress.status === 'interrupted' && progress.path !== undefined && (
+              <>
+                <GhostButton key="openfile" onClick={() => void launchPath(progress.path!, 'open')}>{t('openFile')}</GhostButton>
+                <GhostButton key="opendir" onClick={() => void launchPath(progress.path!, 'reveal')}>{t('openDirectory')}</GhostButton>
+              </>
+            ),
             <PrimaryButton key="confirm" disabled={progress.status === 'running'} onClick={clearProgress}>
               {t('confirm')}
             </PrimaryButton>,
@@ -607,6 +625,16 @@ export function GenerationOverlay(): React.JSX.Element | null {
                   {progress.error ?? 'unknown error'}
                 </div>
               )}
+              {progress.status === 'interrupted' && (
+                <>
+                  <div style={{ fontSize: 13, color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-all' }}>
+                    {t('generatedAt')} {progress.path ?? ''}
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-state-warn-primary)', wordBreak: 'break-word' }}>
+                    {progress.error ?? 'unknown error'}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </Dialog>
@@ -615,7 +643,7 @@ export function GenerationOverlay(): React.JSX.Element | null {
         <button
           type="button"
           onClick={() => setMinimized(false)}
-          title={progress.status === 'running' ? t('generating') : progress.status === 'error' ? t('generateFailed') : t('generateDone')}
+          title={statusTitle(progress.status)}
           style={{
             position: 'fixed',
             right: 16,
@@ -644,10 +672,12 @@ export function GenerationOverlay(): React.JSX.Element | null {
               ? 'var(--dsw-alias-state-error-primary)'
               : progress.status === 'done'
                 ? 'var(--dsw-alias-state-success-primary)'
-                : 'var(--dsw-alias-label-secondary)',
+                : progress.status === 'interrupted'
+                  ? 'var(--dsw-alias-state-warn-primary)'
+                  : 'var(--dsw-alias-label-secondary)',
           }} />
           <span>
-            {progress.status === 'done' ? t('generateDone') : progress.status === 'error' ? t('generateFailed') : t('generating')}
+            {statusTitle(progress.status)}
           </span>
           {progress.status === 'running' && (
             <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--dsw-alias-label-secondary)' }}>{formatElapsed(elapsed)}</span>

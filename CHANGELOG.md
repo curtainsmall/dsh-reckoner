@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- PDF compilation is delegated to a LaTeX driver — **latexmk**, else MiKTeX's **texify** — which owns how many engine passes a document needs; the host never runs an engine itself. A driver that fails is logged and the next is tried, and a compile failure appears as one short line (the driver's full output goes to the log). When no driver is installed the generation is **interrupted** instead of finishing without a PDF: the dialog says *generation interrupted* and keeps the written `.tex`.
+
+### Fixed
+
+- The pending-restart flag is cleared at every host start, whether or not external solvers are enabled: the flag describes a restart, so nothing but a restart should decide it. A state file that cannot be written is reported as `restart flag not cleared` instead of failing the mount.
+
 ## [0.11.0] - 2026-09-15
 
 ### Added

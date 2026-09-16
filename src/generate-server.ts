@@ -1,7 +1,7 @@
 /**
  * Host article generation subsystem: LLM article jobs, file writing, optional
- * PDF compilation for LaTeX (xelatex), OS reveal/open, host-driven directory
- * browsing and the remembered generation settings. Ported from the v0.9.0
+ * PDF compilation for LaTeX (delegated to latexmk), OS reveal/open, host-driven
+ * directory browsing and the remembered generation settings. Ported from the v0.9.0
  * generation feature and wired to the engine record store through the
  * `loadRecord` dependency — this module has no Cordis imports; `register`
  * takes the services it needs (web server, optional llm/agentDefaultModel).
@@ -309,7 +309,7 @@ async function generateArticle(
 
 /** One in-memory generation job (never persisted — no generation log). */
 interface GenerateJob {
-  status: 'running' | 'done' | 'error'
+  status: 'running' | 'done' | 'error' | 'interrupted'
   percent: number
   phase: GenerationPhase
   path?: string
@@ -344,41 +344,76 @@ function runCommand(command: string, args: string[], cwd: string, timeoutMs: num
   })
 }
 
-/** Candidate xelatex commands: PATH first, then known MiKTeX install locations on Windows. */
-function xelatexCandidates(): string[] {
-  const candidates = ['xelatex']
+/**
+ * The LaTeX drivers compilation is delegated to, in order: latexmk (TeX Live, and MiKTeX with its Perl
+ * runtime), then texify (MiKTeX's own driver, no Perl). Both decide themselves how many engine passes
+ * a document needs.
+ */
+const LATEX_DRIVERS: Array<{ command: string; args: string[] }> = [
+  { command: 'latexmk', args: ['-pdfxe', '-interaction=nonstopmode', '-halt-on-error', '-synctex=1'] },
+  { command: 'texify', args: ['--pdf', '--engine=xetex', '--synctex=1', '--tex-option=--interaction=nonstopmode'] },
+]
+/** One driver's own budget; it runs the engine as often as it needs inside it. */
+const COMPILE_TIMEOUT_MS = 120_000
+/** What the dialog says when no driver is installed at all. */
+const NO_DRIVER_MESSAGE = 'no LaTeX driver found (latexmk or texify)'
+
+/** Where one driver binary is looked for: PATH first, then the known MiKTeX install locations on Windows. */
+function driverCandidates(command: string): string[] {
+  const candidates = [command]
   if (process.platform === 'win32') {
     for (const root of listDriveRoots()) {
-      candidates.push(join(root, 'MiKTeX', 'miktex', 'bin', 'x64', 'xelatex.exe'))
+      candidates.push(join(root, 'MiKTeX', 'miktex', 'bin', 'x64', `${command}.exe`))
     }
     const local = process.env.LOCALAPPDATA
-    if (local !== undefined) candidates.push(join(local, 'Programs', 'MiKTeX', 'miktex', 'bin', 'x64', 'xelatex.exe'))
-    candidates.push('C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\xelatex.exe')
-    candidates.push('C:\\Program Files (x86)\\MiKTeX\\miktex\\bin\\x64\\xelatex.exe')
+    if (local !== undefined) candidates.push(join(local, 'Programs', 'MiKTeX', 'miktex', 'bin', 'x64', `${command}.exe`))
+    candidates.push(`C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\${command}.exe`)
+    candidates.push(`C:\\Program Files (x86)\\MiKTeX\\miktex\\bin\\x64\\${command}.exe`)
   }
   return candidates
 }
 
-/** Compile a generated LaTeX source to PDF with xelatex (two passes so \label/\ref resolve). */
-async function compileLatexToPdf(directory: string, fileName: string): Promise<{ ok: true; pdfPath: string } | { ok: false; error: string }> {
+/**
+ * One short line for the dialog; a driver's full output goes to the log, where length costs nothing.
+ * A TeX error line (the engine marks those with `!`) says the most, then any line naming a cause, and
+ * only then the driver's first line — its banner is worth nothing to the reader.
+ */
+function firstLine(text: string): string {
+  const lines = text.split('\n').map((line) => line.trim()).filter((line) => line.length > 0)
+  const line = lines.find((part) => part.startsWith('!'))
+    ?? lines.find((part) => /error|could not|can't|cannot|not found|did not succeed/i.test(part))
+    ?? lines[0]
+    ?? ''
+  return line.length > 120 ? `${line.slice(0, 120)}…` : line
+}
+
+/**
+ * Compile a generated LaTeX source to PDF by handing it to a driver, which owns how many times a TeX
+ * engine runs (cross-references, page numbers, bibliographies) — this module never decides that, and
+ * never runs an engine itself as a substitute. `missing` means no driver was installed; `failed` means
+ * one ran and did not produce a PDF, with its own message as the detail.
+ */
+async function compileLatexToPdf(directory: string, fileName: string): Promise<{ ok: true; pdfPath: string } | { ok: false; kind: 'missing' | 'failed'; detail: string }> {
   const pdfPath = join(directory, fileName.replace(/\.(tex)$/i, '.pdf'))
-  const args = ['-interaction=nonstopmode', '-halt-on-error', '-synctex=1']
-  if (process.platform === 'win32') args.push('--enable-installer')
-  args.push(fileName)
-  let firstFailure: string | undefined
-  for (const command of xelatexCandidates()) {
-    const first = await runCommand(command, args, directory, 100_000)
-    if (!first.ok) {
-      if (first.code !== null || !first.output.includes('ENOENT')) {
-        firstFailure = `xelatex failed: ${first.output.trim()}`
+  let failure: string | undefined
+  for (const driver of LATEX_DRIVERS) {
+    for (const command of driverCandidates(driver.command)) {
+      const result = await runCommand(command, [...driver.args, fileName], directory, COMPILE_TIMEOUT_MS)
+      if (!result.ok) {
+        // ENOENT means this location holds no driver; anything else means it ran and complained, so
+        // there is no point trying its other locations — record it and move on to the next driver.
+        if (result.code === null) continue
+        failure = result.output.trim()
+        log.warn('latex driver failed', { driver: driver.command, error: failure })
+        break
       }
-      continue
+      if (!existsSync(pdfPath)) return { ok: false, kind: 'failed', detail: `${driver.command} finished but produced no PDF` }
+      return { ok: true, pdfPath }
     }
-    await runCommand(command, args, directory, 100_000)
-    if (!existsSync(pdfPath)) return { ok: false, error: 'xelatex finished but produced no PDF' }
-    return { ok: true, pdfPath }
   }
-  return { ok: false, error: firstFailure ?? 'xelatex was not found on this machine' }
+  return failure === undefined
+    ? { ok: false, kind: 'missing', detail: 'neither latexmk nor texify is installed' }
+    : { ok: false, kind: 'failed', detail: failure }
 }
 
 /** Start a background generation job and return its id; progress is polled via GET /generate-progress. */
@@ -418,10 +453,22 @@ function startGenerateJob(
         job.phase = GenerationPhase.Compile
         job.percent = 96
         const compiled = await compileLatexToPdf(targetDir, fileName)
-        if (compiled.ok) job.pdfPath = compiled.pdfPath
-        else {
-          job.compileError = compiled.error
-          log.warn('latex compile failed', { file: target, error: compiled.error })
+        if (compiled.ok) {
+          job.pdfPath = compiled.pdfPath
+        } else if (compiled.kind === 'missing') {
+          // No driver installed: the source is written, but the run stops here. The dialog gets one
+          // short line; the driver's own message (long install instructions) goes to the log.
+          log.warn('latex compile failed', { file: target, error: compiled.detail })
+          job.status = 'interrupted'
+          job.percent = 100
+          job.path = target
+          job.error = NO_DRIVER_MESSAGE
+          return
+        } else {
+          // The source is fine as far as we know and the article was written: report the driver's first
+          // line (the full output is in the log) and keep the run's outcome as done.
+          log.warn('latex compile failed', { file: target, error: compiled.detail })
+          job.compileError = firstLine(compiled.detail)
         }
       }
       job.status = 'done'
