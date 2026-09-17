@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { QuantityKind } from '../../src/math/quantity-kind.ts'
 import { Engine } from '../../src/engine/engine.ts'
 import { VariableTable } from '../../src/engine/table.ts'
-import { validateValue } from '../../src/engine/values.ts'
+import { toCanonical, validateValue } from '../../src/engine/values.ts'
 
 let home = ''
 
@@ -35,6 +35,33 @@ describe('value universe validateValue', () => {
     expect(validateValue({ type: 'number', value: 1, kind: 'resistance', prefix: 'kilo', variant: 'degC' })).toMatch(/not supported for kind "resistance"/)
     expect(validateValue({ type: 'number', value: 1, kind: 'temperature', variant: 'kelvin' })).toMatch(/not supported for kind "temperature"/)
     expect(validateValue({ type: 'number', value: 25, kind: 'temperature', variant: 'degC', prefix: 'milli' })).toMatch(/SI base representation/)
+  })
+})
+
+describe('toCanonical', () => {
+  it('converts a quantity nested in an array or an object like a top-level one', () => {
+    expect(toCanonical({
+      type: 'array',
+      value: [
+        { type: 'number', value: 0.1, kind: QuantityKind.Resistance, prefix: 'kilo' },
+        { type: 'number', value: 25, kind: QuantityKind.Temperature, variant: 'degC' },
+        { type: 'complex', value: { mag: 2, ang: Math.PI / 2 }, kind: QuantityKind.Voltage },
+      ],
+    })).toEqual({
+      type: 'array',
+      value: [
+        { type: 'number', value: 100, kind: QuantityKind.Resistance },
+        { type: 'number', value: 298.15, kind: QuantityKind.Temperature },
+        { type: 'complex', value: { re: Math.cos(Math.PI / 2) * 2, im: Math.sin(Math.PI / 2) * 2 }, kind: QuantityKind.Voltage },
+      ],
+    })
+    expect(toCanonical({
+      type: 'object',
+      value: { note: { type: 'string', value: 'kept' }, length: { type: 'number', value: 2, kind: QuantityKind.Length, variant: 'inch' } },
+    })).toEqual({
+      type: 'object',
+      value: { note: { type: 'string', value: 'kept' }, length: { type: 'number', value: 0.0508, kind: QuantityKind.Length } },
+    })
   })
 })
 
@@ -229,6 +256,29 @@ describe('engine (set/get/call + markers + trace)', () => {
       times: { type: 'array', value: [{ type: 'slot', value: 'missing' }] },
       cfg: { type: 'object', value: { gain: { type: 'number', value: 1, kind: QuantityKind.None } } },
     }, 'D')).resolves.toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+  })
+
+  it('converts a quantity nested in an array or object argument, and says so in the trace', async () => {
+    const engine = makeEngine()
+    engine.registry.register({
+      id: 'sum_lengths',
+      summary: 'adds the items up',
+      parameters: { lengths: { type: 'array', items: { type: 'complex', kind: QuantityKind.Length } } },
+      returns: { type: 'complex', kind: QuantityKind.Length },
+      run: (args) => (args.lengths as number[]).reduce((total, item) => total + item, 0),
+    })
+    engine.markerQuestion('q')
+    engine.opSet('L', { type: 'number', value: 2, kind: QuantityKind.Length, variant: 'inch' })
+    // 0.1 kilo-metre + 2 inch (via a slot) = 100.0508 m; before the recursion the kernel saw 0.1 + 2
+    const receipt = await engine.opCall('sum_lengths', {
+      lengths: { type: 'array', value: [{ type: 'number', value: 0.1, kind: QuantityKind.Length, prefix: 'kilo' }, { type: 'slot', value: 'L' }] },
+    }, 'total')
+    expect(receipt).toMatchObject({ ok: true })
+    expect((engine.opGet('total') as unknown as { value: { value: number } }).value.value).toBeCloseTo(100.0508, 10)
+    const rows = engine.store.readRows(String(engine.openId()))
+    const callRow = rows.find((row) => row.tool === 'call' && row.solver === 'sum_lengths')
+    const resolved = (callRow!.resolved as { lengths: { value: { value: number }[] } }).lengths.value
+    expect(resolved.map((item) => item.value)).toEqual([100, 0.0508])
   })
 
   it('solver run throws → ok:false ENGINE_SOLVER_FAILED, no slot is created', async () => {

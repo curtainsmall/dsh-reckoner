@@ -186,7 +186,11 @@ function checkPrefixVariant(v: Record<string, unknown>, allowComplex: boolean): 
   return undefined
 }
 
-/** Convert number/complex values to the SI base + rect normalization (call boundary). */
+/**
+ * Convert number/complex values to the SI base + rect normalization (call boundary).
+ * Arrays and objects recurse: a quantity nested in one is converted like a top-level one, so
+ * `resolved` describes what the run really used and a kernel never sees a prefix or a variant word.
+ */
 export function toCanonical(value: TypedValue): TypedValue {
   if (value.type === 'number') {
     let number = value.value
@@ -209,6 +213,12 @@ export function toCanonical(value: TypedValue): TypedValue {
     }
     const scale = value.prefix !== undefined ? PREFIX_SCALES[value.prefix]! : 1
     return { type: 'complex', value: { re: re * scale, im: im * scale }, kind: value.kind }
+  }
+  if (value.type === 'array') return { type: 'array', value: value.value.map(toCanonical) }
+  if (value.type === 'object') {
+    const fields: Record<string, TypedValue> = {}
+    for (const [key, field] of Object.entries(value.value)) fields[key] = toCanonical(field)
+    return { type: 'object', value: fields }
   }
   return value
 }
