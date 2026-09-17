@@ -32,7 +32,7 @@ registers): type `object`, then add one field per returned key:
 | Field name | Type | Other fields |
 |---|---|---|
 | `message` | string | |
-| `values` | array | Array items: `quantity` · Quantity kind: `none` |
+| `values` | array | Array items: `number` · Quantity kind: `none` |
 | `flag` | boolean | |
 
 `agentDeclaration`:
@@ -51,7 +51,7 @@ registers): type `object`, then add one field per returned key:
     "type": "object",
     "fields": {
       "message": { "type": "string" },
-      "values": { "type": "array", "items": { "type": "quantity", "kind": "none" } },
+      "values": { "type": "array", "items": { "type": "number", "kind": "none" } },
       "flag": { "type": "boolean" }
     }
   },

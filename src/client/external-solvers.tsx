@@ -270,17 +270,22 @@ async function saveDeclaration(
 const NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/
 
 type ParamRowType = 'quantity' | 'string' | 'boolean' | 'array'
+/** Parameter array items: the declaration dialect spells a quantity `quantity`. */
 type SimpleRowType = 'quantity' | 'string' | 'boolean'
 
-/** Returns leaf / array-item shape (shared by field rows and array rows). */
-type ReturnsLeafType = 'quantity' | 'string' | 'boolean' | 'array'
+/** Returns leaves and their array items: the engine spells a quantity `number` or `complex`. */
+type ReturnsLeafType = 'number' | 'complex' | 'string' | 'boolean' | 'array'
+type ReturnsItemType = 'number' | 'complex' | 'string' | 'boolean'
+
+/** Whether a returns leaf type carries a quantity kind. */
+const isQuantityType = (type: ReturnsLeafType): boolean => type === 'number' || type === 'complex'
 
 /** Editable form of the return shape: null = void, or spec leaves, object fields, array items. */
 interface ReturnsForm {
   mode: 'void' | 'string' | 'boolean' | 'number' | 'complex' | 'array' | 'object'
-  /** kind for number/complex leaves and quantity array items. */
+  /** kind for number/complex leaves and for array items of those. */
   kind: string
-  itemType: SimpleRowType
+  itemType: ReturnsItemType
   itemKind: string
   /** Field rows for object mode. */
   fields: ReturnsFieldRow[]
@@ -294,7 +299,7 @@ interface ReturnsFieldRow {
   name: string
   type: ReturnsLeafType
   kind: string
-  itemType: SimpleRowType
+  itemType: ReturnsItemType
   itemKind: string
 }
 
@@ -328,16 +333,21 @@ interface FormState {
 
 /** Default form (new tool): object with no fields — saving yields an explicit spec. */
 function defaultReturnsForm(): ReturnsForm {
-  return { mode: 'object', kind: 'none', itemType: 'quantity', itemKind: 'none', fields: [], unmodeled: false }
+  return { mode: 'object', kind: 'none', itemType: 'number', itemKind: 'none', fields: [], unmodeled: false }
 }
 
 /** An editable simple leaf or array-item spec (no description/enum/required). */
-function parseReturnsLeaf(spec: unknown): { type: SimpleRowType; kind: string } | undefined {
+function parseReturnsLeaf(spec: unknown): { type: ReturnsItemType; kind: string } | undefined {
   if (typeof spec !== 'object' || spec === null) return undefined
   const s = spec as Record<string, unknown>
   if (s.type === 'quantity') {
+    // The word this form wrote before the returns dialect was settled: a quantity that was never complex.
     if (typeof s.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(s.kind)) return undefined
-    return { type: 'quantity', kind: s.kind }
+    return { type: 'number', kind: s.kind }
+  }
+  if (s.type === 'number' || s.type === 'complex') {
+    if (typeof s.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(s.kind)) return undefined
+    return { type: s.type, kind: s.kind }
   }
   if (s.type === 'string' && s.enum === undefined) return { type: 'string', kind: 'none' }
   if (s.type === 'boolean') return { type: 'boolean', kind: 'none' }
@@ -350,7 +360,7 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
   if (returns === null) return { ...defaultReturnsForm(), mode: 'void' }
   if (typeof returns !== 'object' || returns === null) return fallback()
   const r = returns as Record<string, unknown>
-  const empty = { kind: 'none', itemType: 'quantity' as SimpleRowType, itemKind: 'none' }
+  const empty = { kind: 'none', itemType: 'number' as ReturnsItemType, itemKind: 'none' }
   switch (r.type) {
     case 'string':
       return { ...empty, mode: 'string', fields: [], unmodeled: false }
@@ -379,7 +389,7 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
       for (const [name, spec] of Object.entries(r.fields as Record<string, unknown>)) {
         const leaf = parseReturnsLeaf(spec)
         if (leaf !== undefined) {
-          fields.push({ id: fields.length, name, type: leaf.type, kind: leaf.kind, itemType: 'quantity', itemKind: 'none' })
+          fields.push({ id: fields.length, name, type: leaf.type, kind: leaf.kind, itemType: 'number', itemKind: 'none' })
           continue
         }
         // A one-level array field (same limit as parameter rows).
@@ -398,15 +408,15 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
   }
 }
 
+/** One returns leaf as a spec: a quantity says which form it is, everything else is bare. */
+function buildReturnsLeafSpec(type: ReturnsItemType, kind: string): Record<string, unknown> {
+  return type === 'number' || type === 'complex' ? { type, kind } : { type }
+}
+
 /** Build a spec from a leaf/array row (shared by fields and array items). */
-function buildReturnsLeaf(row: { type: SimpleRowType | 'array'; kind: string; itemType: SimpleRowType; itemKind: string }): Record<string, unknown> {
-  if (row.type === 'array') {
-    const items: Record<string, unknown> = { type: row.itemType }
-    if (row.itemType === 'quantity') items.kind = row.itemKind
-    return { type: 'array', items }
-  }
-  if (row.type === 'quantity') return { type: 'quantity', kind: row.kind }
-  return { type: row.type }
+function buildReturnsLeaf(row: { type: ReturnsLeafType; kind: string; itemType: ReturnsItemType; itemKind: string }): Record<string, unknown> {
+  if (row.type === 'array') return { type: 'array', items: buildReturnsLeafSpec(row.itemType, row.itemKind) }
+  return buildReturnsLeafSpec(row.type, row.kind)
 }
 
 /** Form → returns spec; null = void. */
@@ -421,9 +431,7 @@ function buildReturnsSpec(form: ReturnsForm): unknown {
     case 'complex':
       return { type: form.mode, kind: form.kind }
     case 'array': {
-      const items: Record<string, unknown> = { type: form.itemType }
-      if (form.itemType === 'quantity') items.kind = form.itemKind
-      return { type: 'array', items }
+      return { type: 'array', items: buildReturnsLeafSpec(form.itemType, form.itemKind) }
     }
     case 'object': {
       const fields: Record<string, unknown> = {}
@@ -679,7 +687,7 @@ function EditorDialog({ editor, onClose, onSaved }: {
   })
   const addReturnField = (): void => {
     const id = state.returns.fields.reduce((max, row) => Math.max(max, row.id), -1) + 1
-    set('returns', { ...state.returns, fields: [...state.returns.fields, { id, name: '', type: 'quantity', kind: 'none', itemType: 'quantity', itemKind: 'none' }] })
+    set('returns', { ...state.returns, fields: [...state.returns.fields, { id, name: '', type: 'number', kind: 'none', itemType: 'number', itemKind: 'none' }] })
   }
   const removeReturnField = (id: number): void => {
     set('returns', { ...state.returns, fields: state.returns.fields.filter((row) => row.id !== id) })
@@ -845,14 +853,15 @@ function EditorDialog({ editor, onClose, onSaved }: {
               )}
               {state.returns.mode === 'array' && (
                 <Field label={t('paramItemsLabel')} style={{ flex: 1.4 }}>
-                  <select value={state.returns.itemType} onChange={(event) => setReturns({ itemType: event.target.value as SimpleRowType })} style={controlStyle}>
-                    <option value="quantity">quantity</option>
+                  <select value={state.returns.itemType} onChange={(event) => setReturns({ itemType: event.target.value as ReturnsItemType })} style={controlStyle}>
+                    <option value="number">number</option>
+                    <option value="complex">complex</option>
                     <option value="string">string</option>
                     <option value="boolean">boolean</option>
                   </select>
                 </Field>
               )}
-              {state.returns.mode === 'array' && state.returns.itemType === 'quantity' && (
+              {state.returns.mode === 'array' && isQuantityType(state.returns.itemType) && (
                 <Field label={t('paramKindLabel')} style={{ flex: 1.4 }}>
                   <select value={state.returns.itemKind} onChange={(event) => setReturns({ itemKind: event.target.value })} style={controlStyle}>
                     {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
@@ -873,7 +882,8 @@ function EditorDialog({ editor, onClose, onSaved }: {
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                       <Field label={t('paramTypeLabel')} style={{ flex: 0.8 }}>
                         <select value={row.type} onChange={(event) => setReturnField(row.id, { type: event.target.value as ReturnsLeafType })} style={controlStyle}>
-                          <option value="quantity">quantity</option>
+                          <option value="number">number</option>
+                          <option value="complex">complex</option>
                           <option value="string">string</option>
                           <option value="boolean">boolean</option>
                           <option value="array">array</option>
@@ -882,9 +892,9 @@ function EditorDialog({ editor, onClose, onSaved }: {
                       <Field label={t('paramKindLabel')} style={{ flex: 1.2 }}>
                         <select
                           value={row.type === 'array' ? row.itemKind : row.kind}
-                          disabled={row.type !== 'quantity' && row.type !== 'array'}
+                          disabled={!isQuantityType(row.type) && row.type !== 'array'}
                           onChange={(event) => setReturnField(row.id, row.type === 'array' ? { itemKind: event.target.value } : { kind: event.target.value })}
-                          style={{ ...controlStyle, opacity: row.type !== 'quantity' && row.type !== 'array' ? 0.5 : 1 }}
+                          style={{ ...controlStyle, opacity: !isQuantityType(row.type) && row.type !== 'array' ? 0.5 : 1 }}
                         >
                           {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
                         </select>
@@ -904,8 +914,9 @@ function EditorDialog({ editor, onClose, onSaved }: {
                     </div>
                     {row.type === 'array' && (
                       <Field label={t('paramItemsLabel')} style={{ flex: 1 }}>
-                        <select value={row.itemType} onChange={(event) => setReturnField(row.id, { itemType: event.target.value as SimpleRowType })} style={controlStyle}>
-                          <option value="quantity">quantity</option>
+                        <select value={row.itemType} onChange={(event) => setReturnField(row.id, { itemType: event.target.value as ReturnsItemType })} style={controlStyle}>
+                          <option value="number">number</option>
+                          <option value="complex">complex</option>
                           <option value="string">string</option>
                           <option value="boolean">boolean</option>
                         </select>

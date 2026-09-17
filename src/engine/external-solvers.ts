@@ -49,6 +49,10 @@ function specFromLeaf(returns: ToolReturns, path: string): Spec {
     }
     case 'array':
       return { type: 'array', items: specFromLeaf(returns.items, `${path}.items`) }
+    default:
+      // An unmappable leaf must fail here, at registration: a silently dropped spec
+      // (an array without items) only surfaces as a broken call much later.
+      throw new Error(`${path}: unknown returns type "${String((returns as { type?: unknown }).type)}" (number, complex, string, boolean, object, array)`)
   }
 }
 

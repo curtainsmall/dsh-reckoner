@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { compileExternalSolver } from '../../src/engine/external-solvers.ts'
 import { QuantityKind } from '../../src/math/quantity-kind.ts'
-import { DeclarationParamType, DeclarationTransport, type ToolDeclaration } from '../../src/tool.ts'
+import { DeclarationParamType, DeclarationTransport, type ToolDeclaration, type ToolReturns } from '../../src/tool.ts'
 
 const BASE: ToolDeclaration = {
   name: 'sample_echo',
@@ -47,5 +47,24 @@ describe('compileExternalSolver', () => {
   it('maps a complex leaf with kind and the either form', () => {
     const solver = compileExternalSolver({ ...BASE, returns: { type: 'complex', kind: QuantityKind.Voltage } })
     expect(solver!.returns).toEqual({ type: 'quantity', kind: 'voltage', form: 'either' })
+  })
+
+  it('maps an array field with its items', () => {
+    const solver = compileExternalSolver({
+      ...BASE,
+      returns: { type: 'object', fields: { values: { type: 'array', items: { type: 'number', kind: QuantityKind.None } } } },
+    })
+    expect(solver!.returns).toEqual({
+      type: 'object',
+      fields: { values: { type: 'array', items: { type: 'quantity', kind: 'none' } } },
+    })
+  })
+
+  it('rejects an unmappable returns leaf instead of dropping the spec', () => {
+    // "quantity" is the parameter word; a returns leaf says number or complex. Dropping it
+    // silently would leave an array without items and only fail on the first call.
+    const unmappable = { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } } as unknown as ToolReturns
+    expect(() => compileExternalSolver({ ...BASE, returns: { type: 'object', fields: { values: unmappable } } }))
+      .toThrow(/unknown returns type "quantity"/)
   })
 })

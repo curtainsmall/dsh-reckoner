@@ -40,6 +40,31 @@ interface Peer {
   seen: () => Envelope
 }
 
+/** The echo peer's declaration: an object returns holding a string, an array of quantities and a boolean. */
+function echoDeclaration(url: string): ToolDeclaration {
+  return {
+    name: 'echo_http',
+    description: 'echoes every parameter back',
+    enabled: true,
+    parameters: {
+      message: { type: DeclarationParamType.String, required: true },
+      values: { type: DeclarationParamType.Array, items: { type: DeclarationParamType.Quantity, kind: QuantityKind.None } },
+      flag: { type: DeclarationParamType.Boolean },
+    },
+    returns: {
+      type: 'object',
+      fields: {
+        message: { type: 'string' },
+        values: { type: 'array', items: { type: 'number', kind: QuantityKind.None } },
+        flag: { type: 'boolean' },
+      },
+    },
+    transport: DeclarationTransport.Http,
+    transportOptions: { url },
+    timeoutMs: 10000,
+  }
+}
+
 let home = ''
 let peer: Server | undefined
 
@@ -118,6 +143,35 @@ describe('an external solver through the engine', () => {
     await expect(engine.opCall('remote_gain', { r: { type: 'number', value: 1, kind: QuantityKind.Resistance } }, 'V'))
       .resolves.toMatchObject({ ok: false, code: 'EXTERNAL_RESPONSE' })
     expect(engine.opGet('V')).toMatchObject({ ok: false })
+    engine.markerAnswer('done')
+  })
+
+  it('lands an echoed object holding an array of quantities in the slot', async () => {
+    const remote = await startPeer((envelope) => JSON.stringify({
+      requestId: envelope.requestId,
+      result: {
+        type: 'object',
+        value: {
+          message: { type: 'string', value: 'round trip ok' },
+          values: { type: 'array', value: [{ type: 'number', value: 1, kind: QuantityKind.None }, { type: 'number', value: 2.5, kind: QuantityKind.None }] },
+          flag: { type: 'boolean', value: true },
+        },
+      },
+    }))
+    const engine = makeEngine()
+    engine.registry.register(compileExternalSolver(echoDeclaration(remote.url))!)
+    engine.markerQuestion('q')
+
+    const receipt = await engine.opCall('echo_http', {
+      message: { type: 'string', value: 'round trip ok' },
+      values: { type: 'array', value: [{ type: 'number', value: 1, kind: QuantityKind.None }, { type: 'number', value: 2.5, kind: QuantityKind.None }] },
+      flag: { type: 'boolean', value: true },
+    }, 'echo_out')
+
+    expect(receipt).toMatchObject({ ok: true, target: 'echo_out', rev: 1 })
+    expect(remote.seen().args).toMatchObject({ message: { type: 'string', value: 'round trip ok' }, flag: { type: 'boolean', value: true } })
+    const got = engine.opGet('echo_out') as unknown as { value: { value: { values: { value: unknown[] } } } }
+    expect(got.value.value.values.value).toHaveLength(2)
     engine.markerAnswer('done')
   })
 

@@ -27,7 +27,7 @@ Returns——**Returns** 区域（必填；没有 Returns 的声明永远不会�
 | 字段名 | 类型 | 其他字段 |
 |---|---|---|
 | `message` | string | |
-| `values` | array | 数组元素：`quantity` · 数量类别：`none` |
+| `values` | array | 数组元素：`number` · 数量类别：`none` |
 | `flag` | boolean | |
 
 `agentDeclaration`：
@@ -46,7 +46,7 @@ Returns——**Returns** 区域（必填；没有 Returns 的声明永远不会�
     "type": "object",
     "fields": {
       "message": { "type": "string" },
-      "values": { "type": "array", "items": { "type": "quantity", "kind": "none" } },
+      "values": { "type": "array", "items": { "type": "number", "kind": "none" } },
       "flag": { "type": "boolean" }
     }
   },
