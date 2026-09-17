@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **External solvers**: register your own calculation solvers over http. A declaration (name, description, parameters, an explicit `returns`, endpoint, extra headers, timeout) lives in `~/.dsh-electro-lab/external-solvers.jsonl` and is registered into the solver registry at engine start, so `solver_info` and `call` work on it unchanged; changes apply after a host restart. Manage them with `external_solver_add` / `external_solver_update` / `external_solver_delete`, by editing the archive file, or from the panel's **External solvers** tab. The protocol is a POST-only typed envelope, `{requestId, args}` → `{requestId, result}` or `{requestId, error}`, with the same error codes as local solvers (`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`).
+
 ## [0.12.0] - 2026-09-16
 
 ### Breaking

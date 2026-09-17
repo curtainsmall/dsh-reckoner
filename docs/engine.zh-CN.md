@@ -200,6 +200,12 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 - `series_sum` 在所有分支上返回同一种固定形状（kind/power/sum/lastTerm/converges）；发散的无穷级数输入会报错。
 - 带单位的回显字段沿用旧声明并使用 kind `none`（开尔文温度、波长、同轴直径、频率回显列表）——这些量的类型化值是 SI 基准数字。
 
+### 外部求解器
+
+注册表里还可以有来自声明的 solver：`external-solvers.jsonl` 每行一条 JSON 声明，引擎启动时每条启用且 `returns` 可映射的声明都会编译进与内置求解器同一个注册表。此后引擎看来没有区别——声明的 `parameters` 与 `returns` 就是签名，`solver_info` 与 `call` 无需特判即可工作；已解析参数以类型化值发出（SI、直角坐标、不含 variant/prefix 词），返回值在进入表之前先按声明的 `returns` 校验。轨迹里的 `call` 行与内核调用完全同形。
+
+传输是只发 POST 的类型化信封：`{requestId, args}` → `{requestId, result}`（void solver 为 `null`）或 `{requestId, error}`；端点 URL、附加头部与超时（默认 30 秒）来自声明的传输选项。失败保留接口本身的含义——`EXTERNAL_ERROR`（端点在信封里自报）、`EXTERNAL_HTTP`（非 2xx 状态）、`EXTERNAL_TIMEOUT`（声明的超时）、`EXTERNAL_RESPONSE`（信封或值违反契约）——与其他失败一样，以一行失败调用落入轨迹。
+
 ## 6. 存储
 
 插件主目录是 `~/.dsh-electro-lab`（可用 `DSH_ELECTRO_LAB_HOME` 环境变量覆盖）：
@@ -210,6 +216,7 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
   records/
     <id>.jsonl           ← 轨迹本体（id 为 UUID v4）
   state.json             ← 插件状态：生成设置 + 重启标记
+  external-solvers.jsonl ← 外部求解器声明（每行一条 JSON）
   logs/
     <YYYY-MM-DD_HH-mm-ss.SSS>.log   ← 一次宿主运行，纯事件行
 ```
@@ -255,6 +262,10 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 
 插件自身的状态：生成对话框的设置（`generateDir`、`generateLanguage`、`generateFormat`、`generateCompile`）与外部声明重启标记（`restartRequired`，声明在启动时注册完毕后清除）。写入经由唯一持有模块做「读—改—写」，写者只动自己的键；文件以**原子替换**落盘（先写临时文件再改名），写入中途崩溃只会留下上一版完整文件。文件不可读时读成 `{}`。
 
+### external-solvers.jsonl（声明归档）
+
+每行一条 JSON 声明：`name`、`description`、`enabled`、`parameters`、`returns`、`transport` 与 `transportOptions`（端点 URL、附加头部、超时）。`returns` 决定能否注册——一个 spec，或 `null` 表示 void；`returns` 无法映射的声明会被存档、启动时跳过并给出告警，`enabled: false` 则静默跳过。文件只在挂载时读取一次：管理工具与归档端点写它并置 state.json 里的重启标记，从不改动运行中的注册表。
+
 ### logs/（每次宿主运行一个文件）
 
 每次插件挂载一个文件：`<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`，独占创建并保持打开。行格式为 `<时间戳> <LEVEL> <message>[ k=v …]`，同时写入文件与 stdout。字段值为 JSON 类型、只展开一层——嵌套对象或数组是一个 token——Error 渲染为消息并追加带 `  | ` 前缀的堆栈续行。唯一的设置是 `DSH_ELECTRO_LAB_LOG_LEVEL`（`debug` | `info` | `warn` | `error` | `off`，默认 `info`）；保留最新 20 个文件、总量不超过 50 MB。
@@ -264,4 +275,5 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 ## 7. 宿主端点
 
 - `GET /api/dsh-electro-lab/records-index`——供记录面板列表使用的索引行（`{ rows: [{ id, openedAt, sealedAt, question }] }`）。列表每 5 秒轮询一次；从不读取轨迹本体。
+- `/api/dsh-electro-lab/external-solvers`——声明归档。`GET` 列出声明与重启标记，`PUT` 用 `config` 查询参数里的 base64url JSON 添加或替换一条，`DELETE ?name=` 删除一条。任何写入都置重启标记。
 

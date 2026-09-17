@@ -200,6 +200,12 @@ The solver surface is exactly the migrated kernels under the engine's one-shape-
 - `series_sum` returns one fixed shape (kind/power/sum/lastTerm/converges) across all branches; a diverging infinite input errors.
 - Unit-carrying echo fields follow the legacy declarations and use kind `none` (kelvin temperatures, wavelengths, coaxial diameters, echo frequency lists) — typed values for those quantities are SI base numbers.
 
+### External solvers
+
+The registry also holds solvers registered from declarations: `external-solvers.jsonl` keeps one JSON declaration per line, and at engine start every enabled declaration with a mappable `returns` is compiled into the same registry the built-ins occupy. For the engine there is no difference afterwards — the declaration's `parameters` and `returns` are the signature, so `solver_info` and `call` work unchanged, the resolved arguments leave as typed values (SI, rect, no variant/prefix words), and the returned value is validated against the declared `returns` before it enters the table. A call line in the trace reads exactly like a kernel call's.
+
+The transport is a POST-only typed envelope: `{requestId, args}` → `{requestId, result}` (`null` for a void solver) or `{requestId, error}`; the endpoint URL, extra headers and the timeout (default 30 s) come from the declaration's transport options. Failures keep the interface's own meaning — `EXTERNAL_ERROR` (the endpoint reported it in the envelope), `EXTERNAL_HTTP` (a non-2xx status), `EXTERNAL_TIMEOUT` (the declaration's timeout), `EXTERNAL_RESPONSE` (the envelope or the value broke the contract) — and land in the trace as a failed call line, like every other failure.
+
 ## 6. Storage
 
 The plugin home is `~/.dsh-electro-lab` (override with the `DSH_ELECTRO_LAB_HOME` environment variable):
@@ -210,6 +216,7 @@ The plugin home is `~/.dsh-electro-lab` (override with the `DSH_ELECTRO_LAB_HOME
   records/
     <id>.jsonl           ← the trace body (id is a UUID v4)
   state.json             ← plugin state: generation settings + restart flag
+  external-solvers.jsonl ← external solver declarations (one JSON per line)
   logs/
     <YYYY-MM-DD_HH-mm-ss.SSS>.log   ← one host run, plain event lines
 ```
@@ -255,6 +262,10 @@ Rebuilding state replays the lines in order: `set` lines set the slot to the sto
 
 The plugin's own state: the generation dialog's settings (`generateDir`, `generateLanguage`, `generateFormat`, `generateCompile`) and the external-declaration restart flag (`restartRequired`, cleared once declarations are registered at start). Writes go through one owner module as read-modify-write, so a writer touches only its own keys, and the file is replaced atomically (temporary file + rename), so a crash mid-write leaves the previous file intact. An unreadable file reads as `{}`.
 
+### external-solvers.jsonl (declarations)
+
+One JSON declaration per line: `name`, `description`, `enabled`, `parameters`, `returns`, `transport` and `transportOptions` (endpoint URL, extra headers, timeout). `returns` is what registers the solver — a spec, or `null` for a void one; a declaration without a mappable `returns` is archived but skipped at start with a warning, and `enabled: false` is skipped silently. The file is read once at mount: the manager tools and the archive endpoint write it and set the restart flag in state.json, never the live registry.
+
 ### logs/ (one file per host run)
 
 One file per plugin mount: `<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, created exclusively and held open. Lines are `<timestamp> <LEVEL> <message>[ k=v …]`, written to the file and to stdout. Field values are JSON types expanded one level — a nested object or array is one token — and an Error becomes its message plus `  | ` continuation lines with the stack. `DSH_ELECTRO_LAB_LOG_LEVEL` (`debug` | `info` | `warn` | `error` | `off`, default `info`) is the only setting; the newest 20 files up to 50 MB are kept.
@@ -264,4 +275,5 @@ The file is the run's whole record: the name is the start, the last line is the 
 ## 7. Host endpoints
 
 - `GET /api/dsh-electro-lab/records-index` — the index rows for the Records panel list (`{ rows: [{ id, openedAt, sealedAt, question }] }`). The list polls every 5 s; it never reads trace bodies.
+- `/api/dsh-electro-lab/external-solvers` — the declaration archive. `GET` lists the declarations plus the restart flag, `PUT` adds or replaces one from base64url JSON in the `config` query parameter, `DELETE ?name=` removes one. Every write sets the restart flag.
 
