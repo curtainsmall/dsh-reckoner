@@ -163,12 +163,13 @@ function primaryButtonStyle(hovered: boolean, disabled = false): React.CSSProper
 }
 
 /** Ghost button (secondary action). */
-export function GhostButton({ children, onClick, style }: { children: ReactNode; onClick: () => void; style?: React.CSSProperties }): React.JSX.Element {
+export function GhostButton({ children, onClick, disabled = false, style }: { children: ReactNode; onClick: () => void; disabled?: boolean; style?: React.CSSProperties }): React.JSX.Element {
   const [hovered, setHovered] = useState(false)
   return (
     <button
       type="button"
       style={{ ...ghostButtonStyle(hovered), ...style }}
+      disabled={disabled}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

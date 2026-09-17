@@ -628,6 +628,53 @@ const fieldLabelStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 }
 
+/** One section of the form: a rounded card carrying its own header and fields. */
+const cardStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: '10px 12px',
+  borderRadius: 10,
+  background: 'var(--dsw-alias-bg-layer-1)',
+  border: '1px solid var(--dsw-alias-border-l1)',
+}
+
+/** A card header: the section title, its action on the right. */
+const cardHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 8,
+  minHeight: 24,
+}
+
+const cardTitleStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--dsw-alias-label-secondary)',
+}
+
+/** One line of controls: every line keeps the same gap and baseline alignment. */
+const rowLineStyle: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'flex-end' }
+
+/** One parameter or returned field: an outlined block inside its card. */
+const rowCardStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: 8,
+  borderRadius: 8,
+  border: '1px solid var(--dsw-alias-border-l1)',
+}
+
+/** A line kept for a hint whether or not it has text, so nothing below it moves. */
+const hintSlotStyle: React.CSSProperties = { minHeight: 18, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
+
+/** A field that stays in the layout while hidden: its line keeps its width and height. */
+function hiddenField(hidden: boolean): React.CSSProperties {
+  return hidden ? { visibility: 'hidden' } : {}
+}
+
 /** One labelled field: tiny label above the control, grows to fill its row. */
 function Field({ label, style, children }: { label: string; style?: React.CSSProperties; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -715,48 +762,65 @@ function EditorDialog({ editor, onClose, onSaved }: {
         <PrimaryButton key="save" disabled={saving} onClick={save}>{t('confirm')}</PrimaryButton>,
       ]}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* Identity */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Field label={t('nameLabel')} style={{ flex: 1.4 }}>
-            <input
-              type="text"
-              value={state.name}
-              spellCheck={false}
-              onChange={(event) => set('name', event.target.value)}
-              style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }}
-            />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Identity: name, timeout, description, enabled */}
+        <section style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t('identityLabel')}</span>
+          </div>
+          <div style={rowLineStyle}>
+            <Field label={t('nameLabel')} style={{ flex: 1.4 }}>
+              <input
+                type="text"
+                value={state.name}
+                spellCheck={false}
+                onChange={(event) => set('name', event.target.value)}
+                style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }}
+              />
+            </Field>
+            <Field label={t('timeoutLabel')} style={{ flex: 1 }}>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={state.timeoutMs}
+                onChange={(event) => set('timeoutMs', event.target.value.replace(/[^0-9]/g, ''))}
+                style={controlStyle}
+              />
+            </Field>
+          </div>
+          <Field label={t('descriptionLabel')}>
+            <input type="text" value={state.description} onChange={(event) => set('description', event.target.value)} style={controlStyle} />
           </Field>
-          <Field label={t('timeoutLabel')} style={{ flex: 1 }}>
-            <input type="text" inputMode="numeric" value={state.timeoutMs} onChange={(event) => set('timeoutMs', event.target.value)} style={controlStyle} />
-          </Field>
-        </div>
-        <Field label={t('descriptionLabel')}>
-          <input type="text" value={state.description} onChange={(event) => set('description', event.target.value)} style={controlStyle} />
-        </Field>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
-          <input type="checkbox" checked={state.enabled} onChange={(event) => set('enabled', event.target.checked)} style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }} />
-          {t('enabledLabel')}
-        </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={state.enabled} onChange={(event) => set('enabled', event.target.checked)} style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }} />
+            {t('enabledLabel')}
+          </label>
+        </section>
 
         {/* Endpoint: http is the only transport, and the verb is the host's own business. */}
-        <Field label={t('urlLabel')}>
-          <input type="text" value={state.url} spellCheck={false} onChange={(event) => set('url', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
-        </Field>
-        {state.url.trim().length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', lineHeight: 1.5 }}>
-            {t('warnHttp', { url: state.url.trim() })}
+        <section style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t('endpointLabel')}</span>
           </div>
-        )}
+          <Field label={t('urlLabel')}>
+            <input type="text" value={state.url} spellCheck={false} onChange={(event) => set('url', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
+          </Field>
+          {/* The warning keeps its line whether or not it applies, so the cards below stay put. */}
+          <div style={{ ...hintSlotStyle, color: 'var(--dsw-alias-state-error-primary)' }}>
+            {state.url.trim().length > 0 ? t('warnHttp', { url: state.url.trim() }) : ''}
+          </div>
+        </section>
 
         {/* Parameters */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' }}>{t('parametersLabel')}</span>
-          <GhostButton onClick={addRow}>{t('addParameter')}</GhostButton>
-        </div>
+        <section style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t('parametersLabel')}</span>
+            <GhostButton onClick={addRow}>{t('addParameter')}</GhostButton>
+          </div>
         {state.rows.map((row) => (
-          <div key={row.id} style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <div key={row.id} style={rowCardStyle}>
+            <div style={rowLineStyle}>
               <Field label={t('paramTypeLabel')} style={{ flex: 0.8 }}>
                 <select value={row.type} onChange={(event) => setRow(row.id, { type: event.target.value as RowType })} style={controlStyle}>
                   <option value="complex">complex</option>
@@ -790,44 +854,64 @@ function EditorDialog({ editor, onClose, onSaved }: {
                 ✕
               </button>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            {/* Both type-specific fields keep their place: switching the type never resizes the row. */}
+            <div style={rowLineStyle}>
               <Field label={t('nameLabel')} style={{ flex: 1.2 }}>
                 <input type="text" value={row.name} spellCheck={false} onChange={(event) => setRow(row.id, { name: event.target.value })} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
               </Field>
-              {row.type === 'array' && (
-                <Field label={t('paramItemsLabel')} style={{ flex: 1 }}>
-                  <select value={row.itemType} onChange={(event) => setRow(row.id, { itemType: event.target.value as LeafType })} style={controlStyle}>
-                    <option value="complex">complex</option>
-                    <option value="number">number</option>
-                    <option value="string">string</option>
-                    <option value="boolean">boolean</option>
-                  </select>
-                </Field>
-              )}
-              {row.type === 'string' && (
-                <Field label={t('paramEnumLabel')} style={{ flex: 1.4 }}>
-                  <input type="text" value={row.enumText} onChange={(event) => setRow(row.id, { enumText: event.target.value })} style={controlStyle} />
-                </Field>
-              )}
+              <Field label={t('paramItemsLabel')} style={{ flex: 1, ...hiddenField(row.type !== 'array') }}>
+                <select
+                  value={row.itemType}
+                  disabled={row.type !== 'array'}
+                  onChange={(event) => setRow(row.id, { itemType: event.target.value as LeafType })}
+                  style={controlStyle}
+                >
+                  <option value="complex">complex</option>
+                  <option value="number">number</option>
+                  <option value="string">string</option>
+                  <option value="boolean">boolean</option>
+                </select>
+              </Field>
+              <Field label={t('paramEnumLabel')} style={{ flex: 1.4, ...hiddenField(row.type !== 'string') }}>
+                <input
+                  type="text"
+                  value={row.enumText}
+                  disabled={row.type !== 'string'}
+                  onChange={(event) => setRow(row.id, { enumText: event.target.value })}
+                  style={controlStyle}
+                />
+              </Field>
             </div>
             <Field label={t('paramDescriptionLabel')}>
               <input type="text" value={row.description} onChange={(event) => setRow(row.id, { description: event.target.value })} style={controlStyle} />
             </Field>
           </div>
         ))}
-        {state.rows.length === 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{t('parametersLabel')} —</div>
-        )}
+        {/* Reserved line: the notice appears without moving the Returns card below it. */}
+        <div style={hintSlotStyle}>
+          {state.unmodeled.length > 0 ? `${t('unmodeledParams', { count: state.unmodeled.length })} ${state.unmodeled.join(', ')}` : ''}
+        </div>
+        </section>
 
         {/* Returns: required edit — a spec (leaf/object/array) or explicit void (returns: null). */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' }}>{t('returnsLabel')}</span>
-        </div>
-        {state.returns.unmodeled ? (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>{t('returnsPreserved')}</div>
-        ) : (
+        <section style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t('returnsLabel')}</span>
+            {/* Kept in place, hidden and inert unless the shape is an object. */}
+            <GhostButton
+              onClick={addReturnField}
+              disabled={state.returns.unmodeled || state.returns.mode !== 'object'}
+              style={hiddenField(state.returns.unmodeled || state.returns.mode !== 'object')}
+            >
+              {t('addReturnField')}
+            </GhostButton>
+          </div>
+          {state.returns.unmodeled ? (
+            <div style={hintSlotStyle}>{t('returnsPreserved')}</div>
+          ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
+            {/* Every conditional select keeps its slot, so the row never reflows. */}
+            <div style={rowLineStyle}>
               <Field label={t('returnsTypeLabel')} style={{ flex: 0.9 }}>
                 <select value={state.returns.mode} onChange={(event) => setReturns({ mode: event.target.value as ReturnsForm['mode'] })} style={controlStyle}>
                   <option value="void">void</option>
@@ -839,42 +923,57 @@ function EditorDialog({ editor, onClose, onSaved }: {
                   <option value="array">array</option>
                 </select>
               </Field>
-              {(state.returns.mode === 'number' || state.returns.mode === 'complex') && (
-                <Field label={t('paramKindLabel')} style={{ flex: 1.4 }}>
-                  <select value={state.returns.kind} onChange={(event) => setReturns({ kind: event.target.value })} style={controlStyle}>
-                    {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
-                  </select>
-                </Field>
-              )}
-              {state.returns.mode === 'array' && (
-                <Field label={t('paramItemsLabel')} style={{ flex: 1.4 }}>
-                  <select value={state.returns.itemType} onChange={(event) => setReturns({ itemType: event.target.value as LeafType })} style={controlStyle}>
-                    <option value="number">number</option>
-                    <option value="complex">complex</option>
-                    <option value="string">string</option>
-                    <option value="boolean">boolean</option>
-                  </select>
-                </Field>
-              )}
-              {state.returns.mode === 'array' && isQuantityType(state.returns.itemType) && (
-                <Field label={t('paramKindLabel')} style={{ flex: 1.4 }}>
-                  <select value={state.returns.itemKind} onChange={(event) => setReturns({ itemKind: event.target.value })} style={controlStyle}>
-                    {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
-                  </select>
-                </Field>
-              )}
+              <Field
+                label={t('paramKindLabel')}
+                style={{ flex: 1, ...hiddenField(state.returns.mode !== 'number' && state.returns.mode !== 'complex') }}
+              >
+                <select
+                  value={state.returns.kind}
+                  disabled={state.returns.mode !== 'number' && state.returns.mode !== 'complex'}
+                  onChange={(event) => setReturns({ kind: event.target.value })}
+                  style={controlStyle}
+                >
+                  {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+                </select>
+              </Field>
+              <Field label={t('paramItemsLabel')} style={{ flex: 1, ...hiddenField(state.returns.mode !== 'array') }}>
+                <select
+                  value={state.returns.itemType}
+                  disabled={state.returns.mode !== 'array'}
+                  onChange={(event) => setReturns({ itemType: event.target.value as LeafType })}
+                  style={controlStyle}
+                >
+                  <option value="number">number</option>
+                  <option value="complex">complex</option>
+                  <option value="string">string</option>
+                  <option value="boolean">boolean</option>
+                </select>
+              </Field>
+              <Field
+                label={t('paramKindLabel')}
+                style={{ flex: 1, ...hiddenField(state.returns.mode !== 'array' || !isQuantityType(state.returns.itemType)) }}
+              >
+                <select
+                  value={state.returns.itemKind}
+                  disabled={state.returns.mode !== 'array' || !isQuantityType(state.returns.itemType)}
+                  onChange={(event) => setReturns({ itemKind: event.target.value })}
+                  style={controlStyle}
+                >
+                  {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+                </select>
+              </Field>
             </div>
-            {state.returns.mode === 'void' && (
-              <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{t('returnsVoidHint')}</div>
-            )}
+            {/* One reserved hint line, whichever hint applies. */}
+            <div style={hintSlotStyle}>
+              {state.returns.mode === 'void'
+                ? t('returnsVoidHint')
+                : state.returns.mode === 'object' && state.returns.fields.length === 0 ? t('returnsEmptyObjectHint') : ''}
+            </div>
             {state.returns.mode === 'object' && (
               <>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <GhostButton onClick={addReturnField}>{t('addReturnField')}</GhostButton>
-                </div>
                 {state.returns.fields.map((row) => (
-                  <div key={row.id} style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                  <div key={row.id} style={rowCardStyle}>
+                    <div style={rowLineStyle}>
                       <Field label={t('paramTypeLabel')} style={{ flex: 0.8 }}>
                         <select value={row.type} onChange={(event) => setReturnField(row.id, { type: event.target.value as RowType })} style={controlStyle}>
                           <option value="number">number</option>
@@ -907,33 +1006,29 @@ function EditorDialog({ editor, onClose, onSaved }: {
                         ✕
                       </button>
                     </div>
-                    {row.type === 'array' && (
-                      <Field label={t('paramItemsLabel')} style={{ flex: 1 }}>
-                        <select value={row.itemType} onChange={(event) => setReturnField(row.id, { itemType: event.target.value as LeafType })} style={controlStyle}>
-                          <option value="number">number</option>
-                          <option value="complex">complex</option>
-                          <option value="string">string</option>
-                          <option value="boolean">boolean</option>
-                        </select>
-                      </Field>
-                    )}
+                    {/* Kept in place while hidden: switching this field's type never resizes the row. */}
+                    <Field label={t('paramItemsLabel')} style={{ flex: 1, ...hiddenField(row.type !== 'array') }}>
+                      <select
+                        value={row.itemType}
+                        disabled={row.type !== 'array'}
+                        onChange={(event) => setReturnField(row.id, { itemType: event.target.value as LeafType })}
+                        style={controlStyle}
+                      >
+                        <option value="number">number</option>
+                        <option value="complex">complex</option>
+                        <option value="string">string</option>
+                        <option value="boolean">boolean</option>
+                      </select>
+                    </Field>
                   </div>
                 ))}
-                {state.returns.fields.length === 0 && (
-                  <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{t('returnsEmptyObjectHint')}</div>
-                )}
               </>
             )}
           </div>
-        )}
-        {state.unmodeled.length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>
-            {t('unmodeledParams', { count: state.unmodeled.length })} {state.unmodeled.join(', ')}
-          </div>
-        )}
-        {error.length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', lineHeight: 1.5 }}>{error}</div>
-        )}
+          )}
+        </section>
+        {/* Reserved line: a save failure appears without moving the footer. */}
+        <div style={{ ...hintSlotStyle, color: 'var(--dsw-alias-state-error-primary)' }}>{error}</div>
       </div>
     </Dialog>
   )
