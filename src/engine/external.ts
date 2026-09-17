@@ -40,6 +40,20 @@ function readResult(body: unknown, requestId: string): TypedValue | null {
   return raw as TypedValue
 }
 
+/**
+ * The message for a transport failure. fetch reports everything it could not do as "fetch failed" and
+ * keeps the reason in its cause, so a refused connection, an unknown host and a broken socket all read
+ * the same — the caller is left with no way to tell an endpoint that is down from one that is wrong.
+ */
+function transportFailure(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const cause: unknown = error.cause
+  if (!(cause instanceof Error)) return cause === undefined ? error.message : `${error.message}: ${String(cause)}`
+  const code = (cause as { code?: unknown }).code
+  const hasCode = typeof code === 'string' && !cause.message.includes(code)
+  return `${error.message}: ${hasCode ? `${code} ${cause.message}` : cause.message}`
+}
+
 /** Run one external call; return the result from the response (may be null; the engine validates it against the solver signature). */
 export async function callExternal(solverId: string, block: ExternalBlock, args: Record<string, TypedValue>): Promise<TypedValue | null> {
   const timeoutMs = block.timeoutMs ?? 30000
@@ -71,19 +85,26 @@ export async function callExternal(solverId: string, block: ExternalBlock, args:
     log.info('external call ok', { solver: solverId, ep: options.url, req: requestId, took_ms: Date.now() - startedAt })
     return result
   } catch (error) {
+    const timedOut = error instanceof Error && error.name === 'AbortError'
+    const message = error instanceof ToolError || timedOut ? errorMessage(error) : transportFailure(error)
     log.warn('external call failed', {
       solver: solverId,
       ep: options.url,
       req: requestId,
       took_ms: Date.now() - startedAt,
       code: error instanceof ToolError ? error.code : ToolErrorCode.Tool,
+      error: message,
     })
     if (error instanceof ToolError) throw error
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new ToolError(`http request timed out after ${timeoutMs} ms`, ToolErrorCode.ExternalTimeout)
-    }
-    throw error
+    if (timedOut) throw new ToolError(`http request timed out after ${timeoutMs} ms`, ToolErrorCode.ExternalTimeout)
+    // A transport failure stays a plain failure (the engine reports it as SOLVER_FAILED), but the reason travels with it.
+    throw new Error(message, { cause: error })
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** The message of a thrown value, for the log and the receipt. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

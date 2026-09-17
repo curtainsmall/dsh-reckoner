@@ -101,10 +101,19 @@ describe('callExternal', () => {
     reply = () => ({ status: 500, body: 'boom' })
     await expect(callExternal('probe', blockFor(url), ARGS)).rejects.toMatchObject({ code: ToolErrorCode.ExternalHttp })
 
-    const dead = blockFor('http://127.0.0.1:9/')
-    const failure = await callExternal('probe', dead, ARGS).catch((error: unknown) => error)
+    // A port nobody listens on: opened and closed again, so the refusal is a connection refusal. (A
+    // well-known port would be refused by fetch itself as a "bad port" before any connection.)
+    const gone = createServer()
+    await new Promise<void>((resolve) => gone.listen(0, '127.0.0.1', resolve))
+    const deadPort = (gone.address() as AddressInfo).port
+    await new Promise<void>((resolve) => gone.close(() => resolve()))
+
+    const failure = await callExternal('probe', blockFor(`http://127.0.0.1:${deadPort}/`), ARGS).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(Error)
     expect((failure as ToolError).code).toBeUndefined()
+    // The refusal keeps its reason: "fetch failed" on its own leaves the endpoint undiagnosable.
+    expect((failure as Error).message).toMatch(/^fetch failed: .*ECONNREFUSED/)
+    expect((failure as Error).message).toContain(`127.0.0.1:${deadPort}`)
   })
 
   it('gives up on its own timeout', async () => {
