@@ -30,7 +30,7 @@ dsh plugin --profile web add dsh-electro-lab
 
 注册与管理有三条路径：直接编辑归档文件、管理工具（`external_solver_add` / `external_solver_update` / `external_solver_delete`），或面板的**「外部求解器」页**——该页可列出、添加、编辑、启用/停用与删除声明。注册要求 **returns 显式给出**（一个 spec，或 `null` 表示 void）；缺少 returns 的声明只会被存档、启动时跳过并给出告警。
 
-线协议是类型化信封，只发 POST：`{requestId, args}` → `{requestId, result}`（类型化值，void 时为 `null`）或 `{requestId, error}`。线上只传类型化值——不出现符号，也不出现 variant/prefix 词。失败与本地求解器走同一套错误收据（`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`）并落入记录轨迹；结果作为事实存储，重放时绝不重算。
+线协议是类型化信封，只发 POST：`{requestId, args}` → `{requestId, result}`（类型化值，void 时为 `null`）或 `{requestId, error}`。线上只传类型化值——不出现符号，也不出现 variant/prefix 词。量与返回值声明为 `complex`（实数也是合法的复数）或 `number`（只收实数——遇复数拒绝，绝不收窄）。失败与本地求解器走同一套错误收据（`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`）并落入记录轨迹；信封尚未产生就失败的（对端没跑、主机名解析不了）会带上原因——`fetch failed: connect ECONNREFUSED 127.0.0.1:8787`；结果作为事实存储，重放时绝不重算。
 
 [`external-solvers-example/`](external-solvers-example/README.zh-CN.md) 是独立的 npm 工程，内含手动测试对端——`node src/echo.ts http` 可将信封协议端到端回显；注册指南逐字段列出应填内容。
 

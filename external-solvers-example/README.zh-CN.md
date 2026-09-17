@@ -69,6 +69,8 @@ curl -s -X POST http://127.0.0.1:8787/ \
 
 requestId 不匹配的响应会被宿主拒绝；非 JSON 的请求体会收到 `{error: "…"}` 响应。端点通过返回 `{ "requestId": "…", "error": "…" }` 表示计算失败——宿主会把它提升为 solver 错误（code 为 `EXTERNAL_ERROR`），与任何抛出的失败所产生的是同一种结构化错误。宿主永远只发 **POST**；类型化参数以 JSON 请求体的形式传输。
 
+没在运行的对端在收据与日志里读作 `fetch failed: connect ECONNREFUSED 127.0.0.1:8787`，因此"对端没跑"、"端点写错"与"信封损坏"三者可以分辨；运行时会直接拒拨的端口则读作 `bad port`——这也是这里特意用 8787 而不是某个知名端口的原因。
+
 ## 协议参考
 
 完整的声明语法（name/description/enabled/parameters/returns/transport/transportOptions）、类型化值载荷形状与线协议实现在插件引擎源码中——见插件仓库的 `src/engine/external-solvers.ts`（声明编译）与 `src/engine/external.ts`（类型化信封传输）。

@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **External solvers**: register your own calculation solvers over http. A declaration (name, description, parameters, an explicit `returns`, endpoint, extra headers, timeout) lives in `~/.dsh-electro-lab/external-solvers.jsonl` and is registered into the solver registry at engine start, so `solver_info` and `call` work on it unchanged; changes apply after a host restart. Manage them with `external_solver_add` / `external_solver_update` / `external_solver_delete`, by editing the archive file, or from the panel's **External solvers** tab. The protocol is a POST-only typed envelope, `{requestId, args}` → `{requestId, result}` or `{requestId, error}`, with the same error codes as local solvers (`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`).
+- **External solvers**: register your own calculation solvers over http. A declaration (name, description, parameters, an explicit `returns`, endpoint, extra headers, timeout) lives in `~/.dsh-electro-lab/external-solvers.jsonl` and is registered into the solver registry at engine start, so `solver_info` and `call` work on it unchanged; changes apply after a host restart. Manage them with `external_solver_add` / `external_solver_update` / `external_solver_delete`, by editing the archive file, or from the panel's **External solvers** tab. The protocol is a POST-only typed envelope, `{requestId, args}` → `{requestId, result}` or `{requestId, error}`, with the same error codes as local solvers (`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`). A quantity parameter or result is declared `complex` (a real is a legal complex) or `number` (reals only — a complex is refused, never narrowed).
+
+### Fixed
+
+- Quantities nested in an array or object argument are converted like top-level ones. Before, a prefix or a variant word inside such an argument reached the solver untouched: `equivalent_impedance` on `[0.1 kilo-ohm, 50 ohm]` returned 50.1 instead of 150, silently, and the trace's `resolved` field kept the `prefix` it claims to have applied. Every solver taking an array or object of quantities was affected — impedance networks, transfer-function coefficients, DFT sample arrays, transient time points.
+- A failed external call now keeps the reason fetch hides in its cause: `fetch failed: connect ECONNREFUSED 127.0.0.1:8787` instead of `fetch failed`. The log line carries it too, where it used to record only the code.
 
 ## [0.12.0] - 2026-09-16
 

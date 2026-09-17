@@ -46,7 +46,7 @@ DeepSeek Harness ElectroLab 插件把全部电气电子计算放在一台确定�
 
 ### 换算边界
 
-变量表按**原样**存储值——`get` 返回的正是 `set` 写入的内容，不做归一化。换算只发生在值被计算*引用*时：在 `call` 边界，引擎把 variant 换算为 SI（degC → K、deg → rad、psi → Pa……），并把复数形状归一化（`{mag, ang}` → `{re, im}`，角度恒为弧度）。变量表不受影响；轨迹同时记录原始 args 与换算后的终点值。
+变量表按**原样**存储值——`get` 返回的正是 `set` 写入的内容，不做归一化。换算只发生在值被计算*引用*时：在 `call` 边界，引擎把 variant 换算为 SI（degC → K、deg → rad、psi → Pa……），并把复数形状归一化（`{mag, ang}` → `{re, im}`，角度恒为弧度）。这个边界也深入参数内部：嵌在数组或对象里的量与顶层的量一样换算，因此无论量处在哪一层，都不会有 prefix 或 variant 词到达内核。变量表不受影响；轨迹同时记录原始 args 与换算后的终点值。
 
 ## 3. 原语
 
@@ -204,7 +204,7 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 
 注册表里还可以有来自声明的 solver：`external-solvers.jsonl` 每行一条 JSON 声明，引擎启动时每条启用且 `returns` 可映射的声明都会编译进与内置求解器同一个注册表。此后引擎看来没有区别——声明的 `parameters` 与 `returns` 就是签名，`solver_info` 与 `call` 无需特判即可工作；已解析参数以类型化值发出（SI、直角坐标、不含 variant/prefix 词），返回值在进入表之前先按声明的 `returns` 校验。轨迹里的 `call` 行与内核调用完全同形。
 
-传输是只发 POST 的类型化信封：`{requestId, args}` → `{requestId, result}`（void solver 为 `null`）或 `{requestId, error}`；端点 URL、附加头部与超时（默认 30 秒）来自声明的传输选项。失败保留接口本身的含义——`EXTERNAL_ERROR`（端点在信封里自报）、`EXTERNAL_HTTP`（非 2xx 状态）、`EXTERNAL_TIMEOUT`（声明的超时）、`EXTERNAL_RESPONSE`（信封或值违反契约）——与其他失败一样，以一行失败调用落入轨迹。
+传输是只发 POST 的类型化信封：`{requestId, args}` → `{requestId, result}`（void solver 为 `null`）或 `{requestId, error}`；端点 URL、附加头部与超时（默认 30 秒）来自声明的传输选项。失败保留接口本身的含义——`EXTERNAL_ERROR`（端点在信封里自报）、`EXTERNAL_HTTP`（非 2xx 状态）、`EXTERNAL_TIMEOUT`（声明的超时）、`EXTERNAL_RESPONSE`（信封或值违反契约）——与其他失败一样，以一行失败调用落入轨迹。信封尚未产生就发生的失败不属于接口失败：调用以引擎自身的 solver 失败收场，并带上原因（`fetch failed: connect ECONNREFUSED 127.0.0.1:8787`）。fetch 会直接拒拨一批知名端口（表现为 `bad port`），所以对端要监听这批之外的端口。
 
 量叶子（在声明里，或在内核 solver 的签名里）声明该位置允许的值集：`complex(kind)` 同时接受实数（ℝ ⊂ ℂ），`number(kind)` 只收实数——遇到复数会拒绝，而不是悄悄丢掉虚部。加宽是隐式的，收窄从不隐式：实数一路以实数传递，直到某个真需要复数的内核把它转过去。
 

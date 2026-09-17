@@ -97,6 +97,12 @@ host raises it as the solver error (code `EXTERNAL_ERROR`), the same structured
 error any thrown failure produces. The host only ever sends **POST**; the
 typed args travel as the JSON body.
 
+A peer that is not running reads as `fetch failed: connect ECONNREFUSED
+127.0.0.1:8787` in the receipt and the log, so a dead peer is told apart from a
+wrong endpoint or a broken envelope; a port the runtime refuses to dial at all
+reads as `bad port`, which is why 8787 is used here rather than a well-known
+one.
+
 ## Protocol reference
 
 The full declaration grammar (name/description/enabled/parameters/returns/
