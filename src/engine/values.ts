@@ -37,9 +37,14 @@ export function isSlotValue(raw: unknown): raw is SlotValue {
     && typeof (raw as { value?: unknown }).value === 'string'
 }
 
-/** Declaration spec: quantity carries kind (with form), string (optional enum), boolean, array/object recursively closed. */
+/**
+ * Declaration spec: a quantity leaf names the set a value must belong to. `complex` accepts a real too —
+ * ℝ ⊂ ℂ is a one-way inclusion, so widening is implicit and narrowing never is: a `number` leaf rejects a
+ * complex payload instead of quietly taking its real part.
+ */
 export type Spec =
-  | { type: 'quantity'; kind: Kind; form?: 're-im' | 'mag-ang' | 'either' }
+  | { type: 'number'; kind: Kind }
+  | { type: 'complex'; kind: Kind }
   | { type: 'string'; enum?: readonly string[] }
   | { type: 'boolean' }
   | { type: 'array'; items: Spec }
@@ -208,21 +213,19 @@ export function toCanonical(value: TypedValue): TypedValue {
   return value
 }
 
-/** Convert a complex value into the form a declaration needs (re-im / mag-ang / either → re-im). */
-export function toShape(value: { re: number; im: number }, form: 're-im' | 'mag-ang' | 'either' | undefined): { re: number; im: number } | { mag: number; ang: number } {
-  if (form === 'mag-ang') {
-    return { mag: Math.hypot(value.re, value.im), ang: Math.atan2(value.im, value.re) }
-  }
-  return value
-}
-
 /* ── spec matching and native conversion (declaration is the validator) ───── */
 
 /** Validate that a typed value matches a declaration spec (quantity kinds must match; objects are closed). */
 export function validateAgainstSpec(spec: Spec, value: TypedValue, path: string): string | undefined {
   switch (spec.type) {
-    case 'quantity': {
-      if (value.type !== 'number' && value.type !== 'complex') return `${path}: expected a quantity, got ${value.type}`
+    case 'number': {
+      if (value.type === 'complex') return `${path}: expected number(${spec.kind}), got a complex (narrowing is never implicit)`
+      if (value.type !== 'number') return `${path}: expected number(${spec.kind}), got ${value.type}`
+      if (value.kind !== spec.kind) return `${path}: expected kind ${spec.kind}, got ${value.kind}`
+      return undefined
+    }
+    case 'complex': {
+      if (value.type !== 'number' && value.type !== 'complex') return `${path}: expected complex(${spec.kind}), got ${value.type}`
       if (value.kind !== spec.kind) return `${path}: expected kind ${spec.kind}, got ${value.kind}`
       return undefined
     }
@@ -264,7 +267,11 @@ export function validateAgainstSpec(spec: Spec, value: TypedValue, path: string)
  */
 export function fromNative(spec: Spec, raw: unknown, path: string): TypedValue {
   switch (spec.type) {
-    case 'quantity': {
+    case 'number': {
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) throw new Error(`${path}: result must be a finite number`)
+      return { type: 'number', value: raw, kind: spec.kind }
+    }
+    case 'complex': {
       if (typeof raw === 'number') {
         if (!Number.isFinite(raw)) throw new Error(`${path}: result is not a finite number`)
         return { type: 'number', value: raw, kind: spec.kind }
@@ -274,7 +281,7 @@ export function fromNative(spec: Spec, raw: unknown, path: string): TypedValue {
         if (typeof box.re === 'number' && typeof box.im === 'number') return { type: 'complex', value: { re: box.re, im: box.im }, kind: spec.kind }
         if (typeof box.mag === 'number' && typeof box.ang === 'number') return { type: 'complex', value: { mag: box.mag, ang: box.ang }, kind: spec.kind }
       }
-      throw new Error(`${path}: quantity result must be a number or {re, im} / {mag, ang}`)
+      throw new Error(`${path}: result must be a number or {re, im} / {mag, ang}`)
     }
     case 'string':
       if (typeof raw !== 'string') throw new Error(`${path}: expected a string result`)

@@ -27,7 +27,7 @@ function declaration(url: string, returns: ToolDeclaration['returns']): ToolDecl
     name: 'remote_gain',
     description: 'a peer-computed voltage',
     enabled: true,
-    parameters: { r: { type: DeclarationParamType.Quantity, kind: QuantityKind.Resistance, required: true } },
+    parameters: { r: { type: DeclarationParamType.Complex, kind: QuantityKind.Resistance, required: true } },
     returns,
     transport: DeclarationTransport.Http,
     transportOptions: { url },
@@ -48,7 +48,7 @@ function echoDeclaration(url: string): ToolDeclaration {
     enabled: true,
     parameters: {
       message: { type: DeclarationParamType.String, required: true },
-      values: { type: DeclarationParamType.Array, items: { type: DeclarationParamType.Quantity, kind: QuantityKind.None } },
+      values: { type: DeclarationParamType.Array, items: { type: DeclarationParamType.Complex, kind: QuantityKind.None } },
       flag: { type: DeclarationParamType.Boolean },
     },
     returns: {

@@ -10,9 +10,10 @@ import type { DeclarationParamSpec, ToolDeclaration, ToolReturns } from '../tool
 
 function specFromParam(param: DeclarationParamSpec, path: string): Spec {
   switch (param.type) {
-    case DeclarationParamType.Quantity:
+    case DeclarationParamType.Number:
+    case DeclarationParamType.Complex:
       if (!isKind(param.kind)) throw new Error(`${path}: unknown kind "${param.kind}"`)
-      return { type: 'quantity', kind: param.kind }
+      return { type: param.type, kind: param.kind }
     case DeclarationParamType.String:
       return param.enum === undefined ? { type: 'string' } : { type: 'string', enum: param.enum }
     case DeclarationParamType.Boolean:
@@ -39,9 +40,9 @@ function specFromLeaf(returns: ToolReturns, path: string): Spec {
     case 'boolean':
       return { type: 'boolean' }
     case 'number':
-      return { type: 'quantity', kind: returns.kind }
+      return { type: 'number', kind: returns.kind }
     case 'complex':
-      return { type: 'quantity', kind: returns.kind, form: 'either' }
+      return { type: 'complex', kind: returns.kind }
     case 'object': {
       const fields: Record<string, Spec> = {}
       for (const [key, field] of Object.entries(returns.fields)) fields[key] = specFromLeaf(field, `${path}.fields.${key}`)

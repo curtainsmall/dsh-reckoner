@@ -118,8 +118,8 @@ describe('engine (set/get/call + markers + trace)', () => {
     engine.registry.register({
       id: 'double_rc',
       summary: 'double',
-      parameters: { r: { type: 'quantity', kind: QuantityKind.Resistance } },
-      returns: { type: 'quantity', kind: QuantityKind.Resistance },
+      parameters: { r: { type: 'complex', kind: QuantityKind.Resistance } },
+      returns: { type: 'complex', kind: QuantityKind.Resistance },
       run: (args) => ({ re: (args.r as number) * 2, im: 0 }),
     })
     engine.markerQuestion('q')
@@ -144,8 +144,8 @@ describe('engine (set/get/call + markers + trace)', () => {
     engine.registry.register({
       id: 'needs_r',
       summary: 'needs r',
-      parameters: { r: { type: 'quantity', kind: QuantityKind.Resistance } },
-      returns: { type: 'quantity', kind: QuantityKind.None },
+      parameters: { r: { type: 'complex', kind: QuantityKind.Resistance } },
+      returns: { type: 'complex', kind: QuantityKind.None },
       run: (args) => (args.r as number),
     })
     engine.registry.register({
@@ -173,10 +173,10 @@ describe('engine (set/get/call + markers + trace)', () => {
       id: 'two_args',
       summary: 'two args',
       parameters: {
-        a: { type: 'quantity', kind: QuantityKind.Resistance },
+        a: { type: 'complex', kind: QuantityKind.Resistance },
         b: { type: 'string', enum: ['x', 'y'] },
       },
-      returns: { type: 'quantity', kind: QuantityKind.None },
+      returns: { type: 'complex', kind: QuantityKind.None },
       run: (args) => (args.a as number),
     })
     engine.markerQuestion('q')
@@ -184,19 +184,19 @@ describe('engine (set/get/call + markers + trace)', () => {
     await expect(engine.opCall('two_args', {}, 'D')).resolves.toMatchObject({
       ok: false,
       code: 'ENGINE_ARGS',
-      error: /missing required arguments: a: quantity\(resistance\), b: string\(x\|y\)/,
+      error: expect.stringMatching(/missing required arguments: a: complex\(resistance\), b: string\(x\|y\)/),
     })
     // A bad literal names the argument and the expected spec
     await expect(engine.opCall('two_args', { a: 5, b: { type: 'string', value: 'x' } }, 'D')).resolves.toMatchObject({
       ok: false,
       code: 'ENGINE_ARGS',
-      error: /argument "a": .*expected quantity\(resistance\)/,
+      error: expect.stringMatching(/argument "a": .*expected complex\(resistance\)/),
     })
     // A bare "@name" string gets the migration hint instead of a silent loop
     await expect(engine.opCall('two_args', { a: '@R', b: { type: 'string', value: 'x' } }, 'D')).resolves.toMatchObject({
       ok: false,
       code: 'ENGINE_ARGS',
-      error: /"@name" strings are no longer references/,
+      error: expect.stringMatching(/"@name" strings are no longer references/),
     })
   })
 
@@ -206,10 +206,10 @@ describe('engine (set/get/call + markers + trace)', () => {
       id: 'nested_refs',
       summary: 'nested refs',
       parameters: {
-        times: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Time } },
-        cfg: { type: 'object', fields: { gain: { type: 'quantity', kind: QuantityKind.None } } },
+        times: { type: 'array', items: { type: 'complex', kind: QuantityKind.Time } },
+        cfg: { type: 'object', fields: { gain: { type: 'complex', kind: QuantityKind.None } } },
       },
-      returns: { type: 'quantity', kind: QuantityKind.None },
+      returns: { type: 'complex', kind: QuantityKind.None },
       run: (args) => (args.cfg as { gain: number }).gain,
     })
     engine.markerQuestion('q')
@@ -237,7 +237,7 @@ describe('engine (set/get/call + markers + trace)', () => {
       id: 'boom',
       summary: 'boom',
       parameters: {},
-      returns: { type: 'quantity', kind: QuantityKind.None },
+      returns: { type: 'complex', kind: QuantityKind.None },
       run: () => {
         throw new Error('singular system')
       },

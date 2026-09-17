@@ -24,19 +24,19 @@ export const filterSolvers: SolverDef[] = [
     id: 'filter_design',
     summary: 'Design a Butterworth low-pass ladder: order, cutoffFrequency and equal source/load resistance give the element list (series inductors, shunt capacitors); attenuation in dB at the cutoff and at the query frequency',
     parameters: {
-      order: { type: 'quantity', kind: QuantityKind.None },
-      cutoffFrequency: { type: 'quantity', kind: QuantityKind.Frequency },
-      resistance: { type: 'quantity', kind: QuantityKind.Resistance },
-      queryFrequency: { type: 'quantity', kind: QuantityKind.Frequency },
+      order: { type: 'complex', kind: QuantityKind.None },
+      cutoffFrequency: { type: 'complex', kind: QuantityKind.Frequency },
+      resistance: { type: 'complex', kind: QuantityKind.Resistance },
+      queryFrequency: { type: 'complex', kind: QuantityKind.Frequency },
     },
     returns: {
       type: 'object',
       fields: {
         response: { type: 'string' },
         kind: { type: 'string' },
-        order: { type: 'quantity', kind: QuantityKind.None },
-        cutoffFrequency: { type: 'quantity', kind: QuantityKind.Frequency },
-        resistance: { type: 'quantity', kind: QuantityKind.Resistance },
+        order: { type: 'complex', kind: QuantityKind.None },
+        cutoffFrequency: { type: 'complex', kind: QuantityKind.Frequency },
+        resistance: { type: 'complex', kind: QuantityKind.Resistance },
         elements: {
           type: 'array',
           items: {
@@ -46,12 +46,12 @@ export const filterSolvers: SolverDef[] = [
               kind: { type: 'string' },
               // magnitude: inductance (H) when kind is inductance, capacitance
               // (F) when kind is capacitance — see module header.
-              value: { type: 'quantity', kind: QuantityKind.None },
+              value: { type: 'complex', kind: QuantityKind.None },
             },
           },
         },
-        attenuationAtCutoffDb: { type: 'quantity', kind: QuantityKind.Log },
-        attenuationAtQueryDb: { type: 'quantity', kind: QuantityKind.Log },
+        attenuationAtCutoffDb: { type: 'complex', kind: QuantityKind.Log },
+        attenuationAtQueryDb: { type: 'complex', kind: QuantityKind.Log },
       },
     },
     run: (args) => {

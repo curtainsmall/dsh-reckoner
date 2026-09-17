@@ -269,23 +269,21 @@ async function saveDeclaration(
 /** Tool name rule (mirror of the host registry): lowercase start, a-z0-9_. */
 const NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/
 
-type ParamRowType = 'quantity' | 'string' | 'boolean' | 'array'
-/** Parameter array items: the declaration dialect spells a quantity `quantity`. */
-type SimpleRowType = 'quantity' | 'string' | 'boolean'
+/** A value leaf that names a set: `complex` takes a real too (ℝ ⊂ ℂ), `number` takes reals only. */
+type LeafType = 'number' | 'complex' | 'string' | 'boolean'
 
-/** Returns leaves and their array items: the engine spells a quantity `number` or `complex`. */
-type ReturnsLeafType = 'number' | 'complex' | 'string' | 'boolean' | 'array'
-type ReturnsItemType = 'number' | 'complex' | 'string' | 'boolean'
+/** A row type: a value leaf, or a one-level array of them. */
+type RowType = LeafType | 'array'
 
-/** Whether a returns leaf type carries a quantity kind. */
-const isQuantityType = (type: ReturnsLeafType): boolean => type === 'number' || type === 'complex'
+/** Whether a leaf type carries a quantity kind. */
+const isQuantityType = (type: RowType): boolean => type === 'number' || type === 'complex'
 
 /** Editable form of the return shape: null = void, or spec leaves, object fields, array items. */
 interface ReturnsForm {
-  mode: 'void' | 'string' | 'boolean' | 'number' | 'complex' | 'array' | 'object'
-  /** kind for number/complex leaves and for array items of those. */
+  mode: 'void' | LeafType | 'array' | 'object'
+  /** kind for quantity leaves and for array items of those. */
   kind: string
-  itemType: ReturnsItemType
+  itemType: LeafType
   itemKind: string
   /** Field rows for object mode. */
   fields: ReturnsFieldRow[]
@@ -297,9 +295,9 @@ interface ReturnsForm {
 interface ReturnsFieldRow {
   id: number
   name: string
-  type: ReturnsLeafType
+  type: RowType
   kind: string
-  itemType: ReturnsItemType
+  itemType: LeafType
   itemKind: string
 }
 
@@ -307,10 +305,10 @@ interface ReturnsFieldRow {
 interface ParamRow {
   id: number
   name: string
-  type: ParamRowType
-  /** Quantity kind name (quantity rows and array-of-quantity rows). */
+  type: RowType
+  /** Quantity kind name (quantity leaves and array-of-quantity rows). */
   kind: string
-  itemType: SimpleRowType
+  itemType: LeafType
   itemKind: string
   /** String rows: the enum entries, comma-separated in the input. */
   enumText: string
@@ -337,14 +335,9 @@ function defaultReturnsForm(): ReturnsForm {
 }
 
 /** An editable simple leaf or array-item spec (no description/enum/required). */
-function parseReturnsLeaf(spec: unknown): { type: ReturnsItemType; kind: string } | undefined {
+function parseLeaf(spec: unknown): { type: LeafType; kind: string } | undefined {
   if (typeof spec !== 'object' || spec === null) return undefined
   const s = spec as Record<string, unknown>
-  if (s.type === 'quantity') {
-    // The word this form wrote before the returns dialect was settled: a quantity that was never complex.
-    if (typeof s.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(s.kind)) return undefined
-    return { type: 'number', kind: s.kind }
-  }
   if (s.type === 'number' || s.type === 'complex') {
     if (typeof s.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(s.kind)) return undefined
     return { type: s.type, kind: s.kind }
@@ -360,7 +353,7 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
   if (returns === null) return { ...defaultReturnsForm(), mode: 'void' }
   if (typeof returns !== 'object' || returns === null) return fallback()
   const r = returns as Record<string, unknown>
-  const empty = { kind: 'none', itemType: 'number' as ReturnsItemType, itemKind: 'none' }
+  const empty = { kind: 'none', itemType: 'number' as LeafType, itemKind: 'none' }
   switch (r.type) {
     case 'string':
       return { ...empty, mode: 'string', fields: [], unmodeled: false }
@@ -372,7 +365,7 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
       return { ...empty, mode: r.type, kind: r.kind, fields: [], unmodeled: false }
     }
     case 'array': {
-      const item = parseReturnsLeaf(r.items)
+      const item = parseLeaf(r.items)
       if (item === undefined) return fallback()
       return {
         ...empty,
@@ -387,14 +380,14 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
       if (typeof r.fields !== 'object' || r.fields === null || Array.isArray(r.fields)) return fallback()
       const fields: ReturnsFieldRow[] = []
       for (const [name, spec] of Object.entries(r.fields as Record<string, unknown>)) {
-        const leaf = parseReturnsLeaf(spec)
+        const leaf = parseLeaf(spec)
         if (leaf !== undefined) {
           fields.push({ id: fields.length, name, type: leaf.type, kind: leaf.kind, itemType: 'number', itemKind: 'none' })
           continue
         }
         // A one-level array field (same limit as parameter rows).
         if (typeof spec === 'object' && spec !== null && (spec as Record<string, unknown>).type === 'array') {
-          const item = parseReturnsLeaf((spec as Record<string, unknown>).items)
+          const item = parseLeaf((spec as Record<string, unknown>).items)
           if (item === undefined) return fallback()
           fields.push({ id: fields.length, name, type: 'array', kind: 'none', itemType: item.type, itemKind: item.kind })
           continue
@@ -408,15 +401,15 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
   }
 }
 
-/** One returns leaf as a spec: a quantity says which form it is, everything else is bare. */
-function buildReturnsLeafSpec(type: ReturnsItemType, kind: string): Record<string, unknown> {
-  return type === 'number' || type === 'complex' ? { type, kind } : { type }
+/** One leaf as a spec: a quantity says which set it takes (complex takes a real too), everything else is bare. */
+function buildLeafSpec(type: LeafType, kind: string): Record<string, unknown> {
+  return isQuantityType(type) ? { type, kind } : { type }
 }
 
 /** Build a spec from a leaf/array row (shared by fields and array items). */
-function buildReturnsLeaf(row: { type: ReturnsLeafType; kind: string; itemType: ReturnsItemType; itemKind: string }): Record<string, unknown> {
-  if (row.type === 'array') return { type: 'array', items: buildReturnsLeafSpec(row.itemType, row.itemKind) }
-  return buildReturnsLeafSpec(row.type, row.kind)
+function buildReturnsLeaf(row: { type: RowType; kind: string; itemType: LeafType; itemKind: string }): Record<string, unknown> {
+  if (row.type === 'array') return { type: 'array', items: buildLeafSpec(row.itemType, row.itemKind) }
+  return buildLeafSpec(row.type, row.kind)
 }
 
 /** Form → returns spec; null = void. */
@@ -431,7 +424,7 @@ function buildReturnsSpec(form: ReturnsForm): unknown {
     case 'complex':
       return { type: form.mode, kind: form.kind }
     case 'array': {
-      return { type: 'array', items: buildReturnsLeafSpec(form.itemType, form.itemKind) }
+      return { type: 'array', items: buildLeafSpec(form.itemType, form.itemKind) }
     }
     case 'object': {
       const fields: Record<string, unknown> = {}
@@ -447,11 +440,12 @@ function parseParamRow(name: string, spec: unknown, id: number): ParamRow | unde
   const s = spec as Record<string, unknown>
   const description = typeof s.description === 'string' ? s.description : ''
   const required = s.required === true
-  const base = { id, name, kind: 'none', itemType: 'quantity' as SimpleRowType, itemKind: 'none', enumText: '', description, required }
+  const base = { id, name, kind: 'none', itemType: 'complex' as LeafType, itemKind: 'none', enumText: '', description, required }
   switch (s.type) {
-    case 'quantity': {
+    case 'number':
+    case 'complex': {
       if (typeof s.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(s.kind)) return undefined
-      return { ...base, type: 'quantity', kind: s.kind }
+      return { ...base, type: s.type, kind: s.kind }
     }
     case 'string': {
       if (s.enum !== undefined && (!Array.isArray(s.enum) || s.enum.some((item) => typeof item !== 'string'))) return undefined
@@ -461,13 +455,13 @@ function parseParamRow(name: string, spec: unknown, id: number): ParamRow | unde
     case 'boolean':
       return { ...base, type: 'boolean' }
     case 'array': {
-      // One level of homogeneous items: quantity (with a known kind), plain
+      // One level of homogeneous items: a quantity leaf (with a known kind), plain
       // string or boolean. Anything deeper is preserved verbatim instead.
       if (typeof s.items !== 'object' || s.items === null) return undefined
       const items = s.items as Record<string, unknown>
-      if (items.type === 'quantity') {
+      if (items.type === 'number' || items.type === 'complex') {
         if (typeof items.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(items.kind)) return undefined
-        return { ...base, type: 'array', itemType: 'quantity', itemKind: items.kind }
+        return { ...base, type: 'array', itemType: items.type, itemKind: items.kind }
       }
       if (items.type === 'string' && items.enum === undefined) return { ...base, type: 'array', itemType: 'string' }
       if (items.type === 'boolean') return { ...base, type: 'array', itemType: 'boolean' }
@@ -482,8 +476,9 @@ function parseParamRow(name: string, spec: unknown, id: number): ParamRow | unde
 function buildParamSpec(row: ParamRow): Record<string, unknown> {
   const spec: Record<string, unknown> = {}
   switch (row.type) {
-    case 'quantity':
-      spec.type = 'quantity'
+    case 'number':
+    case 'complex':
+      spec.type = row.type
       spec.kind = row.kind
       break
     case 'string':
@@ -498,9 +493,7 @@ function buildParamSpec(row: ParamRow): Record<string, unknown> {
       break
     case 'array': {
       spec.type = 'array'
-      const items: Record<string, unknown> = { type: row.itemType }
-      if (row.itemType === 'quantity') items.kind = row.itemKind
-      spec.items = items
+      spec.items = buildLeafSpec(row.itemType, row.itemKind)
       break
     }
   }
@@ -675,7 +668,7 @@ function EditorDialog({ editor, onClose, onSaved }: {
   }
   const addRow = (): void => {
     const id = state.rows.reduce((max, row) => Math.max(max, row.id), -1) + 1
-    set('rows', [...state.rows, { id, name: '', type: 'quantity', kind: 'none', itemType: 'quantity', itemKind: 'none', enumText: '', description: '', required: false }])
+    set('rows', [...state.rows, { id, name: '', type: 'complex', kind: 'none', itemType: 'complex', itemKind: 'none', enumText: '', description: '', required: false }])
   }
   const removeRow = (id: number): void => {
     set('rows', state.rows.filter((row) => row.id !== id))
@@ -765,8 +758,9 @@ function EditorDialog({ editor, onClose, onSaved }: {
           <div key={row.id} style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
               <Field label={t('paramTypeLabel')} style={{ flex: 0.8 }}>
-                <select value={row.type} onChange={(event) => setRow(row.id, { type: event.target.value as ParamRowType })} style={controlStyle}>
-                  <option value="quantity">quantity</option>
+                <select value={row.type} onChange={(event) => setRow(row.id, { type: event.target.value as RowType })} style={controlStyle}>
+                  <option value="complex">complex</option>
+                  <option value="number">number</option>
                   <option value="string">string</option>
                   <option value="boolean">boolean</option>
                   <option value="array">array</option>
@@ -775,9 +769,9 @@ function EditorDialog({ editor, onClose, onSaved }: {
               <Field label={t('paramKindLabel')} style={{ flex: 1.2 }}>
                 <select
                   value={row.type === 'array' ? row.itemKind : row.kind}
-                  disabled={row.type !== 'quantity' && row.type !== 'array'}
+                  disabled={!isQuantityType(row.type) && row.type !== 'array'}
                   onChange={(event) => setRow(row.id, row.type === 'array' ? { itemKind: event.target.value } : { kind: event.target.value })}
-                  style={{ ...controlStyle, opacity: row.type !== 'quantity' && row.type !== 'array' ? 0.5 : 1 }}
+                  style={{ ...controlStyle, opacity: !isQuantityType(row.type) && row.type !== 'array' ? 0.5 : 1 }}
                 >
                   {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
                 </select>
@@ -802,8 +796,9 @@ function EditorDialog({ editor, onClose, onSaved }: {
               </Field>
               {row.type === 'array' && (
                 <Field label={t('paramItemsLabel')} style={{ flex: 1 }}>
-                  <select value={row.itemType} onChange={(event) => setRow(row.id, { itemType: event.target.value as SimpleRowType })} style={controlStyle}>
-                    <option value="quantity">quantity</option>
+                  <select value={row.itemType} onChange={(event) => setRow(row.id, { itemType: event.target.value as LeafType })} style={controlStyle}>
+                    <option value="complex">complex</option>
+                    <option value="number">number</option>
                     <option value="string">string</option>
                     <option value="boolean">boolean</option>
                   </select>
@@ -853,7 +848,7 @@ function EditorDialog({ editor, onClose, onSaved }: {
               )}
               {state.returns.mode === 'array' && (
                 <Field label={t('paramItemsLabel')} style={{ flex: 1.4 }}>
-                  <select value={state.returns.itemType} onChange={(event) => setReturns({ itemType: event.target.value as ReturnsItemType })} style={controlStyle}>
+                  <select value={state.returns.itemType} onChange={(event) => setReturns({ itemType: event.target.value as LeafType })} style={controlStyle}>
                     <option value="number">number</option>
                     <option value="complex">complex</option>
                     <option value="string">string</option>
@@ -881,7 +876,7 @@ function EditorDialog({ editor, onClose, onSaved }: {
                   <div key={row.id} style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                       <Field label={t('paramTypeLabel')} style={{ flex: 0.8 }}>
-                        <select value={row.type} onChange={(event) => setReturnField(row.id, { type: event.target.value as ReturnsLeafType })} style={controlStyle}>
+                        <select value={row.type} onChange={(event) => setReturnField(row.id, { type: event.target.value as RowType })} style={controlStyle}>
                           <option value="number">number</option>
                           <option value="complex">complex</option>
                           <option value="string">string</option>
@@ -914,7 +909,7 @@ function EditorDialog({ editor, onClose, onSaved }: {
                     </div>
                     {row.type === 'array' && (
                       <Field label={t('paramItemsLabel')} style={{ flex: 1 }}>
-                        <select value={row.itemType} onChange={(event) => setReturnField(row.id, { itemType: event.target.value as ReturnsItemType })} style={controlStyle}>
+                        <select value={row.itemType} onChange={(event) => setReturnField(row.id, { itemType: event.target.value as LeafType })} style={controlStyle}>
                           <option value="number">number</option>
                           <option value="complex">complex</option>
                           <option value="string">string</option>

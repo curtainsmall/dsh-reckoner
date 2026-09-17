@@ -24,7 +24,7 @@ function rectOf(value: Complex): { re: number; im: number } {
   return { re: snapshot.re, im: snapshot.im }
 }
 
-const coefficientArray = { type: 'array' as const, items: { type: 'quantity' as const, kind: QuantityKind.None } }
+const coefficientArray = { type: 'array' as const, items: { type: 'complex' as const, kind: QuantityKind.None } }
 
 export const transferSolvers: SolverDef[] = [
   {
@@ -42,13 +42,13 @@ export const transferSolvers: SolverDef[] = [
           items: {
             type: 'object',
             fields: {
-              pole: { type: 'quantity', kind: QuantityKind.None },
-              order: { type: 'quantity', kind: QuantityKind.None },
-              residue: { type: 'quantity', kind: QuantityKind.None },
+              pole: { type: 'complex', kind: QuantityKind.None },
+              order: { type: 'complex', kind: QuantityKind.None },
+              residue: { type: 'complex', kind: QuantityKind.None },
             },
           },
         },
-        polynomial: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        polynomial: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {
@@ -72,15 +72,15 @@ export const transferSolvers: SolverDef[] = [
       numerator: coefficientArray,
       denominator: coefficientArray,
       variable: { type: 'string', enum: [Variable.S, Variable.Z] },
-      frequencies: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Frequency } },
-      sampleTime: { type: 'quantity', kind: QuantityKind.Time, optional: true },
+      frequencies: { type: 'array', items: { type: 'complex', kind: QuantityKind.Frequency } },
+      sampleTime: { type: 'complex', kind: QuantityKind.Time, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
         variable: { type: 'string' },
-        frequencies: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
-        responses: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        frequencies: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
+        responses: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {
@@ -103,12 +103,12 @@ export const transferSolvers: SolverDef[] = [
     parameters: {
       numerator: coefficientArray,
       denominator: coefficientArray,
-      times: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Time } },
+      times: { type: 'array', items: { type: 'complex', kind: QuantityKind.Time } },
     },
     returns: {
       type: 'object',
       fields: {
-        values: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        values: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {
@@ -131,7 +131,7 @@ export const transferSolvers: SolverDef[] = [
     returns: {
       type: 'object',
       fields: {
-        output: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        output: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {
@@ -150,10 +150,10 @@ export const transferSolvers: SolverDef[] = [
       numerator: coefficientArray,
       denominator: coefficientArray,
       variable: { type: 'string', enum: [Variable.S, Variable.Z], optional: true },
-      frequencyStart: { type: 'quantity', kind: QuantityKind.Frequency },
-      frequencyEnd: { type: 'quantity', kind: QuantityKind.Frequency },
-      pointsPerDecade: { type: 'quantity', kind: QuantityKind.None, optional: true },
-      sampleTime: { type: 'quantity', kind: QuantityKind.Time, optional: true },
+      frequencyStart: { type: 'complex', kind: QuantityKind.Frequency },
+      frequencyEnd: { type: 'complex', kind: QuantityKind.Frequency },
+      pointsPerDecade: { type: 'complex', kind: QuantityKind.None, optional: true },
+      sampleTime: { type: 'complex', kind: QuantityKind.Time, optional: true },
     },
     returns: {
       type: 'object',
@@ -164,9 +164,9 @@ export const transferSolvers: SolverDef[] = [
           items: {
             type: 'object',
             fields: {
-              frequency: { type: 'quantity', kind: QuantityKind.Frequency },
-              magnitudeDb: { type: 'quantity', kind: QuantityKind.Log },
-              phase: { type: 'quantity', kind: QuantityKind.Angle },
+              frequency: { type: 'complex', kind: QuantityKind.Frequency },
+              magnitudeDb: { type: 'complex', kind: QuantityKind.Log },
+              phase: { type: 'complex', kind: QuantityKind.Angle },
             },
           },
         },

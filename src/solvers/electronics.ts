@@ -48,19 +48,19 @@ export const electronicsSolvers: SolverDef[] = [
         type: 'string',
         enum: ['inverting', 'non-inverting', 'voltage-follower', 'difference', 'integrator', 'differentiator'],
       },
-      feedbackResistance: { type: 'quantity', kind: QuantityKind.Resistance, optional: true },
-      inputResistance: { type: 'quantity', kind: QuantityKind.Resistance, optional: true },
-      inputVoltage: { type: 'quantity', kind: QuantityKind.Voltage },
-      secondInputVoltage: { type: 'quantity', kind: QuantityKind.Voltage, optional: true },
-      capacitance: { type: 'quantity', kind: QuantityKind.Capacitance, optional: true },
-      frequency: { type: 'quantity', kind: QuantityKind.Frequency, optional: true },
+      feedbackResistance: { type: 'complex', kind: QuantityKind.Resistance, optional: true },
+      inputResistance: { type: 'complex', kind: QuantityKind.Resistance, optional: true },
+      inputVoltage: { type: 'complex', kind: QuantityKind.Voltage },
+      secondInputVoltage: { type: 'complex', kind: QuantityKind.Voltage, optional: true },
+      capacitance: { type: 'complex', kind: QuantityKind.Capacitance, optional: true },
+      frequency: { type: 'complex', kind: QuantityKind.Frequency, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
         configuration: { type: 'string' },
-        gain: { type: 'quantity', kind: QuantityKind.None },
-        outputVoltage: { type: 'quantity', kind: QuantityKind.Voltage },
+        gain: { type: 'complex', kind: QuantityKind.None },
+        outputVoltage: { type: 'complex', kind: QuantityKind.Voltage },
       },
     },
     run: (args) => {
@@ -143,15 +143,15 @@ export const electronicsSolvers: SolverDef[] = [
     id: 'time_constant',
     summary: 'Time constant and cutoff frequency: τ = RC (give capacitance) or τ = L/R (give inductance); exactly one of capacitance or inductance, cutoffFrequency = 1/(2πτ)',
     parameters: {
-      resistance: { type: 'quantity', kind: QuantityKind.Resistance },
-      capacitance: { type: 'quantity', kind: QuantityKind.Capacitance, optional: true },
-      inductance: { type: 'quantity', kind: QuantityKind.Inductance, optional: true },
+      resistance: { type: 'complex', kind: QuantityKind.Resistance },
+      capacitance: { type: 'complex', kind: QuantityKind.Capacitance, optional: true },
+      inductance: { type: 'complex', kind: QuantityKind.Inductance, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
-        timeConstant: { type: 'quantity', kind: QuantityKind.Time },
-        cutoffFrequency: { type: 'quantity', kind: QuantityKind.Frequency },
+        timeConstant: { type: 'complex', kind: QuantityKind.Time },
+        cutoffFrequency: { type: 'complex', kind: QuantityKind.Frequency },
       },
     },
     run: (args) => {
@@ -166,18 +166,18 @@ export const electronicsSolvers: SolverDef[] = [
     id: 'voltage_divider',
     summary: 'Resistive divider: outputVoltage = Vs·R2/(R1+R2), with R2∥RL when a loadResistance is given (plus unloadedOutputVoltage and loadCurrent); outputResistance is the Thévenin source resistance R1∥R2',
     parameters: {
-      sourceVoltage: { type: 'quantity', kind: QuantityKind.Voltage },
-      resistance1: { type: 'quantity', kind: QuantityKind.Resistance },
-      resistance2: { type: 'quantity', kind: QuantityKind.Resistance },
-      loadResistance: { type: 'quantity', kind: QuantityKind.Resistance, optional: true },
+      sourceVoltage: { type: 'complex', kind: QuantityKind.Voltage },
+      resistance1: { type: 'complex', kind: QuantityKind.Resistance },
+      resistance2: { type: 'complex', kind: QuantityKind.Resistance },
+      loadResistance: { type: 'complex', kind: QuantityKind.Resistance, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
-        outputVoltage: { type: 'quantity', kind: QuantityKind.Voltage },
-        outputResistance: { type: 'quantity', kind: QuantityKind.Resistance },
-        unloadedOutputVoltage: { type: 'quantity', kind: QuantityKind.Voltage },
-        loadCurrent: { type: 'quantity', kind: QuantityKind.Current },
+        outputVoltage: { type: 'complex', kind: QuantityKind.Voltage },
+        outputResistance: { type: 'complex', kind: QuantityKind.Resistance },
+        unloadedOutputVoltage: { type: 'complex', kind: QuantityKind.Voltage },
+        loadCurrent: { type: 'complex', kind: QuantityKind.Current },
       },
     },
     run: (args) => {
@@ -208,15 +208,15 @@ export const electronicsSolvers: SolverDef[] = [
     id: 'led_resistor',
     summary: 'LED series resistor: R = (Vs − Vf)/I and its dissipated power P = I²·R (requires sourceVoltage > forwardVoltage)',
     parameters: {
-      sourceVoltage: { type: 'quantity', kind: QuantityKind.Voltage },
-      forwardVoltage: { type: 'quantity', kind: QuantityKind.Voltage },
-      current: { type: 'quantity', kind: QuantityKind.Current },
+      sourceVoltage: { type: 'complex', kind: QuantityKind.Voltage },
+      forwardVoltage: { type: 'complex', kind: QuantityKind.Voltage },
+      current: { type: 'complex', kind: QuantityKind.Current },
     },
     returns: {
       type: 'object',
       fields: {
-        resistance: { type: 'quantity', kind: QuantityKind.Resistance },
-        power: { type: 'quantity', kind: QuantityKind.Power },
+        resistance: { type: 'complex', kind: QuantityKind.Resistance },
+        power: { type: 'complex', kind: QuantityKind.Power },
       },
     },
     run: (args) => {

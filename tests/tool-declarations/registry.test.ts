@@ -24,9 +24,9 @@ const HTTP_TOOL: ToolDeclaration = {
   enabled: true,
   parameters: {
     mode: { type: DeclarationParamType.String, enum: ['a', 'b'], description: 'the mode', required: true },
-    gain: { type: DeclarationParamType.Quantity, kind: 'log', description: 'the gain' },
+    gain: { type: DeclarationParamType.Complex, kind: 'log', description: 'the gain' },
     on: { type: DeclarationParamType.Boolean, description: 'a switch' },
-    points: { type: DeclarationParamType.Array, items: { type: DeclarationParamType.Quantity, kind: 'frequency', description: 'one point' }, description: 'the points' },
+    points: { type: DeclarationParamType.Array, items: { type: DeclarationParamType.Complex, kind: 'frequency', description: 'one point' }, description: 'the points' },
   },
   transport: DeclarationTransport.Http,
   transportOptions: { url: 'https://example.test/calc', headers: { authorization: 'token' } },
@@ -129,12 +129,12 @@ describe('validateDeclaration', () => {
 
   it('rejects unknown parameter types', () => {
     const errors = validateDeclaration({ ...HTTP_TOOL, parameters: { x: { type: 'float' } } })
-    expect(errors.join('; ')).toContain('parameter "x": unknown type "float" (one of quantity, string, boolean, array)')
+    expect(errors.join('; ')).toContain('parameter "x": unknown type "float" (one of number, complex, string, boolean, array)')
   })
 
-  it('rejects quantity parameters with an unknown kind', () => {
-    const errors = validateDeclaration({ ...HTTP_TOOL, parameters: { x: { type: 'quantity', kind: 'farad' } } })
-    expect(errors.join('; ')).toContain('parameter "x": quantity type requires a known kind')
+  it('rejects quantity leaves with an unknown kind', () => {
+    const errors = validateDeclaration({ ...HTTP_TOOL, parameters: { x: { type: 'complex', kind: 'farad' } } })
+    expect(errors.join('; ')).toContain('parameter "x": a quantity type requires a known kind')
   })
 
   it('rejects string enums that are not string arrays', () => {
@@ -147,15 +147,15 @@ describe('validateDeclaration', () => {
     expect(missing.join('; ')).toContain('parameter "x": array type requires an items declaration')
     const nested = validateDeclaration({
       ...HTTP_TOOL,
-      parameters: { x: { type: 'array', items: { type: 'array', items: { type: 'quantity', kind: 'bogus' } } } },
+      parameters: { x: { type: 'array', items: { type: 'array', items: { type: 'complex', kind: 'bogus' } } } },
     })
-    expect(nested.join('; ')).toContain('parameter "x".items.items: quantity type requires a known kind')
+    expect(nested.join('; ')).toContain('parameter "x".items.items: a quantity type requires a known kind')
   })
 
   it('accepts deeply nested homogeneous arrays', () => {
     const errors = validateDeclaration({
       ...HTTP_TOOL,
-      parameters: { x: { type: 'array', items: { type: 'array', items: { type: 'quantity', kind: 'voltage' } } } },
+      parameters: { x: { type: 'array', items: { type: 'array', items: { type: 'complex', kind: 'voltage' } } } },
     })
     expect(errors).toEqual([])
   })

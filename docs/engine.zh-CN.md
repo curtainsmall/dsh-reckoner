@@ -206,6 +206,8 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 
 传输是只发 POST 的类型化信封：`{requestId, args}` → `{requestId, result}`（void solver 为 `null`）或 `{requestId, error}`；端点 URL、附加头部与超时（默认 30 秒）来自声明的传输选项。失败保留接口本身的含义——`EXTERNAL_ERROR`（端点在信封里自报）、`EXTERNAL_HTTP`（非 2xx 状态）、`EXTERNAL_TIMEOUT`（声明的超时）、`EXTERNAL_RESPONSE`（信封或值违反契约）——与其他失败一样，以一行失败调用落入轨迹。
 
+量叶子（在声明里，或在内核 solver 的签名里）声明该位置允许的值集：`complex(kind)` 同时接受实数（ℝ ⊂ ℂ），`number(kind)` 只收实数——遇到复数会拒绝，而不是悄悄丢掉虚部。加宽是隐式的，收窄从不隐式：实数一路以实数传递，直到某个真需要复数的内核把它转过去。
+
 ## 6. 存储
 
 插件主目录是 `~/.dsh-electro-lab`（可用 `DSH_ELECTRO_LAB_HOME` 环境变量覆盖）：

@@ -25,7 +25,7 @@ function rectOf(value: Complex): { re: number; im: number } {
   return { re: snapshot.re, im: snapshot.im }
 }
 
-const sequenceArray = { type: 'array' as const, items: { type: 'quantity' as const, kind: QuantityKind.None } }
+const sequenceArray = { type: 'array' as const, items: { type: 'complex' as const, kind: QuantityKind.None } }
 
 const windowParam = {
   type: 'string' as const,
@@ -45,7 +45,7 @@ export const dftSolvers: SolverDef[] = [
       type: 'object',
       fields: {
         window: { type: 'string' },
-        spectrum: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        spectrum: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {
@@ -67,7 +67,7 @@ export const dftSolvers: SolverDef[] = [
     returns: {
       type: 'object',
       fields: {
-        samples: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        samples: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {
@@ -82,17 +82,17 @@ export const dftSolvers: SolverDef[] = [
     summary: 'Fourier series coefficients (a₀, aₙ, bₙ) of a standard odd-symmetric waveform',
     parameters: {
       waveform: { type: 'string', enum: [WaveformKind.Square, WaveformKind.Triangle, WaveformKind.Sawtooth] },
-      harmonics: { type: 'quantity', kind: QuantityKind.None },
-      amplitude: { type: 'quantity', kind: QuantityKind.None, optional: true },
+      harmonics: { type: 'complex', kind: QuantityKind.None },
+      amplitude: { type: 'complex', kind: QuantityKind.None, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
         waveform: { type: 'string' },
-        harmonics: { type: 'quantity', kind: QuantityKind.None },
-        dc: { type: 'quantity', kind: QuantityKind.None },
-        cosine: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
-        sine: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        harmonics: { type: 'complex', kind: QuantityKind.None },
+        dc: { type: 'complex', kind: QuantityKind.None },
+        cosine: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
+        sine: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {
@@ -120,11 +120,11 @@ export const dftSolvers: SolverDef[] = [
       type: 'object',
       fields: {
         window: { type: 'string' },
-        rms: { type: 'quantity', kind: QuantityKind.None },
-        peak: { type: 'quantity', kind: QuantityKind.None },
-        peakToPeak: { type: 'quantity', kind: QuantityKind.None },
-        dc: { type: 'quantity', kind: QuantityKind.None },
-        spectrum: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        rms: { type: 'complex', kind: QuantityKind.None },
+        peak: { type: 'complex', kind: QuantityKind.None },
+        peakToPeak: { type: 'complex', kind: QuantityKind.None },
+        dc: { type: 'complex', kind: QuantityKind.None },
+        spectrum: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {

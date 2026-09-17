@@ -23,8 +23,11 @@ Parameters — click **Add parameter** once per row:
 | Name | Type | Required | Other fields |
 |---|---|---|---|
 | `message` | string | yes | Description: `a text echoed back verbatim` |
-| `values` | array | no | Array items: `quantity` · Quantity kind: `none` · Description: `values echoed back verbatim` |
+| `values` | array | no | Array items: `complex` · Quantity kind: `none` · Description: `values echoed back verbatim` |
 | `flag` | boolean | no | Description: `a boolean echoed back verbatim` |
+
+A quantity item is `complex` or `number`: `complex` takes a real as well (ℝ ⊂ ℂ), `number` takes
+reals only and refuses a complex payload instead of quietly dropping its imaginary part.
 
 Returns — the **Returns** section (required; a declaration without it never
 registers): type `object`, then add one field per returned key:
@@ -44,7 +47,7 @@ registers): type `object`, then add one field per returned key:
   "enabled": true,
   "parameters": {
     "message": { "type": "string", "description": "a text echoed back verbatim", "required": true },
-    "values": { "type": "array", "items": { "type": "quantity", "kind": "none" }, "description": "values echoed back verbatim" },
+    "values": { "type": "array", "items": { "type": "complex", "kind": "none" }, "description": "values echoed back verbatim" },
     "flag": { "type": "boolean", "description": "a boolean echoed back verbatim" }
   },
   "returns": {

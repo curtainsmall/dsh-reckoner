@@ -34,12 +34,12 @@ export const expressionSolvers: SolverDef[] = [
           type: 'object',
           fields: {
             name: { type: 'string' },
-            value: { type: 'quantity', kind: QuantityKind.None },
+            value: { type: 'complex', kind: QuantityKind.None },
           },
         },
       },
     },
-    returns: { type: 'quantity', kind: QuantityKind.None },
+    returns: { type: 'complex', kind: QuantityKind.None },
     run: (args) => {
       const variables = args.variables as Binding[] | undefined
       const bindings: Record<string, Complex> = {}
@@ -61,7 +61,7 @@ export const expressionSolvers: SolverDef[] = [
           type: 'object',
           fields: {
             name: { type: 'string' },
-            value: { type: 'quantity', kind: QuantityKind.None },
+            value: { type: 'complex', kind: QuantityKind.None },
           },
         },
       },
@@ -70,10 +70,10 @@ export const expressionSolvers: SolverDef[] = [
       type: 'object',
       fields: {
         variable: { type: 'string' },
-        numeratorDegree: { type: 'quantity', kind: QuantityKind.None },
-        denominatorDegree: { type: 'quantity', kind: QuantityKind.None },
-        numerator: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
-        denominator: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        numeratorDegree: { type: 'complex', kind: QuantityKind.None },
+        denominatorDegree: { type: 'complex', kind: QuantityKind.None },
+        numerator: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
+        denominator: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {

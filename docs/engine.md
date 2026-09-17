@@ -206,6 +206,8 @@ The registry also holds solvers registered from declarations: `external-solvers.
 
 The transport is a POST-only typed envelope: `{requestId, args}` → `{requestId, result}` (`null` for a void solver) or `{requestId, error}`; the endpoint URL, extra headers and the timeout (default 30 s) come from the declaration's transport options. Failures keep the interface's own meaning — `EXTERNAL_ERROR` (the endpoint reported it in the envelope), `EXTERNAL_HTTP` (a non-2xx status), `EXTERNAL_TIMEOUT` (the declaration's timeout), `EXTERNAL_RESPONSE` (the envelope or the value broke the contract) — and land in the trace as a failed call line, like every other failure.
 
+A quantity leaf — in a declaration or in a kernel solver's signature — names the set a value must belong to: `complex(kind)` takes a real as well (ℝ ⊂ ℂ), `number(kind)` takes reals only and refuses a complex payload rather than quietly dropping its imaginary part. Widening is implicit, narrowing never is: a real travels as a real until a kernel that needs a complex calls it into one.
+
 ## 6. Storage
 
 The plugin home is `~/.dsh-electro-lab` (override with the `DSH_ELECTRO_LAB_HOME` environment variable):

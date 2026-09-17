@@ -18,15 +18,15 @@ export const noiseSolvers: SolverDef[] = [
     id: 'thermal_noise',
     summary: 'Thermal (Johnson) noise power in a bandwidth: P = k·T·B (k = 1.380649e−23 J/K), temperature in kelvin; returns watts',
     parameters: {
-      temperature: { type: 'quantity', kind: QuantityKind.None },
-      bandwidth: { type: 'quantity', kind: QuantityKind.Frequency },
+      temperature: { type: 'complex', kind: QuantityKind.None },
+      bandwidth: { type: 'complex', kind: QuantityKind.Frequency },
     },
     returns: {
       type: 'object',
       fields: {
-        temperature: { type: 'quantity', kind: QuantityKind.None },
-        bandwidth: { type: 'quantity', kind: QuantityKind.Frequency },
-        noisePowerWatts: { type: 'quantity', kind: QuantityKind.Power },
+        temperature: { type: 'complex', kind: QuantityKind.None },
+        bandwidth: { type: 'complex', kind: QuantityKind.Frequency },
+        noisePowerWatts: { type: 'complex', kind: QuantityKind.Power },
       },
     },
     run: (args) => {
@@ -40,13 +40,13 @@ export const noiseSolvers: SolverDef[] = [
     id: 'cascade_noise_figure',
     summary: 'Total noise figure of cascaded stages (Friis) from per-stage noise figures and gains in dB: F = F₁ + (F₂−1)/G₁ + (F₃−1)/(G₁G₂) + …; first stage first in both arrays',
     parameters: {
-      noiseFigureDb: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Log } },
-      gainDb: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Log } },
+      noiseFigureDb: { type: 'array', items: { type: 'complex', kind: QuantityKind.Log } },
+      gainDb: { type: 'array', items: { type: 'complex', kind: QuantityKind.Log } },
     },
     returns: {
       type: 'object',
       fields: {
-        totalNoiseFigureDb: { type: 'quantity', kind: QuantityKind.Log },
+        totalNoiseFigureDb: { type: 'complex', kind: QuantityKind.Log },
       },
     },
     run: (args) => {
@@ -61,12 +61,12 @@ export const noiseSolvers: SolverDef[] = [
     id: 'quantization_noise',
     summary: 'Ideal SNR of a uniform quantizer in dB: SNR = 6.02·N + 1.76 (16 bits → ≈ 98 dB)',
     parameters: {
-      bits: { type: 'quantity', kind: QuantityKind.None },
+      bits: { type: 'complex', kind: QuantityKind.None },
     },
     returns: {
       type: 'object',
       fields: {
-        snrDb: { type: 'quantity', kind: QuantityKind.Log },
+        snrDb: { type: 'complex', kind: QuantityKind.Log },
       },
     },
     run: (args) => {

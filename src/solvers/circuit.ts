@@ -104,9 +104,9 @@ export const circuitSolvers: SolverDef[] = [
     summary: 'Total impedance of a set of impedances combined in series (Z = Σ Zi) or in parallel (1/Z = Σ 1/Zi)',
     parameters: {
       topology: { type: 'string', enum: [CircuitMode.Series, CircuitMode.Parallel] },
-      impedances: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Resistance } },
+      impedances: { type: 'array', items: { type: 'complex', kind: QuantityKind.Resistance } },
     },
-    returns: { type: 'quantity', kind: QuantityKind.Resistance },
+    returns: { type: 'complex', kind: QuantityKind.Resistance },
     run: (args) => {
       const parts = (args.impedances as ValuePayload[]).map((item) => toComplex(item))
       const topology = args.topology as CircuitMode
@@ -130,9 +130,9 @@ export const circuitSolvers: SolverDef[] = [
     summary: 'Total driving-point impedance of a (possibly nested) series/parallel network at a frequency; network is JSON text of a tree of element leaves (kind resistance|inductance|capacitance) and series/parallel groups',
     parameters: {
       network: { type: 'string' },
-      frequency: { type: 'quantity', kind: QuantityKind.Frequency },
+      frequency: { type: 'complex', kind: QuantityKind.Frequency },
     },
-    returns: { type: 'quantity', kind: QuantityKind.Resistance },
+    returns: { type: 'complex', kind: QuantityKind.Resistance },
     run: (args) => {
       const frequency = toScalar(args.frequency as ValuePayload)
       const node = parseNetwork(String(args.network))
@@ -143,18 +143,18 @@ export const circuitSolvers: SolverDef[] = [
     id: 'resonance',
     summary: 'Series/parallel LC resonance: resonantFrequency, qualityFactor and bandwidth (qualityFactor = (1/R)√(L/C) series, R√(C/L) parallel)',
     parameters: {
-      inductance: { type: 'quantity', kind: QuantityKind.Inductance },
-      capacitance: { type: 'quantity', kind: QuantityKind.Capacitance },
-      resistance: { type: 'quantity', kind: QuantityKind.Resistance },
+      inductance: { type: 'complex', kind: QuantityKind.Inductance },
+      capacitance: { type: 'complex', kind: QuantityKind.Capacitance },
+      resistance: { type: 'complex', kind: QuantityKind.Resistance },
       mode: { type: 'string', enum: [CircuitMode.Series, CircuitMode.Parallel], optional: true },
     },
     returns: {
       type: 'object',
       fields: {
-        resonantFrequency: { type: 'quantity', kind: QuantityKind.Frequency },
+        resonantFrequency: { type: 'complex', kind: QuantityKind.Frequency },
         mode: { type: 'string' },
-        qualityFactor: { type: 'quantity', kind: QuantityKind.None },
-        bandwidth: { type: 'quantity', kind: QuantityKind.Frequency },
+        qualityFactor: { type: 'complex', kind: QuantityKind.None },
+        bandwidth: { type: 'complex', kind: QuantityKind.Frequency },
       },
     },
     run: (args) => {
@@ -178,17 +178,17 @@ export const circuitSolvers: SolverDef[] = [
     id: 'ac_power',
     summary: 'AC power from RMS values: apparent = V·I, real = apparent·cosφ, reactive = apparent·sinφ, powerFactor = cosφ; phaseAngle (radians) is the V–I phase angle',
     parameters: {
-      rmsVoltage: { type: 'quantity', kind: QuantityKind.Voltage },
-      rmsCurrent: { type: 'quantity', kind: QuantityKind.Current },
-      phaseAngle: { type: 'quantity', kind: QuantityKind.Angle, optional: true },
+      rmsVoltage: { type: 'complex', kind: QuantityKind.Voltage },
+      rmsCurrent: { type: 'complex', kind: QuantityKind.Current },
+      phaseAngle: { type: 'complex', kind: QuantityKind.Angle, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
-        apparent: { type: 'quantity', kind: QuantityKind.Power },
-        real: { type: 'quantity', kind: QuantityKind.Power },
-        reactive: { type: 'quantity', kind: QuantityKind.Power },
-        powerFactor: { type: 'quantity', kind: QuantityKind.None },
+        apparent: { type: 'complex', kind: QuantityKind.Power },
+        real: { type: 'complex', kind: QuantityKind.Power },
+        reactive: { type: 'complex', kind: QuantityKind.Power },
+        powerFactor: { type: 'complex', kind: QuantityKind.None },
       },
     },
     run: (args) => {
@@ -205,13 +205,13 @@ export const circuitSolvers: SolverDef[] = [
     parameters: {
       kind: { type: 'string', enum: ['rc', 'rl', 'rlc'] },
       mode: { type: 'string', enum: [SwitchingMode.Charge, SwitchingMode.Discharge] },
-      sourceVoltage: { type: 'quantity', kind: QuantityKind.Voltage, optional: true },
-      initialVoltage: { type: 'quantity', kind: QuantityKind.Voltage, optional: true },
-      initialCurrent: { type: 'quantity', kind: QuantityKind.Current, optional: true },
-      resistance: { type: 'quantity', kind: QuantityKind.Resistance },
-      capacitance: { type: 'quantity', kind: QuantityKind.Capacitance, optional: true },
-      inductance: { type: 'quantity', kind: QuantityKind.Inductance, optional: true },
-      times: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Time } },
+      sourceVoltage: { type: 'complex', kind: QuantityKind.Voltage, optional: true },
+      initialVoltage: { type: 'complex', kind: QuantityKind.Voltage, optional: true },
+      initialCurrent: { type: 'complex', kind: QuantityKind.Current, optional: true },
+      resistance: { type: 'complex', kind: QuantityKind.Resistance },
+      capacitance: { type: 'complex', kind: QuantityKind.Capacitance, optional: true },
+      inductance: { type: 'complex', kind: QuantityKind.Inductance, optional: true },
+      times: { type: 'array', items: { type: 'complex', kind: QuantityKind.Time } },
     },
     returns: {
       type: 'object',
@@ -223,9 +223,9 @@ export const circuitSolvers: SolverDef[] = [
           items: {
             type: 'object',
             fields: {
-              time: { type: 'quantity', kind: QuantityKind.Time },
-              voltage: { type: 'quantity', kind: QuantityKind.Voltage },
-              current: { type: 'quantity', kind: QuantityKind.Current },
+              time: { type: 'complex', kind: QuantityKind.Time },
+              voltage: { type: 'complex', kind: QuantityKind.Voltage },
+              current: { type: 'complex', kind: QuantityKind.Current },
             },
           },
         },

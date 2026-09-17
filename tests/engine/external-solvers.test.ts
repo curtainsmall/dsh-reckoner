@@ -9,7 +9,7 @@ const BASE: ToolDeclaration = {
   enabled: true,
   parameters: {
     message: { type: DeclarationParamType.String, required: true },
-    count: { type: DeclarationParamType.Quantity, kind: QuantityKind.None },
+    count: { type: DeclarationParamType.Complex, kind: QuantityKind.None },
   },
   transport: DeclarationTransport.Http,
   transportOptions: { url: 'http://127.0.0.1:1/x' },
@@ -26,7 +26,7 @@ describe('compileExternalSolver', () => {
     expect(solver!.external).toMatchObject({ transport: 'http' })
     expect(solver!.returns).toEqual({
       type: 'object',
-      fields: { message: { type: 'string' }, count: { type: 'quantity', kind: 'none' } },
+      fields: { message: { type: 'string' }, count: { type: 'number', kind: 'none' } },
     })
   })
 
@@ -44,9 +44,9 @@ describe('compileExternalSolver', () => {
     expect(() => compileExternalSolver({ ...BASE, returns: { type: 'any' } })).toThrow(/cannot be mapped/)
   })
 
-  it('maps a complex leaf with kind and the either form', () => {
+  it('maps a complex leaf with its kind', () => {
     const solver = compileExternalSolver({ ...BASE, returns: { type: 'complex', kind: QuantityKind.Voltage } })
-    expect(solver!.returns).toEqual({ type: 'quantity', kind: 'voltage', form: 'either' })
+    expect(solver!.returns).toEqual({ type: 'complex', kind: 'voltage' })
   })
 
   it('maps an array field with its items', () => {
@@ -56,15 +56,15 @@ describe('compileExternalSolver', () => {
     })
     expect(solver!.returns).toEqual({
       type: 'object',
-      fields: { values: { type: 'array', items: { type: 'quantity', kind: 'none' } } },
+      fields: { values: { type: 'array', items: { type: 'number', kind: 'none' } } },
     })
   })
 
   it('rejects an unmappable returns leaf instead of dropping the spec', () => {
-    // "quantity" is the parameter word; a returns leaf says number or complex. Dropping it
-    // silently would leave an array without items and only fail on the first call.
-    const unmappable = { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } } as unknown as ToolReturns
+    // An unknown leaf must fail here: dropping it silently would leave an array without items
+    // and only break the spec later, on the first call.
+    const unmappable = { type: 'integer', kind: QuantityKind.None } as unknown as ToolReturns
     expect(() => compileExternalSolver({ ...BASE, returns: { type: 'object', fields: { values: unmappable } } }))
-      .toThrow(/unknown returns type "quantity"/)
+      .toThrow(/unknown returns type "integer"/)
   })
 })

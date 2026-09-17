@@ -35,7 +35,7 @@ pnpm echo:http
 
 ## 4. 调用
 
-让智能体调用 `echo_http`，携带 `message`、可选的 `values`（数字数组——quantity 接受裸数字、`{re, im}` 或 `{mag, ang}`）与可选的 `flag`。引擎把结果存入具名 target 槽；`get` 返回的正是对端原样回显的内容——全部是类型化值：
+让智能体调用 `echo_http`，携带 `message`、可选的 `values`（数字数组——`complex` 接受裸数字、`{re, im}` 或 `{mag, ang}`）与可选的 `flag`。引擎把结果存入具名 target 槽；`get` 返回的正是对端原样回显的内容——全部是类型化值：
 
 ```json
 {

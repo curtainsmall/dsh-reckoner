@@ -19,8 +19,11 @@
 | 名称 | 类型 | 必填 | 其他字段 |
 |---|---|---|---|
 | `message` | string | 是 | 说明：`a text echoed back verbatim` |
-| `values` | array | 否 | 数组元素：`quantity` · 数量类别：`none` · 说明：`values echoed back verbatim` |
+| `values` | array | 否 | 数组元素：`complex` · 数量类别：`none` · 说明：`values echoed back verbatim` |
 | `flag` | boolean | 否 | 说明：`a boolean echoed back verbatim` |
+
+量类型只有 `complex` 与 `number` 两种：`complex` 同时接受实数（ℝ ⊂ ℂ），`number` 只收实数 ——
+遇到复数会明确拒绝，而不是悄悄丢掉虚部。
 
 Returns——**Returns** 区域（必填；没有 Returns 的声明永远不会注册）：类型选 `object`，然后为每个返回键添加一个字段：
 
@@ -39,7 +42,7 @@ Returns——**Returns** 区域（必填；没有 Returns 的声明永远不会�
   "enabled": true,
   "parameters": {
     "message": { "type": "string", "description": "a text echoed back verbatim", "required": true },
-    "values": { "type": "array", "items": { "type": "quantity", "kind": "none" }, "description": "values echoed back verbatim" },
+    "values": { "type": "array", "items": { "type": "complex", "kind": "none" }, "description": "values echoed back verbatim" },
     "flag": { "type": "boolean", "description": "a boolean echoed back verbatim" }
   },
   "returns": {
