@@ -5,11 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] - 2026-09-17
 
 ### Added
 
-- **External solvers**: register your own calculation solvers over http. A declaration (name, description, parameters, an explicit `returns`, endpoint, extra headers, timeout) lives in `~/.dsh-electro-lab/external-solvers.jsonl` and is registered into the solver registry at engine start, so `solver_info` and `call` work on it unchanged; changes apply after a host restart. Manage them with `external_solver_add` / `external_solver_update` / `external_solver_delete`, by editing the archive file, or from the panel's **External solvers** tab. The protocol is a POST-only typed envelope, `{requestId, args}` → `{requestId, result}` or `{requestId, error}`, with the same error codes as local solvers (`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`). A quantity parameter or result is declared `complex` (a real is a legal complex) or `number` (reals only — a complex is refused, never narrowed).
+- **External solvers**: register your own calculation solvers over http. A declaration (name, description, parameters, an explicit `returns`, endpoint, extra headers, timeout) lives in `~/.dsh-electro-lab/external-solvers.jsonl` and is registered into the solver registry at engine start, so `solver_info` and `call` work on it unchanged; changes apply after a host restart. Manage them with `external_solver_add` / `external_solver_update` / `external_solver_delete`, by editing the archive file, or from the panel's **External solvers** tab. The protocol is a POST-only typed envelope, `{requestId, args}` → `{requestId, result}` or `{requestId, error}`, with the same error codes as local solvers (`EXTERNAL_ERROR` / `EXTERNAL_HTTP` / `EXTERNAL_TIMEOUT` / `EXTERNAL_RESPONSE`).
+
+### Changed
+
+- A quantity leaf — in a declaration and in a built-in solver's signature — is spelled `number` or `complex`; the word `quantity` is gone from signatures, failure receipts and the declaration editor. `complex` takes a real as well (ℝ ⊂ ℂ) and `number` takes reals only, refusing a complex payload instead of narrowing it, so a signature can state which of the two it needs: `solver_info` reads `complex(resistance)` where it used to read `quantity(resistance)`, and a call that would narrow fails at the argument. Values keep their own spelling — `number` for a real, `complex` for a `{re, im}` / `{mag, ang}` payload — so records, the wire format and peers are untouched.
 
 ### Fixed
 
@@ -234,6 +238,7 @@ oiseFigureDb`, `gainDb`, `magnitudeDb`, `returnLossDb`…) — dB is a log scale
 
 - First public beta of ElectroLab: the complete feature set listed under [0.1.0] above, published to npm under the `beta` dist-tag.
 
+[0.13.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.13.0
 [0.12.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.12.0
 [0.11.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.11.0
 [0.9.0]: https://github.com/curtainsmall/dsh-electro-lab/releases/tag/v0.9.0
