@@ -17,7 +17,7 @@
  *   capacitance) and the component magnitude as a kind-None value.
  */
 import { Complex } from 'complex.js'
-import { ElementKind } from '../../math/circuits.ts'
+import { ElementKind } from '../math/circuits.ts'
 import {
   MatchTopology,
   MatchVariant,
@@ -29,10 +29,10 @@ import {
   convertReflectionToVswr,
   designMatch,
   type MatchElement,
-} from '../../math/smith.ts'
-import { toComplex, toScalar, serializeComplex, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+} from '../math/smith.ts'
+import { toComplex, toScalar, serializeComplex, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 /** Kernel complex value → engine-native rect (finite-checked, -0 folded). */
 function rectOf(value: Complex): { re: number; im: number } {
@@ -45,10 +45,10 @@ export const smithSolvers: SolverDef[] = [
     id: 'impedance_to_reflection',
     summary: 'Reflection coefficient Γ = (Z − Z0) / (Z + Z0) for an impedance on a referenceImpedance line (default 50 Ω)',
     parameters: {
-      impedance: { type: 'quantity', kind: QuantityKind.Resistance },
-      referenceImpedance: { type: 'quantity', kind: QuantityKind.Resistance, optional: true },
+      impedance: { type: 'complex', kind: QuantityKind.Resistance },
+      referenceImpedance: { type: 'complex', kind: QuantityKind.Resistance, optional: true },
     },
-    returns: { type: 'quantity', kind: QuantityKind.None },
+    returns: { type: 'complex', kind: QuantityKind.None },
     run: (args) => {
       const impedance = toComplex(args.impedance as ValuePayload)
       const referenceImpedance = args.referenceImpedance === undefined ? 50 : toScalar(args.referenceImpedance as ValuePayload)
@@ -59,12 +59,12 @@ export const smithSolvers: SolverDef[] = [
     id: 'reflection_to_vswr',
     summary: 'Voltage standing wave ratio from a reflection coefficient: vswr = (1+|Γ|)/(1−|Γ|); |Γ| = 1 (open/short) is unbounded and throws because the value universe holds no infinity',
     parameters: {
-      reflectionCoefficient: { type: 'quantity', kind: QuantityKind.None },
+      reflectionCoefficient: { type: 'complex', kind: QuantityKind.None },
     },
     returns: {
       type: 'object',
       fields: {
-        vswr: { type: 'quantity', kind: QuantityKind.None },
+        vswr: { type: 'complex', kind: QuantityKind.None },
       },
     },
     run: (args) => {
@@ -76,12 +76,12 @@ export const smithSolvers: SolverDef[] = [
     id: 'return_loss',
     summary: 'Return loss in dB: −20·log10(|Γ|); |Γ| = 0 (perfect match) is unbounded and throws because the value universe holds no infinity',
     parameters: {
-      reflectionCoefficient: { type: 'quantity', kind: QuantityKind.None },
+      reflectionCoefficient: { type: 'complex', kind: QuantityKind.None },
     },
     returns: {
       type: 'object',
       fields: {
-        returnLossDb: { type: 'quantity', kind: QuantityKind.Log },
+        returnLossDb: { type: 'complex', kind: QuantityKind.Log },
       },
     },
     run: (args) => {
@@ -93,10 +93,10 @@ export const smithSolvers: SolverDef[] = [
     id: 'quarter_wave_transformer',
     summary: 'Quarter-wave transformer characteristic impedance: Z1 = √(Z0·ZL), matching a real load impedance to a line impedance',
     parameters: {
-      lineImpedance: { type: 'quantity', kind: QuantityKind.Resistance },
-      loadImpedance: { type: 'quantity', kind: QuantityKind.Resistance },
+      lineImpedance: { type: 'complex', kind: QuantityKind.Resistance },
+      loadImpedance: { type: 'complex', kind: QuantityKind.Resistance },
     },
-    returns: { type: 'quantity', kind: QuantityKind.Resistance },
+    returns: { type: 'complex', kind: QuantityKind.Resistance },
     run: (args) => {
       const lineImpedance = toScalar(args.lineImpedance as ValuePayload)
       const loadImpedance = toScalar(args.loadImpedance as ValuePayload)
@@ -108,16 +108,16 @@ export const smithSolvers: SolverDef[] = [
     summary: 'Design a matching network between two real resistances at a frequency: topology l uses the implied quality factor √(Rl/Rs − 1), pi and t need a qualityFactor above that minimum; returns low-pass/high-pass conjugate solutions as ordered elements',
     parameters: {
       topology: { type: 'string', enum: [MatchTopology.L, MatchTopology.Pi, MatchTopology.T] },
-      sourceImpedance: { type: 'quantity', kind: QuantityKind.Resistance },
-      loadImpedance: { type: 'quantity', kind: QuantityKind.Resistance },
-      frequency: { type: 'quantity', kind: QuantityKind.Frequency },
-      qualityFactor: { type: 'quantity', kind: QuantityKind.None, optional: true },
+      sourceImpedance: { type: 'complex', kind: QuantityKind.Resistance },
+      loadImpedance: { type: 'complex', kind: QuantityKind.Resistance },
+      frequency: { type: 'complex', kind: QuantityKind.Frequency },
+      qualityFactor: { type: 'complex', kind: QuantityKind.None, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
         topology: { type: 'string' },
-        qualityFactor: { type: 'quantity', kind: QuantityKind.None },
+        qualityFactor: { type: 'complex', kind: QuantityKind.None },
         solutions: {
           type: 'object',
           fields: {
@@ -130,12 +130,12 @@ export const smithSolvers: SolverDef[] = [
                     type: 'object',
                     fields: {
                       role: { type: 'string' },
-                      reactance: { type: 'quantity', kind: QuantityKind.Resistance },
+                      reactance: { type: 'complex', kind: QuantityKind.Resistance },
                       // component kind and magnitude: inductance (H) for a
                       // positive reactance, capacitance (F) for a negative
                       // one — see module header.
                       kind: { type: 'string' },
-                      value: { type: 'quantity', kind: QuantityKind.None },
+                      value: { type: 'complex', kind: QuantityKind.None },
                     },
                   },
                 },
@@ -150,9 +150,9 @@ export const smithSolvers: SolverDef[] = [
                     type: 'object',
                     fields: {
                       role: { type: 'string' },
-                      reactance: { type: 'quantity', kind: QuantityKind.Resistance },
+                      reactance: { type: 'complex', kind: QuantityKind.Resistance },
                       kind: { type: 'string' },
-                      value: { type: 'quantity', kind: QuantityKind.None },
+                      value: { type: 'complex', kind: QuantityKind.None },
                     },
                   },
                 },

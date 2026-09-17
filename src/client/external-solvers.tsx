@@ -269,18 +269,21 @@ async function saveDeclaration(
 /** Tool name rule (mirror of the host registry): lowercase start, a-z0-9_. */
 const NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/
 
-type ParamRowType = 'quantity' | 'string' | 'boolean' | 'array'
-type SimpleRowType = 'quantity' | 'string' | 'boolean'
+/** A value leaf that names a set: `complex` takes a real too (ℝ ⊂ ℂ), `number` takes reals only. */
+type LeafType = 'number' | 'complex' | 'string' | 'boolean'
 
-/** Returns leaf / array-item shape (shared by field rows and array rows). */
-type ReturnsLeafType = 'quantity' | 'string' | 'boolean' | 'array'
+/** A row type: a value leaf, or a one-level array of them. */
+type RowType = LeafType | 'array'
+
+/** Whether a leaf type carries a quantity kind. */
+const isQuantityType = (type: RowType): boolean => type === 'number' || type === 'complex'
 
 /** Editable form of the return shape: null = void, or spec leaves, object fields, array items. */
 interface ReturnsForm {
-  mode: 'void' | 'string' | 'boolean' | 'number' | 'complex' | 'array' | 'object'
-  /** kind for number/complex leaves and quantity array items. */
+  mode: 'void' | LeafType | 'array' | 'object'
+  /** kind for quantity leaves and for array items of those. */
   kind: string
-  itemType: SimpleRowType
+  itemType: LeafType
   itemKind: string
   /** Field rows for object mode. */
   fields: ReturnsFieldRow[]
@@ -292,9 +295,9 @@ interface ReturnsForm {
 interface ReturnsFieldRow {
   id: number
   name: string
-  type: ReturnsLeafType
+  type: RowType
   kind: string
-  itemType: SimpleRowType
+  itemType: LeafType
   itemKind: string
 }
 
@@ -302,10 +305,10 @@ interface ReturnsFieldRow {
 interface ParamRow {
   id: number
   name: string
-  type: ParamRowType
-  /** Quantity kind name (quantity rows and array-of-quantity rows). */
+  type: RowType
+  /** Quantity kind name (quantity leaves and array-of-quantity rows). */
   kind: string
-  itemType: SimpleRowType
+  itemType: LeafType
   itemKind: string
   /** String rows: the enum entries, comma-separated in the input. */
   enumText: string
@@ -328,16 +331,16 @@ interface FormState {
 
 /** Default form (new tool): object with no fields — saving yields an explicit spec. */
 function defaultReturnsForm(): ReturnsForm {
-  return { mode: 'object', kind: 'none', itemType: 'quantity', itemKind: 'none', fields: [], unmodeled: false }
+  return { mode: 'object', kind: 'none', itemType: 'number', itemKind: 'none', fields: [], unmodeled: false }
 }
 
 /** An editable simple leaf or array-item spec (no description/enum/required). */
-function parseReturnsLeaf(spec: unknown): { type: SimpleRowType; kind: string } | undefined {
+function parseLeaf(spec: unknown): { type: LeafType; kind: string } | undefined {
   if (typeof spec !== 'object' || spec === null) return undefined
   const s = spec as Record<string, unknown>
-  if (s.type === 'quantity') {
+  if (s.type === 'number' || s.type === 'complex') {
     if (typeof s.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(s.kind)) return undefined
-    return { type: 'quantity', kind: s.kind }
+    return { type: s.type, kind: s.kind }
   }
   if (s.type === 'string' && s.enum === undefined) return { type: 'string', kind: 'none' }
   if (s.type === 'boolean') return { type: 'boolean', kind: 'none' }
@@ -350,7 +353,7 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
   if (returns === null) return { ...defaultReturnsForm(), mode: 'void' }
   if (typeof returns !== 'object' || returns === null) return fallback()
   const r = returns as Record<string, unknown>
-  const empty = { kind: 'none', itemType: 'quantity' as SimpleRowType, itemKind: 'none' }
+  const empty = { kind: 'none', itemType: 'number' as LeafType, itemKind: 'none' }
   switch (r.type) {
     case 'string':
       return { ...empty, mode: 'string', fields: [], unmodeled: false }
@@ -362,7 +365,7 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
       return { ...empty, mode: r.type, kind: r.kind, fields: [], unmodeled: false }
     }
     case 'array': {
-      const item = parseReturnsLeaf(r.items)
+      const item = parseLeaf(r.items)
       if (item === undefined) return fallback()
       return {
         ...empty,
@@ -377,14 +380,14 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
       if (typeof r.fields !== 'object' || r.fields === null || Array.isArray(r.fields)) return fallback()
       const fields: ReturnsFieldRow[] = []
       for (const [name, spec] of Object.entries(r.fields as Record<string, unknown>)) {
-        const leaf = parseReturnsLeaf(spec)
+        const leaf = parseLeaf(spec)
         if (leaf !== undefined) {
-          fields.push({ id: fields.length, name, type: leaf.type, kind: leaf.kind, itemType: 'quantity', itemKind: 'none' })
+          fields.push({ id: fields.length, name, type: leaf.type, kind: leaf.kind, itemType: 'number', itemKind: 'none' })
           continue
         }
         // A one-level array field (same limit as parameter rows).
         if (typeof spec === 'object' && spec !== null && (spec as Record<string, unknown>).type === 'array') {
-          const item = parseReturnsLeaf((spec as Record<string, unknown>).items)
+          const item = parseLeaf((spec as Record<string, unknown>).items)
           if (item === undefined) return fallback()
           fields.push({ id: fields.length, name, type: 'array', kind: 'none', itemType: item.type, itemKind: item.kind })
           continue
@@ -398,15 +401,15 @@ function parseReturnsForm(returns: unknown): ReturnsForm {
   }
 }
 
+/** One leaf as a spec: a quantity says which set it takes (complex takes a real too), everything else is bare. */
+function buildLeafSpec(type: LeafType, kind: string): Record<string, unknown> {
+  return isQuantityType(type) ? { type, kind } : { type }
+}
+
 /** Build a spec from a leaf/array row (shared by fields and array items). */
-function buildReturnsLeaf(row: { type: SimpleRowType | 'array'; kind: string; itemType: SimpleRowType; itemKind: string }): Record<string, unknown> {
-  if (row.type === 'array') {
-    const items: Record<string, unknown> = { type: row.itemType }
-    if (row.itemType === 'quantity') items.kind = row.itemKind
-    return { type: 'array', items }
-  }
-  if (row.type === 'quantity') return { type: 'quantity', kind: row.kind }
-  return { type: row.type }
+function buildReturnsLeaf(row: { type: RowType; kind: string; itemType: LeafType; itemKind: string }): Record<string, unknown> {
+  if (row.type === 'array') return { type: 'array', items: buildLeafSpec(row.itemType, row.itemKind) }
+  return buildLeafSpec(row.type, row.kind)
 }
 
 /** Form → returns spec; null = void. */
@@ -421,9 +424,7 @@ function buildReturnsSpec(form: ReturnsForm): unknown {
     case 'complex':
       return { type: form.mode, kind: form.kind }
     case 'array': {
-      const items: Record<string, unknown> = { type: form.itemType }
-      if (form.itemType === 'quantity') items.kind = form.itemKind
-      return { type: 'array', items }
+      return { type: 'array', items: buildLeafSpec(form.itemType, form.itemKind) }
     }
     case 'object': {
       const fields: Record<string, unknown> = {}
@@ -439,11 +440,12 @@ function parseParamRow(name: string, spec: unknown, id: number): ParamRow | unde
   const s = spec as Record<string, unknown>
   const description = typeof s.description === 'string' ? s.description : ''
   const required = s.required === true
-  const base = { id, name, kind: 'none', itemType: 'quantity' as SimpleRowType, itemKind: 'none', enumText: '', description, required }
+  const base = { id, name, kind: 'none', itemType: 'complex' as LeafType, itemKind: 'none', enumText: '', description, required }
   switch (s.type) {
-    case 'quantity': {
+    case 'number':
+    case 'complex': {
       if (typeof s.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(s.kind)) return undefined
-      return { ...base, type: 'quantity', kind: s.kind }
+      return { ...base, type: s.type, kind: s.kind }
     }
     case 'string': {
       if (s.enum !== undefined && (!Array.isArray(s.enum) || s.enum.some((item) => typeof item !== 'string'))) return undefined
@@ -453,13 +455,13 @@ function parseParamRow(name: string, spec: unknown, id: number): ParamRow | unde
     case 'boolean':
       return { ...base, type: 'boolean' }
     case 'array': {
-      // One level of homogeneous items: quantity (with a known kind), plain
+      // One level of homogeneous items: a quantity leaf (with a known kind), plain
       // string or boolean. Anything deeper is preserved verbatim instead.
       if (typeof s.items !== 'object' || s.items === null) return undefined
       const items = s.items as Record<string, unknown>
-      if (items.type === 'quantity') {
+      if (items.type === 'number' || items.type === 'complex') {
         if (typeof items.kind !== 'string' || !QUANTITY_KIND_NAMES.includes(items.kind)) return undefined
-        return { ...base, type: 'array', itemType: 'quantity', itemKind: items.kind }
+        return { ...base, type: 'array', itemType: items.type, itemKind: items.kind }
       }
       if (items.type === 'string' && items.enum === undefined) return { ...base, type: 'array', itemType: 'string' }
       if (items.type === 'boolean') return { ...base, type: 'array', itemType: 'boolean' }
@@ -474,8 +476,9 @@ function parseParamRow(name: string, spec: unknown, id: number): ParamRow | unde
 function buildParamSpec(row: ParamRow): Record<string, unknown> {
   const spec: Record<string, unknown> = {}
   switch (row.type) {
-    case 'quantity':
-      spec.type = 'quantity'
+    case 'number':
+    case 'complex':
+      spec.type = row.type
       spec.kind = row.kind
       break
     case 'string':
@@ -490,9 +493,7 @@ function buildParamSpec(row: ParamRow): Record<string, unknown> {
       break
     case 'array': {
       spec.type = 'array'
-      const items: Record<string, unknown> = { type: row.itemType }
-      if (row.itemType === 'quantity') items.kind = row.itemKind
-      spec.items = items
+      spec.items = buildLeafSpec(row.itemType, row.itemKind)
       break
     }
   }
@@ -627,6 +628,53 @@ const fieldLabelStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 }
 
+/** One section of the form: a rounded card carrying its own header and fields. */
+const cardStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: '10px 12px',
+  borderRadius: 10,
+  background: 'var(--dsw-alias-bg-layer-1)',
+  border: '1px solid var(--dsw-alias-border-l1)',
+}
+
+/** A card header: the section title, its action on the right. */
+const cardHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 8,
+  minHeight: 24,
+}
+
+const cardTitleStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--dsw-alias-label-secondary)',
+}
+
+/** One line of controls: every line keeps the same gap and baseline alignment. */
+const rowLineStyle: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'flex-end' }
+
+/** One parameter or returned field: an outlined block inside its card. */
+const rowCardStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: 8,
+  borderRadius: 8,
+  border: '1px solid var(--dsw-alias-border-l1)',
+}
+
+/** A line kept for a hint whether or not it has text, so nothing below it moves. */
+const hintSlotStyle: React.CSSProperties = { minHeight: 18, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
+
+/** A field that stays in the layout while hidden: its line keeps its width and height. */
+function hiddenField(hidden: boolean): React.CSSProperties {
+  return hidden ? { visibility: 'hidden' } : {}
+}
+
 /** One labelled field: tiny label above the control, grows to fill its row. */
 function Field({ label, style, children }: { label: string; style?: React.CSSProperties; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -667,7 +715,7 @@ function EditorDialog({ editor, onClose, onSaved }: {
   }
   const addRow = (): void => {
     const id = state.rows.reduce((max, row) => Math.max(max, row.id), -1) + 1
-    set('rows', [...state.rows, { id, name: '', type: 'quantity', kind: 'none', itemType: 'quantity', itemKind: 'none', enumText: '', description: '', required: false }])
+    set('rows', [...state.rows, { id, name: '', type: 'complex', kind: 'none', itemType: 'complex', itemKind: 'none', enumText: '', description: '', required: false }])
   }
   const removeRow = (id: number): void => {
     set('rows', state.rows.filter((row) => row.id !== id))
@@ -679,7 +727,7 @@ function EditorDialog({ editor, onClose, onSaved }: {
   })
   const addReturnField = (): void => {
     const id = state.returns.fields.reduce((max, row) => Math.max(max, row.id), -1) + 1
-    set('returns', { ...state.returns, fields: [...state.returns.fields, { id, name: '', type: 'quantity', kind: 'none', itemType: 'quantity', itemKind: 'none' }] })
+    set('returns', { ...state.returns, fields: [...state.returns.fields, { id, name: '', type: 'number', kind: 'none', itemType: 'number', itemKind: 'none' }] })
   }
   const removeReturnField = (id: number): void => {
     set('returns', { ...state.returns, fields: state.returns.fields.filter((row) => row.id !== id) })
@@ -714,51 +762,69 @@ function EditorDialog({ editor, onClose, onSaved }: {
         <PrimaryButton key="save" disabled={saving} onClick={save}>{t('confirm')}</PrimaryButton>,
       ]}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* Identity */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Field label={t('nameLabel')} style={{ flex: 1.4 }}>
-            <input
-              type="text"
-              value={state.name}
-              spellCheck={false}
-              onChange={(event) => set('name', event.target.value)}
-              style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }}
-            />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Identity: name, timeout, description, enabled */}
+        <section style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t('identityLabel')}</span>
+          </div>
+          <div style={rowLineStyle}>
+            <Field label={t('nameLabel')} style={{ flex: 1.4 }}>
+              <input
+                type="text"
+                value={state.name}
+                spellCheck={false}
+                onChange={(event) => set('name', event.target.value)}
+                style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }}
+              />
+            </Field>
+            <Field label={t('timeoutLabel')} style={{ flex: 1 }}>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={state.timeoutMs}
+                onChange={(event) => set('timeoutMs', event.target.value.replace(/[^0-9]/g, ''))}
+                style={controlStyle}
+              />
+            </Field>
+          </div>
+          <Field label={t('descriptionLabel')}>
+            <input type="text" value={state.description} onChange={(event) => set('description', event.target.value)} style={controlStyle} />
           </Field>
-          <Field label={t('timeoutLabel')} style={{ flex: 1 }}>
-            <input type="text" inputMode="numeric" value={state.timeoutMs} onChange={(event) => set('timeoutMs', event.target.value)} style={controlStyle} />
-          </Field>
-        </div>
-        <Field label={t('descriptionLabel')}>
-          <input type="text" value={state.description} onChange={(event) => set('description', event.target.value)} style={controlStyle} />
-        </Field>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
-          <input type="checkbox" checked={state.enabled} onChange={(event) => set('enabled', event.target.checked)} style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }} />
-          {t('enabledLabel')}
-        </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={state.enabled} onChange={(event) => set('enabled', event.target.checked)} style={{ accentColor: 'var(--dsw-alias-state-business-primary)' }} />
+            {t('enabledLabel')}
+          </label>
+        </section>
 
         {/* Endpoint: http is the only transport, and the verb is the host's own business. */}
-        <Field label={t('urlLabel')}>
-          <input type="text" value={state.url} spellCheck={false} onChange={(event) => set('url', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
-        </Field>
-        {state.url.trim().length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', lineHeight: 1.5 }}>
-            {t('warnHttp', { url: state.url.trim() })}
+        <section style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t('endpointLabel')}</span>
           </div>
-        )}
+          <Field label={t('urlLabel')}>
+            <input type="text" value={state.url} spellCheck={false} onChange={(event) => set('url', event.target.value)} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
+          </Field>
+          {/* The warning keeps its line whether or not it applies, so the cards below stay put. */}
+          <div style={{ ...hintSlotStyle, color: 'var(--dsw-alias-state-error-primary)' }}>
+            {state.url.trim().length > 0 ? t('warnHttp', { url: state.url.trim() }) : ''}
+          </div>
+        </section>
 
         {/* Parameters */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' }}>{t('parametersLabel')}</span>
-          <GhostButton onClick={addRow}>{t('addParameter')}</GhostButton>
-        </div>
+        <section style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t('parametersLabel')}</span>
+            <GhostButton onClick={addRow}>{t('addParameter')}</GhostButton>
+          </div>
         {state.rows.map((row) => (
-          <div key={row.id} style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <div key={row.id} style={rowCardStyle}>
+            <div style={rowLineStyle}>
               <Field label={t('paramTypeLabel')} style={{ flex: 0.8 }}>
-                <select value={row.type} onChange={(event) => setRow(row.id, { type: event.target.value as ParamRowType })} style={controlStyle}>
-                  <option value="quantity">quantity</option>
+                <select value={row.type} onChange={(event) => setRow(row.id, { type: event.target.value as RowType })} style={controlStyle}>
+                  <option value="complex">complex</option>
+                  <option value="number">number</option>
                   <option value="string">string</option>
                   <option value="boolean">boolean</option>
                   <option value="array">array</option>
@@ -767,9 +833,9 @@ function EditorDialog({ editor, onClose, onSaved }: {
               <Field label={t('paramKindLabel')} style={{ flex: 1.2 }}>
                 <select
                   value={row.type === 'array' ? row.itemKind : row.kind}
-                  disabled={row.type !== 'quantity' && row.type !== 'array'}
+                  disabled={!isQuantityType(row.type) && row.type !== 'array'}
                   onChange={(event) => setRow(row.id, row.type === 'array' ? { itemKind: event.target.value } : { kind: event.target.value })}
-                  style={{ ...controlStyle, opacity: row.type !== 'quantity' && row.type !== 'array' ? 0.5 : 1 }}
+                  style={{ ...controlStyle, opacity: !isQuantityType(row.type) && row.type !== 'array' ? 0.5 : 1 }}
                 >
                   {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
                 </select>
@@ -788,43 +854,64 @@ function EditorDialog({ editor, onClose, onSaved }: {
                 ✕
               </button>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            {/* Both type-specific fields keep their place: switching the type never resizes the row. */}
+            <div style={rowLineStyle}>
               <Field label={t('nameLabel')} style={{ flex: 1.2 }}>
                 <input type="text" value={row.name} spellCheck={false} onChange={(event) => setRow(row.id, { name: event.target.value })} style={{ ...controlStyle, fontFamily: 'ui-monospace, monospace' }} />
               </Field>
-              {row.type === 'array' && (
-                <Field label={t('paramItemsLabel')} style={{ flex: 1 }}>
-                  <select value={row.itemType} onChange={(event) => setRow(row.id, { itemType: event.target.value as SimpleRowType })} style={controlStyle}>
-                    <option value="quantity">quantity</option>
-                    <option value="string">string</option>
-                    <option value="boolean">boolean</option>
-                  </select>
-                </Field>
-              )}
-              {row.type === 'string' && (
-                <Field label={t('paramEnumLabel')} style={{ flex: 1.4 }}>
-                  <input type="text" value={row.enumText} onChange={(event) => setRow(row.id, { enumText: event.target.value })} style={controlStyle} />
-                </Field>
-              )}
+              <Field label={t('paramItemsLabel')} style={{ flex: 1, ...hiddenField(row.type !== 'array') }}>
+                <select
+                  value={row.itemType}
+                  disabled={row.type !== 'array'}
+                  onChange={(event) => setRow(row.id, { itemType: event.target.value as LeafType })}
+                  style={controlStyle}
+                >
+                  <option value="complex">complex</option>
+                  <option value="number">number</option>
+                  <option value="string">string</option>
+                  <option value="boolean">boolean</option>
+                </select>
+              </Field>
+              <Field label={t('paramEnumLabel')} style={{ flex: 1.4, ...hiddenField(row.type !== 'string') }}>
+                <input
+                  type="text"
+                  value={row.enumText}
+                  disabled={row.type !== 'string'}
+                  onChange={(event) => setRow(row.id, { enumText: event.target.value })}
+                  style={controlStyle}
+                />
+              </Field>
             </div>
             <Field label={t('paramDescriptionLabel')}>
               <input type="text" value={row.description} onChange={(event) => setRow(row.id, { description: event.target.value })} style={controlStyle} />
             </Field>
           </div>
         ))}
-        {state.rows.length === 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{t('parametersLabel')} —</div>
-        )}
+        {/* Reserved line: the notice appears without moving the Returns card below it. */}
+        <div style={hintSlotStyle}>
+          {state.unmodeled.length > 0 ? `${t('unmodeledParams', { count: state.unmodeled.length })} ${state.unmodeled.join(', ')}` : ''}
+        </div>
+        </section>
 
         {/* Returns: required edit — a spec (leaf/object/array) or explicit void (returns: null). */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' }}>{t('returnsLabel')}</span>
-        </div>
-        {state.returns.unmodeled ? (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>{t('returnsPreserved')}</div>
-        ) : (
+        <section style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t('returnsLabel')}</span>
+            {/* Kept in place, hidden and inert unless the shape is an object. */}
+            <GhostButton
+              onClick={addReturnField}
+              disabled={state.returns.unmodeled || state.returns.mode !== 'object'}
+              style={hiddenField(state.returns.unmodeled || state.returns.mode !== 'object')}
+            >
+              {t('addReturnField')}
+            </GhostButton>
+          </div>
+          {state.returns.unmodeled ? (
+            <div style={hintSlotStyle}>{t('returnsPreserved')}</div>
+          ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
+            {/* Every conditional select keeps its slot, so the row never reflows. */}
+            <div style={rowLineStyle}>
               <Field label={t('returnsTypeLabel')} style={{ flex: 0.9 }}>
                 <select value={state.returns.mode} onChange={(event) => setReturns({ mode: event.target.value as ReturnsForm['mode'] })} style={controlStyle}>
                   <option value="void">void</option>
@@ -836,44 +923,61 @@ function EditorDialog({ editor, onClose, onSaved }: {
                   <option value="array">array</option>
                 </select>
               </Field>
-              {(state.returns.mode === 'number' || state.returns.mode === 'complex') && (
-                <Field label={t('paramKindLabel')} style={{ flex: 1.4 }}>
-                  <select value={state.returns.kind} onChange={(event) => setReturns({ kind: event.target.value })} style={controlStyle}>
-                    {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
-                  </select>
-                </Field>
-              )}
-              {state.returns.mode === 'array' && (
-                <Field label={t('paramItemsLabel')} style={{ flex: 1.4 }}>
-                  <select value={state.returns.itemType} onChange={(event) => setReturns({ itemType: event.target.value as SimpleRowType })} style={controlStyle}>
-                    <option value="quantity">quantity</option>
-                    <option value="string">string</option>
-                    <option value="boolean">boolean</option>
-                  </select>
-                </Field>
-              )}
-              {state.returns.mode === 'array' && state.returns.itemType === 'quantity' && (
-                <Field label={t('paramKindLabel')} style={{ flex: 1.4 }}>
-                  <select value={state.returns.itemKind} onChange={(event) => setReturns({ itemKind: event.target.value })} style={controlStyle}>
-                    {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
-                  </select>
-                </Field>
-              )}
+              <Field
+                label={t('paramKindLabel')}
+                style={{ flex: 1, ...hiddenField(state.returns.mode !== 'number' && state.returns.mode !== 'complex') }}
+              >
+                <select
+                  value={state.returns.kind}
+                  disabled={state.returns.mode !== 'number' && state.returns.mode !== 'complex'}
+                  onChange={(event) => setReturns({ kind: event.target.value })}
+                  style={controlStyle}
+                >
+                  {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+                </select>
+              </Field>
+              <Field label={t('paramItemsLabel')} style={{ flex: 1, ...hiddenField(state.returns.mode !== 'array') }}>
+                <select
+                  value={state.returns.itemType}
+                  disabled={state.returns.mode !== 'array'}
+                  onChange={(event) => setReturns({ itemType: event.target.value as LeafType })}
+                  style={controlStyle}
+                >
+                  <option value="number">number</option>
+                  <option value="complex">complex</option>
+                  <option value="string">string</option>
+                  <option value="boolean">boolean</option>
+                </select>
+              </Field>
+              <Field
+                label={t('paramKindLabel')}
+                style={{ flex: 1, ...hiddenField(state.returns.mode !== 'array' || !isQuantityType(state.returns.itemType)) }}
+              >
+                <select
+                  value={state.returns.itemKind}
+                  disabled={state.returns.mode !== 'array' || !isQuantityType(state.returns.itemType)}
+                  onChange={(event) => setReturns({ itemKind: event.target.value })}
+                  style={controlStyle}
+                >
+                  {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+                </select>
+              </Field>
             </div>
-            {state.returns.mode === 'void' && (
-              <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{t('returnsVoidHint')}</div>
-            )}
+            {/* One reserved hint line, whichever hint applies. */}
+            <div style={hintSlotStyle}>
+              {state.returns.mode === 'void'
+                ? t('returnsVoidHint')
+                : state.returns.mode === 'object' && state.returns.fields.length === 0 ? t('returnsEmptyObjectHint') : ''}
+            </div>
             {state.returns.mode === 'object' && (
               <>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <GhostButton onClick={addReturnField}>{t('addReturnField')}</GhostButton>
-                </div>
                 {state.returns.fields.map((row) => (
-                  <div key={row.id} style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                  <div key={row.id} style={rowCardStyle}>
+                    <div style={rowLineStyle}>
                       <Field label={t('paramTypeLabel')} style={{ flex: 0.8 }}>
-                        <select value={row.type} onChange={(event) => setReturnField(row.id, { type: event.target.value as ReturnsLeafType })} style={controlStyle}>
-                          <option value="quantity">quantity</option>
+                        <select value={row.type} onChange={(event) => setReturnField(row.id, { type: event.target.value as RowType })} style={controlStyle}>
+                          <option value="number">number</option>
+                          <option value="complex">complex</option>
                           <option value="string">string</option>
                           <option value="boolean">boolean</option>
                           <option value="array">array</option>
@@ -882,9 +986,9 @@ function EditorDialog({ editor, onClose, onSaved }: {
                       <Field label={t('paramKindLabel')} style={{ flex: 1.2 }}>
                         <select
                           value={row.type === 'array' ? row.itemKind : row.kind}
-                          disabled={row.type !== 'quantity' && row.type !== 'array'}
+                          disabled={!isQuantityType(row.type) && row.type !== 'array'}
                           onChange={(event) => setReturnField(row.id, row.type === 'array' ? { itemKind: event.target.value } : { kind: event.target.value })}
-                          style={{ ...controlStyle, opacity: row.type !== 'quantity' && row.type !== 'array' ? 0.5 : 1 }}
+                          style={{ ...controlStyle, opacity: !isQuantityType(row.type) && row.type !== 'array' ? 0.5 : 1 }}
                         >
                           {QUANTITY_KIND_NAMES.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
                         </select>
@@ -902,32 +1006,29 @@ function EditorDialog({ editor, onClose, onSaved }: {
                         ✕
                       </button>
                     </div>
-                    {row.type === 'array' && (
-                      <Field label={t('paramItemsLabel')} style={{ flex: 1 }}>
-                        <select value={row.itemType} onChange={(event) => setReturnField(row.id, { itemType: event.target.value as SimpleRowType })} style={controlStyle}>
-                          <option value="quantity">quantity</option>
-                          <option value="string">string</option>
-                          <option value="boolean">boolean</option>
-                        </select>
-                      </Field>
-                    )}
+                    {/* Kept in place while hidden: switching this field's type never resizes the row. */}
+                    <Field label={t('paramItemsLabel')} style={{ flex: 1, ...hiddenField(row.type !== 'array') }}>
+                      <select
+                        value={row.itemType}
+                        disabled={row.type !== 'array'}
+                        onChange={(event) => setReturnField(row.id, { itemType: event.target.value as LeafType })}
+                        style={controlStyle}
+                      >
+                        <option value="number">number</option>
+                        <option value="complex">complex</option>
+                        <option value="string">string</option>
+                        <option value="boolean">boolean</option>
+                      </select>
+                    </Field>
                   </div>
                 ))}
-                {state.returns.fields.length === 0 && (
-                  <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{t('returnsEmptyObjectHint')}</div>
-                )}
               </>
             )}
           </div>
-        )}
-        {state.unmodeled.length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>
-            {t('unmodeledParams', { count: state.unmodeled.length })} {state.unmodeled.join(', ')}
-          </div>
-        )}
-        {error.length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', lineHeight: 1.5 }}>{error}</div>
-        )}
+          )}
+        </section>
+        {/* Reserved line: a save failure appears without moving the footer. */}
+        <div style={{ ...hintSlotStyle, color: 'var(--dsw-alias-state-error-primary)' }}>{error}</div>
       </div>
     </Dialog>
   )

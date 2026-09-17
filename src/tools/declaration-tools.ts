@@ -28,8 +28,9 @@ const DECLARATION_GUIDE =
   '"timeoutMs"?: positive number (default 30000); ' +
   '"returns": the result shape — spec leaves, or null for void; explicit and required: a declaration without it is archived but never registers }. ' +
   'Parameter specs: ' +
-  '{ "type": "quantity", "kind": <lowercase kind name, e.g. resistance, voltage, current, frequency, time, angle, log, none, ...> } ' +
-  '— the value is a bare number or {re, im} (rectangular) or {mag, ang} (polar, angles in radians); ' +
+  '{ "type": "complex", "kind": <lowercase kind name, e.g. resistance, voltage, current, frequency, time, angle, log, none, ...> } ' +
+  '— a real or a complex (bare number, {re, im} rectangular or {mag, ang} polar, angles in radians); ' +
+  '{ "type": "number", "kind" } — reals only, a complex is refused instead of narrowed; ' +
   '{ "type": "string", "enum"?: string array }; { "type": "boolean" }; ' +
   '{ "type": "array", "items": <any parameter spec> } — a homogeneous array, items may nest. ' +
   'returns leaves: { "type": "string" }, { "type": "boolean" }, ' +

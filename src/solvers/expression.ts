@@ -4,10 +4,10 @@
  * quantities; variable/symbol bindings are kind-none quantities too.
  */
 import type { Complex } from 'complex.js'
-import { calcExpression, reduceRational } from '../../math/expression.ts'
-import { serializeComplex, toComplex, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+import { calcExpression, reduceRational } from '../math/expression.ts'
+import { serializeComplex, toComplex, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 /** Kernel complex value → engine-native rect (finite-checked, -0 folded). */
 function rectOf(value: Complex): { re: number; im: number } {
@@ -34,12 +34,12 @@ export const expressionSolvers: SolverDef[] = [
           type: 'object',
           fields: {
             name: { type: 'string' },
-            value: { type: 'quantity', kind: QuantityKind.None },
+            value: { type: 'complex', kind: QuantityKind.None },
           },
         },
       },
     },
-    returns: { type: 'quantity', kind: QuantityKind.None },
+    returns: { type: 'complex', kind: QuantityKind.None },
     run: (args) => {
       const variables = args.variables as Binding[] | undefined
       const bindings: Record<string, Complex> = {}
@@ -61,7 +61,7 @@ export const expressionSolvers: SolverDef[] = [
           type: 'object',
           fields: {
             name: { type: 'string' },
-            value: { type: 'quantity', kind: QuantityKind.None },
+            value: { type: 'complex', kind: QuantityKind.None },
           },
         },
       },
@@ -70,10 +70,10 @@ export const expressionSolvers: SolverDef[] = [
       type: 'object',
       fields: {
         variable: { type: 'string' },
-        numeratorDegree: { type: 'quantity', kind: QuantityKind.None },
-        denominatorDegree: { type: 'quantity', kind: QuantityKind.None },
-        numerator: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
-        denominator: { type: 'array', items: { type: 'quantity', kind: QuantityKind.None } },
+        numeratorDegree: { type: 'complex', kind: QuantityKind.None },
+        denominatorDegree: { type: 'complex', kind: QuantityKind.None },
+        numerator: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
+        denominator: { type: 'array', items: { type: 'complex', kind: QuantityKind.None } },
       },
     },
     run: (args) => {

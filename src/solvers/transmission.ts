@@ -8,25 +8,25 @@ import {
   calcCoaxialParameters,
   calcRiseTimeFromBandwidth,
   calcWavelength,
-} from '../../math/transmission.ts'
-import { toScalar, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+} from '../math/transmission.ts'
+import { toScalar, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 export const transmissionSolvers: SolverDef[] = [
   {
     id: 'wavelength_frequency',
     summary: 'Wavelength from frequency (velocity factor aware)',
     parameters: {
-      frequency: { type: 'quantity', kind: QuantityKind.Frequency },
-      velocityFactor: { type: 'quantity', kind: QuantityKind.None, optional: true },
+      frequency: { type: 'complex', kind: QuantityKind.Frequency },
+      velocityFactor: { type: 'complex', kind: QuantityKind.None, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
-        frequency: { type: 'quantity', kind: QuantityKind.Frequency },
-        velocityFactor: { type: 'quantity', kind: QuantityKind.None },
-        wavelength: { type: 'quantity', kind: QuantityKind.None },
+        frequency: { type: 'complex', kind: QuantityKind.Frequency },
+        velocityFactor: { type: 'complex', kind: QuantityKind.None },
+        wavelength: { type: 'complex', kind: QuantityKind.None },
       },
     },
     run: (args) => {
@@ -43,17 +43,17 @@ export const transmissionSolvers: SolverDef[] = [
     id: 'coaxial_parameters',
     summary: 'Coaxial-line characterization from geometry (impedance, velocity factor, per-meter C and L)',
     parameters: {
-      innerDiameter: { type: 'quantity', kind: QuantityKind.None },
-      outerDiameter: { type: 'quantity', kind: QuantityKind.None },
-      relativePermittivity: { type: 'quantity', kind: QuantityKind.None },
+      innerDiameter: { type: 'complex', kind: QuantityKind.None },
+      outerDiameter: { type: 'complex', kind: QuantityKind.None },
+      relativePermittivity: { type: 'complex', kind: QuantityKind.None },
     },
     returns: {
       type: 'object',
       fields: {
-        impedance: { type: 'quantity', kind: QuantityKind.Resistance },
-        velocityFactor: { type: 'quantity', kind: QuantityKind.None },
-        capacitancePerMeter: { type: 'quantity', kind: QuantityKind.Capacitance },
-        inductancePerMeter: { type: 'quantity', kind: QuantityKind.Inductance },
+        impedance: { type: 'complex', kind: QuantityKind.Resistance },
+        velocityFactor: { type: 'complex', kind: QuantityKind.None },
+        capacitancePerMeter: { type: 'complex', kind: QuantityKind.Capacitance },
+        inductancePerMeter: { type: 'complex', kind: QuantityKind.Inductance },
       },
     },
     run: (args) => {
@@ -73,14 +73,14 @@ export const transmissionSolvers: SolverDef[] = [
     id: 'rise_time_bandwidth',
     summary: 'Convert between rise time and bandwidth (tr ≈ 0.35/BW)',
     parameters: {
-      bandwidth: { type: 'quantity', kind: QuantityKind.Frequency, optional: true },
-      riseTime: { type: 'quantity', kind: QuantityKind.Time, optional: true },
+      bandwidth: { type: 'complex', kind: QuantityKind.Frequency, optional: true },
+      riseTime: { type: 'complex', kind: QuantityKind.Time, optional: true },
     },
     returns: {
       type: 'object',
       fields: {
-        bandwidth: { type: 'quantity', kind: QuantityKind.Frequency },
-        riseTime: { type: 'quantity', kind: QuantityKind.Time },
+        bandwidth: { type: 'complex', kind: QuantityKind.Frequency },
+        riseTime: { type: 'complex', kind: QuantityKind.Time },
       },
     },
     run: (args) => {

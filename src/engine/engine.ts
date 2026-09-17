@@ -353,8 +353,10 @@ export class Engine {
 /** Compact human description of a spec, used in failure receipts so the model can self-correct. */
 function describeSpec(spec: Spec): string {
   switch (spec.type) {
-    case 'quantity':
-      return `quantity(${spec.kind})${spec.form === undefined ? '' : ` ${spec.form}`}`
+    case 'number':
+      return `number(${spec.kind})`
+    case 'complex':
+      return `complex(${spec.kind})`
     case 'string':
       return spec.enum === undefined ? 'string' : `string(${spec.enum.join('|')})`
     case 'boolean':
@@ -369,7 +371,8 @@ function describeSpec(spec: Spec): string {
 /** A ready-to-send typed-value example for a spec (enum strings take their first allowed value). */
 function exampleTypedValue(spec: Spec): unknown {
   switch (spec.type) {
-    case 'quantity':
+    case 'number':
+    case 'complex':
       return { type: 'number', value: 1, kind: spec.kind }
     case 'string':
       return { type: 'string', value: spec.enum?.[0] ?? '…' }
@@ -390,15 +393,13 @@ function typedForm(spec: Spec): string {
   return JSON.stringify(exampleTypedValue(spec))
 }
 
-/** resolved typed value → kernel-native JS (quantity reals become number, complex per the declared form; the rest recurse). */
+/** resolved typed value → kernel-native JS (a real stays a number, a complex goes in as rect; the rest recurse). */
 function nativeValue(spec: Spec, canonical: TypedValue): unknown {
   switch (spec.type) {
-    case 'quantity': {
+    case 'number':
+    case 'complex': {
       if (canonical.type === 'number') return canonical.value
-      const rect = canonical.value as { re: number; im: number }
-      return spec.form === 'mag-ang'
-        ? { mag: Math.hypot(rect.re, rect.im), ang: Math.atan2(rect.im, rect.re) }
-        : rect
+      return canonical.value
     }
     case 'string':
     case 'boolean':

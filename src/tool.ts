@@ -37,9 +37,9 @@ export type ToolReturns =
   | { type: 'string' }
   /** A plain boolean passthrough. */
   | { type: 'boolean' }
-  /** A real quantity with its kind. */
+  /** A real with its kind: a complex result is refused rather than narrowed. */
   | { type: 'number'; kind: QuantityKind }
-  /** A complex quantity with its kind (either form accepted). */
+  /** A complex with its kind, either payload form (a real is a legal complex). */
   | { type: 'complex'; kind: QuantityKind }
   /** A named-fields object; every field declared recursively. */
   | { type: 'object'; fields: Record<string, ToolReturns> }
@@ -93,19 +93,25 @@ export enum DeclarationTransport {
   Http = 'http',
 }
 
-/** A parameter's settled semantic type — quantity mirrors the returns leaves. */
+/**
+ * A parameter's settled semantic type, spelled exactly like the returns leaves. A quantity leaf names the
+ * set a value must belong to: `complex` takes a real too (ℝ ⊂ ℂ), `number` takes reals only — widening is
+ * implicit, narrowing never is.
+ */
 export enum DeclarationParamType {
-  Quantity = 'quantity',
+  /** Reals only: a complex payload is rejected instead of quietly losing its imaginary part. */
+  Number = 'number',
+  /** A real or a complex (bare number, {re,im} or {mag,ang} payloads); kind is a lowercase QuantityKind name. */
+  Complex = 'complex',
   String = 'string',
   Boolean = 'boolean',
   Array = 'array',
 }
 
-/** One parameter of a declared tool: a single settled semantic type; kind is
- *  the semantic payload of the quantity type (mirrors returns). */
+/** A parameter of a declaration: one settled semantic type; kind is the semantic payload of a quantity. */
 export type DeclarationParamSpec =
-  /** A quantity (accepts bare-number, {re,im} or {mag,ang} payloads); kind is a lowercase QuantityKind name. */
-  | { type: DeclarationParamType.Quantity; kind: string; description?: string; required?: boolean }
+  /** A quantity; kind is a lowercase QuantityKind name. */
+  | { type: DeclarationParamType.Number | DeclarationParamType.Complex; kind: string; description?: string; required?: boolean }
   /** A plain string (optionally enum-constrained). */
   | { type: DeclarationParamType.String; enum?: string[]; description?: string; required?: boolean }
   /** A plain boolean. */
@@ -227,9 +233,10 @@ function validateParamSpec(spec: unknown, path: string, errors: string[]): void 
   }
   const s = spec as { type?: string; kind?: string; enum?: unknown; items?: unknown }
   switch (s.type) {
-    case DeclarationParamType.Quantity:
+    case DeclarationParamType.Number:
+    case DeclarationParamType.Complex:
       if (s.kind === undefined || !QUANTITY_KIND_NAMES.includes(s.kind)) {
-        errors.push(`${path}: quantity type requires a known kind (lowercase QuantityKind names)`)
+        errors.push(`${path}: a quantity type requires a known kind (lowercase QuantityKind names)`)
       }
       break
     case DeclarationParamType.String:

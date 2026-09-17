@@ -2,20 +2,45 @@
 
 [English](engine.md)
 
-DeepSeek Harness ElectroLab 插件把全部电气电子计算放在一台确定性的**引擎**内完成。语言模型从不亲自计算：它通过三个原语与三个记录标记操作引擎，引擎维护一张类型化值变量表，在计算边界换算数值，记录每一步，并把每次求解封口成一条可浏览的记录。
+ElectroLab 插件的全部电气电子计算都在一台确定性的**引擎**内完成。语言模型从不亲自计算：它通过四个原语与三个记录标记操作引擎，引擎维护一张类型化值变量表，在计算边界换算单位，并把每一步记录进一条可回读的记录。
 
-本手册是引擎使用面的完整参考——类型化值、原语、标记、求解器目录与存储。以 **ElectroLab 模式**启动的会话，会经由 `electro-lab-interface` 技能（引擎手册）与 `electro-lab-template` 技能（记录协议）携带同样的规则。
+以 **ElectroLab 模式**启动的会话，会通过 `electro-lab-interface` 与 `electro-lab-template` 两个技能携带同样的规则。
 
-## 1. 工作原理
+## 目录
 
-- **每个宿主进程一台全局引擎。** 任何会话的标记都作用于同一台引擎；任何时刻至多有一条未封口记录（单一 open 不变量）。
-- **LLM 使用面只有七个工具**：`set`、`get`、`call`、`solver_info`、`record_question`、`record_analyse`、`record_answer`。约 40 个领域工具、`solve_steps` 与文本↔值编解码工具已退役；数学内核住在引擎的 solver 注册表中，由 `call` 调用。`solver_info` 直接从注册表暴露某个 solver 的精确签名（参数名、数量 kind、允许的枚举、可选标记、returns）——调用陌生 solver 前先读它。
-- **记录是一个过程（时间线）。** 每次引擎操作都会追加一行完全自描述的轨迹行（输入与输出都记录在案）；一条记录可以被重放，从而在不重新计算任何东西的前提下重建任意时刻的状态。
-- **输入即值。** 模型给什么，引擎就存什么；字符串永远是字符串。
+- [1. 概览](#1-概览)
+- [2. 类型化值](#2-类型化值)
+- [3. 原语](#3-原语)
+- [4. 记录与标记](#4-记录与标记)
+- [5. 求解器目录](#5-求解器目录)
+- [6. 外部求解器](#6-外部求解器)
+- [7. 存储](#7-存储)
+- [8. 日志](#8-日志)
+- [9. 宿主端点](#9-宿主端点)
+
+## 1. 概览
+
+每个宿主进程运行一台引擎。任何会话的标记都作用于它，且任何时刻至多有一条记录未封口。
+
+一次求解是若干引擎操作组成、被标记括起来的循环：
+
+| 步骤 | 工具 | 作用 |
+|---|---|---|
+| 1 | `record_question` | 开启记录并清空变量表 |
+| 2 | `set` | 把每个给定条件存为类型化值 |
+| 3 | `record_analyse` | 在计算之前陈述已知量与思路 |
+| 4 | `solver_info` | 读取即将调用的求解器的签名 |
+| 5 | `call` | 运行求解器并把结果存入目标槽 |
+| 6 | `get` | 读回一个值 |
+| 7 | `record_answer` | 提交答案并封口该记录 |
+
+每一步都会向记录追加一行自描述的行，输入与输出都在其中。宿主重启时，会按这些行重建仍未封口那条记录的变量表，直接使用存储的结果，而不重新计算。
+
+引擎存的就是它收到的内容。字符串永远是字符串，任何算术都不在求解器之外发生。
 
 ## 2. 类型化值
 
-类型化值是一个 JSON 对象。`kind` 是 quantity 的一部分：
+类型化值是一个 JSON 对象。`kind` 属于量，量的写法也一样：
 
 ```json
 { "type": "number",  "value": 100,  "kind": "resistance" }
@@ -27,11 +52,21 @@ DeepSeek Harness ElectroLab 插件把全部电气电子计算放在一台确定�
 { "type": "boolean", "value": true }
 ```
 
-- `type`——形状判别符：number / complex / string / boolean / array（items 递归）/ object（fields 递归）。`slot` 值（`{ "type": "slot", "value": "…" }`）是引用，在 call/set 边界解析为被引用值的副本——永不存储、永不返回（§3）。
-- `kind`——量纲类别（resistance、voltage、time、frequency、temperature、angle、pressure、energy、length、mass、log、none……）。kind 是 quantity 的一部分：值一经存在必带 kind；裸数的 kind 为 `none`；纯 ratio 的 kind 为 `log`。
-- `variant`——kind *内部*的一种表示选择。**字段不存在（而非 null）即 SI 基准表示**；存储从不补键。只有下列词是合法的，且每个词只适用于它自己的 kind：
+### 2.1 字段
 
-| kind | variant 词 | 基准（无键） |
+| 字段 | 含义 |
+|---|---|
+| `type` | 形状：`number`、`complex`、`string`、`boolean`、`array`、`object` |
+| `value` | 载荷；数组元素与对象字段又是类型化值 |
+| `kind` | 量纲类别：resistance、voltage、time、frequency、temperature、angle、pressure、energy、length、mass、log、none…… |
+| `variant` | 该 kind 的量在非 SI 基准单位下的写法 |
+| `prefix` | `number` 与 `complex` 上的量级乘数 |
+
+`{ "type": "slot", "value": "name" }` 不是值而是引用，在调用边界解析，见 §3.3。
+
+### 2.2 kind、variant 与 prefix
+
+| kind | variant 词 | 基准单位 |
 |---|---|---|
 | temperature | degC, degF | K |
 | angle | deg | rad |
@@ -41,57 +76,94 @@ DeepSeek Harness ElectroLab 插件把全部电气电子计算放在一台确定�
 | length | inch, foot, yard, mile | m |
 | mass | lb, oz | kg |
 
-- `prefix`——number/complex 上的量级乘数。**字段不存在即乘数 1。** 词表是完整的小写英文单词，绝不用符号：`pico` `nano` `micro` `milli` `kilo` `mega` `giga` `tera`。prefix 一般只对 SI 基准表示有效（variant 词拒绝前缀）。
-- 词表与存储一律是短 ASCII 文本；符号（Ω、°、µ……）从不进入值宇宙。
+prefix 词为 `pico` `nano` `micro` `milli` `kilo` `mega` `giga` `tera`。prefix 只对 SI 基准表示有效，绝不与 variant 词同时出现。
 
-### 换算边界
+`variant` 或 `prefix` 字段缺失，即表示 SI 基准单位与乘数 1；引擎自己从不补写这些键。所有词都是短 ASCII 文本——`Ω`、`°`、`µ` 这类符号从不进入值宇宙。
 
-变量表按**原样**存储值——`get` 返回的正是 `set` 写入的内容，不做归一化。换算只发生在值被计算*引用*时：在 `call` 边界，引擎把 variant 换算为 SI（degC → K、deg → rad、psi → Pa……），并把复数形状归一化（`{mag, ang}` → `{re, im}`，角度恒为弧度）。变量表不受影响；轨迹同时记录原始 args 与换算后的终点值。
+### 2.3 换算边界
+
+变量表按原样存储值，因此 `get` 返回的正是 `set` 写入的内容。换算发生在值进入计算时：在调用边界，引擎把 variant 换算为 SI、把复数载荷归一化为 `{ "re": …, "im": … }` 且角度恒为弧度，并应用 prefix。这个边界深入参数内部，因此嵌在数组或对象里的量与顶层的量一样被换算。
+
+变量表本身不受影响，轨迹同时记录传入的内容与求解器实际收到的内容。
 
 ## 3. 原语
 
-```
-set  { name, value }      写入一个槽：value 是类型化值；value: null 删除该槽
-get  { name }             读取一个槽（返回存储的类型化值，与写入时完全一致）
-call { solver, args, target }  调用一个已注册求解器；args 值是类型化值或形如 { "type": "slot", "value": "R" } 的槽引用
-solver_info { solver }    调用前检视求解器的签名（参数、枚举、returns）
-```
+| 原语 | 参数 | 作用 |
+|---|---|---|
+| `set` | `name`、`value` | 写入一个槽；`value: null` 删除该槽 |
+| `get` | `name` | 读回一个槽，与写入时完全一致 |
+| `call` | `solver`、`args`、`target` | 运行一个已注册求解器并存下结果 |
+| `solver_info` | `solver` | 在调用前返回求解器的签名 |
 
-语义：
+参数是类型化值。`"100 kΩ"` 只能是字符串；100 kΩ 的电阻写作 `{ "type": "number", "value": 100, "kind": "resistance", "prefix": "kilo" }`。
 
-- `"100 kΩ"` 永远是字符串；表示 100 kΩ 的电阻，必须给 `{ "type": "number", "value": 100, "kind": "resistance", "prefix": "kilo" }`。
-- 槽引用是一种独立的类型化值：`{ "type": "slot", "value": "name" }`，其中 `value` 是完整槽路径（`"name"` 或 `"name.field"`）。引擎展开引用后，按 solver 签名对它做 kind/形状校验；引用不存在的槽会以 `ENGINE_SLOT_UNDECLARED` 失败。引用也可以嵌在参数/`set` 值的数组元素与对象字段里，先展开为存储值再做校验——`set` 存入展开后的**副本**，之后改源槽不影响副本。槽引用只存在于 call/set 边界——永不存入变量表、永不作为结果返回；裸字符串永远是字面量字符串，绝不构成引用。
-- **每次调用都返回一张收据**——不存在「异常 vs 正常返回」的分野：
+### 3.1 收据
+
+每次调用都返回一张收据，不存在第二条失败通道：
 
 ```
-success: set  → { ok: true, name, rev }   (delete: { ok: true, name, deleted })
+success: set  → { ok: true, name, rev }        delete: { ok: true, name, deleted }
          get  → { ok: true, name, value }
-         call → { ok: true, target, rev }  (void solver: { ok: true, target: null })
+         call → { ok: true, target, rev }        void solver: { ok: true, target: null }
 failure:      → { ok: false, code, error }
 ```
 
-  先看 `ok`。收据不携带业务数据（`get` 除外）；读值只能经由 `get`。
-- **target 与 solver 签名匹配**（由引擎按注册表判别，模型无需记忆规则）：void solver（声明为 `returns: null`）接受 `target: null`（具名 target → `ENGINE_VOID_TARGET`）；有返回值的 solver 必须给具名 target（缺失/null → `ENGINE_TARGET_REQUIRED`）。
-- **target 恒覆盖**：写入已存在的槽会用新值整体替换（kind 校验通过后）并推进 `rev`；不继承旧表示的任何部分。
-- **删除 = 以 `value: null` 执行 `set`**：槽从变量表消失；删除不存在的槽是幂等的 ok；之后重建会从 rev 1 重新开始；轨迹行带 `deleted: true`。
-- 槽的 kind 在首次写入时钉死：以不同 kind 覆盖会失败（`ENGINE_KIND_MISMATCH`），且不推进版本号。
-- 失败的操作**没有副作用**：不建槽、变量表不变、版本号不动。失败仍会落入轨迹。
+先看 `ok`。只有 `get` 携带取值；一次求解中的其他数字都来自 `set` 或 `call` 写入、再用 `get` 读回的槽。
+
+### 3.2 槽的规则
+
+| 规则 | 行为 |
+|---|---|
+| target | 有返回值的求解器必须有具名 target；声明为 `returns: null` 的 void 求解器接受 `target: null` |
+| 覆盖 | 写入已存在的槽会整体替换其值并推进 `rev`；不继承旧值的任何部分 |
+| 删除 | 以 `value: null` 执行 `set` 即删除该槽；删除不存在的槽是幂等的 ok，之后重建从 rev 1 开始 |
+| kind 钉死 | 槽保留首次写入的 kind；换成别的 kind 会失败，且不推进版本号 |
+| 失败 | 失败的操作没有副作用：不建槽、变量表不变、版本号不动 |
+
+失败仍会落入轨迹。
+
+### 3.3 槽引用
+
+槽引用形如 `{ "type": "slot", "value": "name" }`，其中 `value` 是完整路径：`"name"` 或 `"name.field"`。引擎会展开引用、按求解器签名校验，槽不存在时以 `ENGINE_SLOT_UNDECLARED` 失败。引用可以出现在参数的顶层，也可以嵌在数组元素与对象字段里。
+
+`set` 存入的是被引用值的副本，因此之后改动源槽不会影响副本。引用永不进入变量表，也永不作为结果返回。裸字符串永远是字面量字符串。
+
+### 3.4 失败码
+
+| 码 | 触发条件 |
+|---|---|
+| `ENGINE_ARGS` | 参数不符合求解器签名，或缺少必填参数 |
+| `ENGINE_SLOT_UNDECLARED` | 引用的槽不存在 |
+| `ENGINE_KIND_MISMATCH` | 参数 kind 与形参冲突，或与槽已钉死的 kind 冲突 |
+| `ENGINE_UNKNOWN_SOLVER` | 该求解器 id 未注册 |
+| `ENGINE_VOID_TARGET` | 给 void 求解器传了具名 target |
+| `ENGINE_TARGET_REQUIRED` | 调用有返回值的求解器时未给具名 target |
+| `ENGINE_UNSUPPORTED_VARIANT` | variant 词不适用于该 kind |
+| `ENGINE_UNSUPPORTED_PREFIX` | prefix 词未知，或与 variant 同时出现 |
+| `ENGINE_SOLVER_FAILED` | 求解器自身在运行中失败 |
+| `EXTERNAL_ERROR` | 外部端点在信封里自报失败 |
+| `EXTERNAL_HTTP` | 外部端点返回非 2xx 状态 |
+| `EXTERNAL_TIMEOUT` | 外部调用超过其声明的超时 |
+| `EXTERNAL_RESPONSE` | 外部响应违反信封契约 |
+| `TOOL_ERROR` | 其他工具失败 |
+
+注册期的 `REGISTER_MISSING_RETURNS` 与 `REGISTER_DUPLICATE` 属于宿主插件，而不属于一次求解。
 
 ## 4. 记录与标记
 
-```
-record_question { text }   开启一条记录（清空变量表）；重复开启会把上一条记录封口为 duplicate-start
-record_analyse  { text }   分析：已知量与带公式的思路——不含任何计算出的数字
-record_answer   { text }   最终答案；封口该记录
-```
+| 标记 | 作用 |
+|---|---|
+| `record_question` | 开启一条记录并清空变量表 |
+| `record_analyse` | 在计算之前提交分析：已知量与带公式的思路 |
+| `record_answer` | 提交最终答案并封口该记录 |
 
-- 至多一条未封口记录。第二次 `record_question` 会把当前未封口记录封口（duplicate-start）并开启新记录——两条 open 行永不可能并存。
-- 没有未封口记录时的 `record_answer` 会保留一条 duplicate-end 错误记录。
-- 中断的记录（索引中 `sealedAt: null` 且有本体文件）会在下次引擎启动时续写：轨迹在同一文件中继续，变量表据其重建。未封口（incomplete，即「未完成」）的记录永远不会自行变完整——它要么日后被封口（duplicate-start），要么永远停在未完成状态。
+至多一条记录未封口。第二次 `record_question` 会把当前未封口的记录封为一条未完成记录并开启新记录；没有未封口记录时的 `record_answer` 会保留一条简短错误记录。中断的记录会在下次引擎启动时续写：轨迹在同一文件中继续，变量表据其重建。从未被封口的记录在面板中始终标记为未完成。
+
+封口使记录永久定型：轨迹到此结束，之后绝不重算。§7 说明一条记录在磁盘上存了什么。
 
 ## 5. 求解器目录
 
-所有求解器遵守同一个值契约：quantity 参数是类型化值（见 §2）；传递函数的数组系数是按降幂排列的 kind-`none` 量。目录与数学内核一一对应。
+每个求解器都接收类型化值并返回一个类型化值，见 §2。传递函数的系数是按降幂排列的 kind-`none` 量数组。目录与数学内核一一对应，`solver_info` 给出任意条目的精确签名。
 
 ### 表达式与代数
 
@@ -104,7 +176,7 @@ record_answer   { text }   最终答案；封口该记录
 
 | solver | 用途 |
 |---|---|
-| `series_sum` | 数列求和：等差、等比（有限项或收敛的无穷级数）或幂和 |
+| `series_sum` | 数列求和：等差、等比或幂和 |
 
 ### 传递函数与频域
 
@@ -123,7 +195,7 @@ record_answer   { text }   最终答案；封口该记录
 | solver | 用途 |
 |---|---|
 | `discrete_fourier_transform` | 复采样序列的 DFT（可选加窗） |
-| `inverse_discrete_fourier_transform` | 频谱的 IDFT：恢复时域序列（DFT 的往返） |
+| `inverse_discrete_fourier_transform` | 频谱的 IDFT：恢复时域序列 |
 | `fourier_series_coefficients` | 标准奇对称波形的傅里叶级数系数（a₀、aₙ、bₙ） |
 | `signal_analysis` | 一次调用给出信号统计与加窗频谱（RMS、峰值、峰峰值、DC） |
 
@@ -140,7 +212,7 @@ record_answer   { text }   最终答案；封口该记录
 | solver | 用途 |
 |---|---|
 | `equivalent_impedance` | 一组阻抗串联（Z = Σ Zi）或并联（1/Z = Σ 1/Zi）后的总阻抗 |
-| `circuit_impedance` | 某频率下（可嵌套）串/并联网络的驱动点总阻抗；network 是元件叶子（kind resistance\|inductance\|capacitance）与串/并联组的树的 JSON 文本 |
+| `circuit_impedance` | 某频率下串/并联网络的驱动点总阻抗；network 是 JSON 文本，见下文说明 |
 | `resonance` | 串联/并联 LC 谐振：resonantFrequency、qualityFactor 与 bandwidth |
 | `ac_power` | 由 RMS 值求交流功率：视在 = V·I、有功 = 视在·cosφ、无功 = 视在·sinφ、功率因数 = cosφ |
 | `transient_response` | 一阶/二阶充放电瞬态在时间点列表上的取值；每个时间点返回电压与电流 |
@@ -150,7 +222,7 @@ record_answer   { text }   最终答案；封口该记录
 | solver | 用途 |
 |---|---|
 | `opamp_configurations` | 各配置的理想运放增益与输出：反相、同相、电压跟随器、差分、积分器、微分器 |
-| `time_constant` | 时间常数与截止频率：τ = RC（给电容）或 τ = L/R（给电感） |
+| `time_constant` | 由 R 与 C，或由 L 与 R 得到时间常数与截止频率 |
 | `voltage_divider` | 电阻分压器，带载或不带载，外加戴维南输出电阻 |
 | `led_resistor` | LED 串联电阻：R = (Vs − Vf)/I 及其耗散功率 P = I²·R |
 
@@ -184,47 +256,91 @@ record_answer   { text }   最终答案；封口该记录
 
 | solver | 用途 |
 |---|---|
-| `filter_design` | 巴特沃斯低通梯形设计：阶数、截止频率与相等的源/负载电阻给出元件表（串联电感、并联电容），并给出截止频率与查询频率处的衰减 |
+| `filter_design` | 巴特沃斯低通梯形设计：阶数、截止频率与相等的源/负载电阻给出串联电感与并联电容的元件表，并给出截止频率与查询频率处的衰减 |
 
-### solver 表面说明
+### 读签名
 
-solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的内核。值得注意的推论：
+`solver_info` 返回形参、它们的 kind 与枚举、可选标记以及 `returns` 形状。量叶子声明该位置允许的值集：
 
-- `reflection_to_vswr` / `return_loss`：|Γ| = 1 / |Γ| = 0 两个极端无界——值宇宙中没有无穷，因此这类调用会抛错。
-- `circuit_impedance.network` 是 JSON 文本字符串（封闭的 spec 无法表达递归的异构树）。
-- `resonance.resistance` 为必填，结果恒携带 qualityFactor 与 bandwidth。
-- `filter_design.queryFrequency` 为必填（只想要设计结果时传截止频率即可）；元件幅度是 kind-`none` 值，其单位由元件 kind 字符串携带。
-- `opamp_configurations` 覆盖六种单输入配置（求和放大器没有单一增益）。
-- `transient_response` 在 rc/rl/rlc 上返回同一种固定点形状（{time, voltage, current}）；不返回 rlc 阻尼特征。
-- `voltage_divider` 返回固定四字段对象；不带载时 `unloadedOutputVoltage` 等于 `outputVoltage`，`loadCurrent` 为 0。
-- `series_sum` 在所有分支上返回同一种固定形状（kind/power/sum/lastTerm/converges）；发散的无穷级数输入会报错。
-- 带单位的回显字段沿用旧声明并使用 kind `none`（开尔文温度、波长、同轴直径、频率回显列表）——这些量的类型化值是 SI 基准数字。
+| 叶子 | 接受 |
+|---|---|
+| `complex(kind)` | 该 kind 的实数或复数 |
+| `number(kind)` | 仅实数；复数在参数处被拒绝 |
 
-## 6. 存储
+加宽是隐式的，收窄从不隐式：实数一路以实数传递，直到某个需要复数的求解器把它转过去。`returns: null` 表示 void 求解器，它接受 `target: null`，见 §3.2。
 
-插件主目录是 `~/.dsh-electro-lab`（可用 `DSH_ELECTRO_LAB_HOME` 环境变量覆盖）：
+### 求解器说明
+
+| 求解器 | 说明 |
+|---|---|
+| `reflection_to_vswr`、`return_loss` | 无界的两个极端是错误：值宇宙中没有无穷 |
+| `circuit_impedance.network` | JSON 文本：叶子为 `{ "kind": "resistance" \| "inductance" \| "capacitance", "value": <number> }`，组为 `{ "topology": "series" \| "parallel", "elements": [ … ] }`，组可嵌套 |
+| `resonance` | `resistance` 为必填；结果恒携带 qualityFactor 与 bandwidth |
+| `filter_design` | `queryFrequency` 为必填——只想要设计结果时传截止频率；元件幅度是 kind-`none` 值，其单位写在元件 kind 里 |
+| `opamp_configurations` | 覆盖六种单输入配置，因此求和放大器没有单一增益可返回 |
+| `transient_response` | 在 rc、rl、rlc 上返回同一种点形状；rlc 阻尼特征不在其中 |
+| `voltage_divider` | 返回固定四字段对象；不带载时 `unloadedOutputVoltage` 等于 `outputVoltage`，`loadCurrent` 为 0 |
+| `series_sum` | 在所有分支上返回同一种形状；发散的无穷级数输入是错误 |
+| `time_constant` | 给 `capacitance` 得 τ = RC，给 `inductance` 得 τ = L/R |
+| 带单位字段 | 开尔文温度、波长、同轴直径与频率列表是 kind-`none` 值，其数字为 SI 基准 |
+
+## 6. 外部求解器
+
+除内置目录外，你还可以注册自己的求解器，经 http 访问。声明存放在 `~/.dsh-electro-lab/external-solvers.jsonl`，每行一个 JSON 对象；引擎启动时，每条启用且 `returns` 可映射的声明都会编译进与内置求解器同一个注册表。此后二者没有区别：`solver_info` 与 `call` 一视同仁，参数按同样方式解析，返回值在进入变量表之前先按声明的 `returns` 校验。
+
+| 字段 | 含义 |
+|---|---|
+| `name` | 求解器 id：小写开头，仅 `a-z0-9_` |
+| `description` | 该求解器算什么；`solver_info` 报告的就是它 |
+| `enabled` | 是否在启动时注册；缺省视为启用 |
+| `parameters` | 形参规格，使用与 §5 相同的叶子词表 |
+| `returns` | 结果形状，或 `null` 表示 void 求解器 |
+| `transport` | `http` |
+| `transportOptions` | `url`，以及可选的 `headers` |
+| `timeoutMs` | 调用超时，默认 30 秒 |
+
+### 声明求解器
+
+声明通过面板的 **「外部求解器」页**、智能体的 `external_solver_add`、`external_solver_update` 与 `external_solver_delete`，或直接编辑归档文件来写入。求解器要等宿主重启后才存在，在此之前面板会显示待重启提示。`returns` 无法映射的声明会被存档，但在启动时跳过，并在日志中给出告警。
+
+### 信封
+
+每次调用发送一次 POST，读回一个 JSON 体：
+
+| 方向 | 内容 |
+|---|---|
+| 请求 | `{ "requestId": "…", "args": { "…": … } }` |
+| 结果 | `{ "requestId": "…", "result": … }`，void 求解器为 `null` |
+| 失败 | `{ "requestId": "…", "error": "…" }` |
+
+参数与结果都是类型化值，因此线上不出现符号、variant 或 prefix 词；到达对端的是 SI 与直角形式。`requestId` 不匹配、或两个字段都没有的响应会被拒绝。失败码见 §3.4；信封尚未产生就失败的调用——对端没跑、主机名解析不了——以 `ENGINE_SOLVER_FAILED` 收场并带上原因，例如 `fetch failed: connect ECONNREFUSED 127.0.0.1:8787`。对端必须监听运行时可拨的端口：知名端口会被直接拒拨并读作 `bad port`。
+
+[`external-solvers-example/`](../external-solvers-example/README.zh-CN.md) 是一个可直接运行的对端与逐字段注册指南。
+
+## 7. 存储
+
+插件主目录是 `~/.dsh-electro-lab`，`DSH_ELECTRO_LAB_HOME` 可将其改到别处。
 
 ```
 ~/.dsh-electro-lab/
-  record-index.jsonl     ← 索引（在 records/ 之外）
-  records/
-    <id>.jsonl           ← 轨迹本体（id 为 UUID v4）
-  state.json             ← 插件状态：生成设置 + 重启标记
-  logs/
-    <YYYY-MM-DD_HH-mm-ss.SSS>.log   ← 一次宿主运行，纯事件行
+  record-index.jsonl      索引行，每条记录一行
+  records/<id>.jsonl      轨迹本体，每条记录一个文件
+  external-solvers.jsonl  声明，每行一条
+  state.json              插件状态
+  logs/                   每次宿主运行一个文件
 ```
 
-### record-index.jsonl（仅作索引）
+| 文件 | 存放 |
+|---|---|
+| `record-index.jsonl` | 每条记录的 `{ id, openedAt, sealedAt, question }`；`sealedAt: null` 标记仍未封口的那条 |
+| `records/<id>.jsonl` | 每次引擎操作一行轨迹 |
+| `external-solvers.jsonl` | §6 的声明 |
+| `state.json` | 生成设置与待重启标记 |
+| `logs/` | §8 的运行日志 |
 
-```json
-{ "id": "…", "openedAt": 1730000000000, "sealedAt": null, "question": "given R = 100ohm…" }
-```
+### 轨迹本体
 
-字段：id、openedAt、sealedAt（null = 未封口）、question（不可变的标题）。不存错误、统计或内容；行序即追加序。截断是 UI 的职责。
-
-### 轨迹本体（按步全量）
-
-每次引擎操作或标记一行；每一行都携带恢复该步所需的全部信息——输入与输出都在：
+每一行都携带恢复该步所需的全部信息，输入与输出都在：
 
 ```json
 { "seq": 1, "tool": "marker", "kind": "question", "ok": true, "text": "…", "at": … }
@@ -237,31 +353,48 @@ solver 表面正是在「每 solver 单一返回形状」纪律下迁移后的�
 { "seq": 6, "tool": "marker", "kind": "answer", "ok": true, "text": "…", "at": … }
 ```
 
-- `call` 行存储结果：任何调用的输出都作为事实进入该行——恢复状态时直接用存储的结果，**从不重新计算**。
-- `resolved` 是实际进入 run 的参数集：引用已展开，换算全部完成（SI、直角坐标）。`args` 保留原文；两者逐键对照。
-- 内核内部的中间步骤与模型的推理文本都不会被记录；粒度就是一次引擎操作。轨迹的读者是人——每一步都就地呈现原始输入、换算值与结果，并可用任意方式独立复核。
+| 字段 | 含义 |
+|---|---|
+| `args` | 传入时的参数，含引用 |
+| `resolved` | 求解器实际收到的参数：引用已展开、换算已完成 |
+| `result` | 求解器返回的值，作为事实存储 |
+| `code`、`error` | 仅失败行携带 |
 
-### 恢复 = 重放
+轨迹只记录引擎操作：没有内核内部步骤，也没有模型的推理文本。它的读者是人，每一步都就地呈现原始输入、换算后的值与结果。
 
-重建状态按序重放各行：`set` 行把槽置为存储的值，`call` 行把 target 槽置为存储的结果（非 void），set-null 行删除，marker 行跳过。纯引擎——不重算、不发网络、无随机。
+### 恢复
+
+宿主启动时若仍有未封口的记录，会按序重放该记录的各行来重建变量表：`set` 行写入其值，`call` 行把存储的结果写入目标槽，被删除的槽移除，标记行跳过。存储的结果被当作事实使用，因此不重算、不发网络、无随机。已封口的记录是历史而非状态，它的每一行都仍可独立阅读。
 
 ### 一致性
 
-- 孤儿索引行（sealedAt 为 null 但没有本体文件）在引擎启动时清除——索引只是投影，可安全重建。
-- 打开的记录就是**索引里 `sealedAt: null` 且本体存在的那一行**；重启从这一对恢复，不依赖任何指针文件。
-- 旧格式的 `records.jsonl` / `open-record.json` 不被读取；遗留文件会被忽略，可直接删除。
+| 情形 | 行为 |
+|---|---|
+| 索引行存在但本体文件缺失 | 引擎启动时清除 |
+| 未封口的记录 | 就是 `sealedAt: null` 且本体存在的那条索引行；重启从这一对恢复 |
+| `state.json` | 由唯一持有者做读—改—写并原子替换，写入中途崩溃只会留下上一版；不可读时读成 `{}` |
+| 声明变更 | 写入归档并在 `state.json` 打标记，下次启动生效 |
 
-### state.json（插件状态）
+## 8. 日志
 
-插件自身的状态：生成对话框的设置（`generateDir`、`generateLanguage`、`generateFormat`、`generateCompile`）与外部声明重启标记（`restartRequired`，声明在启动时注册完毕后清除）。写入经由唯一持有模块做「读—改—写」，写者只动自己的键；文件以**原子替换**落盘（先写临时文件再改名），写入中途崩溃只会留下上一版完整文件。文件不可读时读成 `{}`。
+每次宿主运行一个文件：`<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`，独占创建并保持打开。每行形如 `<timestamp> <LEVEL> <message>[ k=v …]`，同时写入文件与 stdout。字段值是 JSON 标量；嵌套对象或数组算一个 token，Error 渲染为消息并追加带 `  | ` 前缀的堆栈续行。
 
-### logs/（每次宿主运行一个文件）
+| 设置 | 取值 |
+|---|---|
+| `DSH_ELECTRO_LAB_LOG_LEVEL` | `debug`、`info`、`warn`、`error`、`off`；默认 `info` |
+| 保留 | 最新 20 个文件、总量不超过 50 MB |
 
-每次插件挂载一个文件：`<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`，独占创建并保持打开。行格式为 `<时间戳> <LEVEL> <message>[ k=v …]`，同时写入文件与 stdout。字段值为 JSON 类型、只展开一层——嵌套对象或数组是一个 token——Error 渲染为消息并追加带 `  | ` 前缀的堆栈续行。唯一的设置是 `DSH_ELECTRO_LAB_LOG_LEVEL`（`debug` | `info` | `warn` | `error` | `off`，默认 `info`）；保留最新 20 个文件、总量不超过 50 MB。
+这个文件描述自己所属的那次 run：文件名是开始，末行是结束，末行不是 `plugin unmounted` 的日志属于被杀掉的 run。端点、请求 id、耗时这类传输事实只记入日志，不写入记录。
 
-一次 run 的全部信息就在这个文件里：文件名是开始，末行是结束，末行不是 `plugin unmounted` 的 run 是被杀掉的。传输事实（端点、请求 id、耗时）只记入日志，不写入记录。
+## 9. 宿主端点
 
-## 7. 宿主端点
-
-- `GET /api/dsh-electro-lab/records-index`——供记录面板列表使用的索引行（`{ rows: [{ id, openedAt, sealedAt, question }] }`）。列表每 5 秒轮询一次；从不读取轨迹本体。
+| 端点 | 用途 |
+|---|---|
+| `GET /api/dsh-electro-lab/records-index` | 面板列表的索引行，每 5 秒轮询一次；从不读取轨迹本体 |
+| `GET /api/dsh-electro-lab/records/<id>` | 一条记录的轨迹行 |
+| `/api/dsh-electro-lab/external-solvers` | 声明归档：`GET` 列出声明与重启标记，`PUT` 添加或替换一条，`DELETE ?name=` 删除一条 |
+| `GET /api/dsh-electro-lab/generate-capability` | 生成对话框背后的 LaTeX 工具链检查 |
+| `/api/dsh-electro-lab/generate`、`-progress`、`-cancel` | 文章生成任务：启动、轮询、取消 |
+| `/api/dsh-electro-lab/list-roots`、`list-dirs`、`generate-dir` | 生成对话框的目录浏览与记忆目录 |
+| `/api/dsh-electro-lab/reveal` | 在宿主的文件管理器中打开生成的文件或其目录 |
 

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { QuantityKind } from '../../src/math/quantity-kind.ts'
 import { Engine } from '../../src/engine/engine.ts'
 import { VariableTable } from '../../src/engine/table.ts'
-import { validateValue } from '../../src/engine/values.ts'
+import { toCanonical, validateValue } from '../../src/engine/values.ts'
 
 let home = ''
 
@@ -35,6 +35,33 @@ describe('value universe validateValue', () => {
     expect(validateValue({ type: 'number', value: 1, kind: 'resistance', prefix: 'kilo', variant: 'degC' })).toMatch(/not supported for kind "resistance"/)
     expect(validateValue({ type: 'number', value: 1, kind: 'temperature', variant: 'kelvin' })).toMatch(/not supported for kind "temperature"/)
     expect(validateValue({ type: 'number', value: 25, kind: 'temperature', variant: 'degC', prefix: 'milli' })).toMatch(/SI base representation/)
+  })
+})
+
+describe('toCanonical', () => {
+  it('converts a quantity nested in an array or an object like a top-level one', () => {
+    expect(toCanonical({
+      type: 'array',
+      value: [
+        { type: 'number', value: 0.1, kind: QuantityKind.Resistance, prefix: 'kilo' },
+        { type: 'number', value: 25, kind: QuantityKind.Temperature, variant: 'degC' },
+        { type: 'complex', value: { mag: 2, ang: Math.PI / 2 }, kind: QuantityKind.Voltage },
+      ],
+    })).toEqual({
+      type: 'array',
+      value: [
+        { type: 'number', value: 100, kind: QuantityKind.Resistance },
+        { type: 'number', value: 298.15, kind: QuantityKind.Temperature },
+        { type: 'complex', value: { re: Math.cos(Math.PI / 2) * 2, im: Math.sin(Math.PI / 2) * 2 }, kind: QuantityKind.Voltage },
+      ],
+    })
+    expect(toCanonical({
+      type: 'object',
+      value: { note: { type: 'string', value: 'kept' }, length: { type: 'number', value: 2, kind: QuantityKind.Length, variant: 'inch' } },
+    })).toEqual({
+      type: 'object',
+      value: { note: { type: 'string', value: 'kept' }, length: { type: 'number', value: 0.0508, kind: QuantityKind.Length } },
+    })
   })
 })
 
@@ -118,8 +145,8 @@ describe('engine (set/get/call + markers + trace)', () => {
     engine.registry.register({
       id: 'double_rc',
       summary: 'double',
-      parameters: { r: { type: 'quantity', kind: QuantityKind.Resistance } },
-      returns: { type: 'quantity', kind: QuantityKind.Resistance },
+      parameters: { r: { type: 'complex', kind: QuantityKind.Resistance } },
+      returns: { type: 'complex', kind: QuantityKind.Resistance },
       run: (args) => ({ re: (args.r as number) * 2, im: 0 }),
     })
     engine.markerQuestion('q')
@@ -144,8 +171,8 @@ describe('engine (set/get/call + markers + trace)', () => {
     engine.registry.register({
       id: 'needs_r',
       summary: 'needs r',
-      parameters: { r: { type: 'quantity', kind: QuantityKind.Resistance } },
-      returns: { type: 'quantity', kind: QuantityKind.None },
+      parameters: { r: { type: 'complex', kind: QuantityKind.Resistance } },
+      returns: { type: 'complex', kind: QuantityKind.None },
       run: (args) => (args.r as number),
     })
     engine.registry.register({
@@ -173,10 +200,10 @@ describe('engine (set/get/call + markers + trace)', () => {
       id: 'two_args',
       summary: 'two args',
       parameters: {
-        a: { type: 'quantity', kind: QuantityKind.Resistance },
+        a: { type: 'complex', kind: QuantityKind.Resistance },
         b: { type: 'string', enum: ['x', 'y'] },
       },
-      returns: { type: 'quantity', kind: QuantityKind.None },
+      returns: { type: 'complex', kind: QuantityKind.None },
       run: (args) => (args.a as number),
     })
     engine.markerQuestion('q')
@@ -184,19 +211,19 @@ describe('engine (set/get/call + markers + trace)', () => {
     await expect(engine.opCall('two_args', {}, 'D')).resolves.toMatchObject({
       ok: false,
       code: 'ENGINE_ARGS',
-      error: /missing required arguments: a: quantity\(resistance\), b: string\(x\|y\)/,
+      error: expect.stringMatching(/missing required arguments: a: complex\(resistance\), b: string\(x\|y\)/),
     })
     // A bad literal names the argument and the expected spec
     await expect(engine.opCall('two_args', { a: 5, b: { type: 'string', value: 'x' } }, 'D')).resolves.toMatchObject({
       ok: false,
       code: 'ENGINE_ARGS',
-      error: /argument "a": .*expected quantity\(resistance\)/,
+      error: expect.stringMatching(/argument "a": .*expected complex\(resistance\)/),
     })
     // A bare "@name" string gets the migration hint instead of a silent loop
     await expect(engine.opCall('two_args', { a: '@R', b: { type: 'string', value: 'x' } }, 'D')).resolves.toMatchObject({
       ok: false,
       code: 'ENGINE_ARGS',
-      error: /"@name" strings are no longer references/,
+      error: expect.stringMatching(/"@name" strings are no longer references/),
     })
   })
 
@@ -206,10 +233,10 @@ describe('engine (set/get/call + markers + trace)', () => {
       id: 'nested_refs',
       summary: 'nested refs',
       parameters: {
-        times: { type: 'array', items: { type: 'quantity', kind: QuantityKind.Time } },
-        cfg: { type: 'object', fields: { gain: { type: 'quantity', kind: QuantityKind.None } } },
+        times: { type: 'array', items: { type: 'complex', kind: QuantityKind.Time } },
+        cfg: { type: 'object', fields: { gain: { type: 'complex', kind: QuantityKind.None } } },
       },
-      returns: { type: 'quantity', kind: QuantityKind.None },
+      returns: { type: 'complex', kind: QuantityKind.None },
       run: (args) => (args.cfg as { gain: number }).gain,
     })
     engine.markerQuestion('q')
@@ -231,13 +258,36 @@ describe('engine (set/get/call + markers + trace)', () => {
     }, 'D')).resolves.toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
   })
 
+  it('converts a quantity nested in an array or object argument, and says so in the trace', async () => {
+    const engine = makeEngine()
+    engine.registry.register({
+      id: 'sum_lengths',
+      summary: 'adds the items up',
+      parameters: { lengths: { type: 'array', items: { type: 'complex', kind: QuantityKind.Length } } },
+      returns: { type: 'complex', kind: QuantityKind.Length },
+      run: (args) => (args.lengths as number[]).reduce((total, item) => total + item, 0),
+    })
+    engine.markerQuestion('q')
+    engine.opSet('L', { type: 'number', value: 2, kind: QuantityKind.Length, variant: 'inch' })
+    // 0.1 kilo-metre + 2 inch (via a slot) = 100.0508 m; before the recursion the kernel saw 0.1 + 2
+    const receipt = await engine.opCall('sum_lengths', {
+      lengths: { type: 'array', value: [{ type: 'number', value: 0.1, kind: QuantityKind.Length, prefix: 'kilo' }, { type: 'slot', value: 'L' }] },
+    }, 'total')
+    expect(receipt).toMatchObject({ ok: true })
+    expect((engine.opGet('total') as unknown as { value: { value: number } }).value.value).toBeCloseTo(100.0508, 10)
+    const rows = engine.store.readRows(String(engine.openId()))
+    const callRow = rows.find((row) => row.tool === 'call' && row.solver === 'sum_lengths')
+    const resolved = (callRow!.resolved as { lengths: { value: { value: number }[] } }).lengths.value
+    expect(resolved.map((item) => item.value)).toEqual([100, 0.0508])
+  })
+
   it('solver run throws → ok:false ENGINE_SOLVER_FAILED, no slot is created', async () => {
     const engine = makeEngine()
     engine.registry.register({
       id: 'boom',
       summary: 'boom',
       parameters: {},
-      returns: { type: 'quantity', kind: QuantityKind.None },
+      returns: { type: 'complex', kind: QuantityKind.None },
       run: () => {
         throw new Error('singular system')
       },

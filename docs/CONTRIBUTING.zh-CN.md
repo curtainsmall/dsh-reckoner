@@ -4,60 +4,67 @@
 
 [English](../.github/CONTRIBUTING.md)
 
-## 开发流程
+## 分支
 
-```
-develop   ← 所有开发在此进行
-main      ← 仅发布（PR 合并、打 tag、GitHub Actions）
-```
+| 分支 | 用途 |
+|---|---|
+| `develop` | 默认分支；所有开发都落在这里 |
+| `feature/*` | 可选的短期分支，通过 PR 合并回来 |
+| `main` | 仅发布；任何情况下都不直接提交或推送 |
 
-- **`develop`** —— 默认分支。所有进行中的提交、实验、已合并的功能分支都落在 develop 上。
-- **`feature/*`** —— 贡献者可选的短期分支，通过 PR 合并回 `develop`。
-- **`main`** —— 仅发布。任何情况下禁止直接提交或推送。
+## 拉取请求
 
-## 拉取请求（PR）
-
-- 所有 PR 目标为 **`develop`**（贡献者也可选择 `feature/*`）；**绝不能指向 `main`**。
-- 将 `develop` 合并进 `main`、打发布 tag、发布版本号，**仅限仓库所有者操作**。
-- 远程规则集强制了这一约束：`main` 要求走 PR（直接推送会被拒绝），develop/tag 规则仅所有者可绕过。
+| 规则 | 说明 |
+|---|---|
+| 目标分支 | `develop` 或 `feature/*`；绝不能指向 `main` |
+| 仅限所有者 | 合并进 `main`、打发布 tag、发布版本 |
+| 远程约束 | `main` 要求走 PR，直接推送会被拒绝 |
 
 ## 提交信息
 
-- 使用 **Conventional Commits** 格式：`type(scope): subject` —— 例如 `feat(expression): ...`、`fix(preset): ...`、`ci(release): ...`。
-- 类型：`feat`、`fix`、`refactor`、`docs`、`test`、`chore`、`perf`、`build`、`ci`、`revert`。
-- subject 用英文、祈使语气、小写开头。
+使用 Conventional Commits：`type(scope): subject`，例如 `feat(expression): …`。
+
+| 部分 | 规则 |
+|---|---|
+| type | `feat`、`fix`、`refactor`、`docs`、`test`、`chore`、`perf`、`build`、`ci`、`revert` |
+| subject | 英文、祈使语气、小写开头 |
+
+只要改动需要说明理由，就写正文；正文是成段的叙述，而不是改动文件清单。
 
 ## 开发环境
 
-- 工具链：**pnpm 11**、**Node ≥ 20**（CI 使用 Node 24）、TypeScript + tsdown + vitest。
-- 安装与验证：
+| 项目 | 取值 |
+|---|---|
+| 工具链 | pnpm 11 与 Node ≥ 20；CI 使用 Node 24 |
+| 构建 | TypeScript、tsdown、vitest |
 
-  ```sh
-  pnpm install
-  pnpm typecheck
-  pnpm test
-  pnpm build
-  ```
+```sh
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm build
+```
 
-- 测试位于 `tests/`（与 `src/` 同级，目录结构镜像：`tests/math/`、`tests/engine/`、`tests/tool-declarations/`）；每个单元在对应分组内提供 `*.test.ts`。
-- 宿主插件在挂载时注册引擎工具（`set` / `get` / `call` 与记录标记）、技能与随包 `electro-lab` 预设；`pnpm build` 重新生成 `lib/`（已 gitignore，发布时全新构建）。
+测试位于 `tests/`，镜像 `src/` 的目录结构，每个单元一个 `*.test.ts`。`pnpm build` 重新生成 `lib/`，它已被 gitignore，发布时全新构建。
 
 ## 发布
 
-仅限所有者操作。一次发布 = 一个 tag：
+仅限所有者操作。一次发布对应一个 tag：
 
-1. 同步更新 `package.json`、`dsh.plugin.json`，并在 `CHANGELOG.md` 添加对应条目（最新条目必须等于新版本号）。
-2. 推送 `develop`，向 `main` 发起 PR，CI（`build`）通过后合并。
-3. 在 `main` 上打 `vX.Y.Z` 并推送 —— 发布工作流校验 tag 位于 `main` 且版本一致，然后发布到 npm（OIDC 可信发布）并创建 GitHub Release。
-4. 预发布版本（`x.y.z-*`）发布到 `beta` dist-tag，并在 GitHub 上标记为预发布。
+1. 更新 `package.json` 与 `dsh.plugin.json`，并在 `CHANGELOG.md` 添加对应条目。最新的版本化条目必须等于新版本号。
+2. 推送 `develop` 并 `main` 发起 PR；`build` 工作流通过后合并。
+3. 在 `main` 上打 `vX.Y.Z` 并推送该 tag。发布工作流会校验 tag 与分支及两个版本文件一致，随后发布到 npm 并创建 GitHub Release。
+4. 预发布版本 `x.y.z-*` 发布到 `beta` dist-tag，并在 GitHub 上标记为预发布。
 
 ## 文档
 
-- README 只记录**已实现**的功能 —— 保持简单、与现状一致。
-- 文档**双语**：英文版放在规范位置，简体中文版放在 `docs/` 下同名文件（`xxx.zh-CN.md`）。changelog 仅英文。
-- 简体中文文档中，分贝术语写作**分贝**。
-- 规划/路线图内容在成为实际工作之前不提交进仓库，另行跟踪。
+| 规则 | 说明 |
+|---|---|
+| 范围 | README 只记录已实现的功能 |
+| 语言 | 每份文档都在规范位置有 en-US 版本，并在其旁以 `xxx.zh-CN.md` 提供简体中文版；changelog 仅英文 |
+| 术语 | 简体中文里分贝写作**分贝**；`dBm`、`dBu`、`dBµV`、`dBW` 这类单位符号保持不变 |
+| 路线图 | 规划内容在成为实际工作之前不进入仓库 |
 
 ## 许可
 
-通过参与贡献，你同意你的贡献以 [MIT 许可]（../LICENSE） 授权。
+通过参与贡献，你同意你的贡献以 [MIT 许可](../LICENSE) 授权。

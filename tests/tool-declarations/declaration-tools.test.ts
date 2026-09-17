@@ -14,7 +14,7 @@ const TOOL: ToolDeclaration = {
   description: 'Echoes its input over http',
   enabled: true,
   parameters: {
-    gain: { type: DeclarationParamType.Quantity, kind: 'log', description: 'the gain' },
+    gain: { type: DeclarationParamType.Complex, kind: 'log', description: 'the gain' },
   },
   transport: DeclarationTransport.Http,
   transportOptions: { url: 'https://example.test/calc' },

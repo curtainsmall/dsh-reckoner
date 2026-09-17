@@ -11,10 +11,10 @@
  * geometric case (the limit of its general term) and count^p for power sums
  * (the last summed term).
  */
-import { PowerSumKind, calcArithmeticSeries, calcGeometricSeries, calcPowerSum } from '../../math/series.ts'
-import { toScalar, type ValuePayload } from '../../math/convert.ts'
-import { QuantityKind } from '../../math/quantity-kind.ts'
-import type { SolverDef } from '../registry.ts'
+import { PowerSumKind, calcArithmeticSeries, calcGeometricSeries, calcPowerSum } from '../math/series.ts'
+import { toScalar, type ValuePayload } from '../math/convert.ts'
+import { QuantityKind } from '../math/quantity-kind.ts'
+import type { SolverDef } from '../engine/registry.ts'
 
 /** Last summed term of a power sum Σk^p over the first n naturals = n^p. */
 function powerLastTerm(power: PowerSumKind, count: number): number {
@@ -28,10 +28,10 @@ export const seriesSolvers: SolverDef[] = [
     summary: 'Sum of a number sequence: arithmetic, geometric (finite or convergent infinite), or power sum',
     parameters: {
       kind: { type: 'string', enum: ['arithmetic', 'geometric', 'power'] },
-      firstTerm: { type: 'quantity', kind: QuantityKind.None, optional: true },
-      commonDifference: { type: 'quantity', kind: QuantityKind.None, optional: true },
-      commonRatio: { type: 'quantity', kind: QuantityKind.None, optional: true },
-      count: { type: 'quantity', kind: QuantityKind.None, optional: true },
+      firstTerm: { type: 'complex', kind: QuantityKind.None, optional: true },
+      commonDifference: { type: 'complex', kind: QuantityKind.None, optional: true },
+      commonRatio: { type: 'complex', kind: QuantityKind.None, optional: true },
+      count: { type: 'complex', kind: QuantityKind.None, optional: true },
       infinite: { type: 'boolean', optional: true },
       power: { type: 'string', enum: [PowerSumKind.Linear, PowerSumKind.Square, PowerSumKind.Cube], optional: true },
     },
@@ -40,8 +40,8 @@ export const seriesSolvers: SolverDef[] = [
       fields: {
         kind: { type: 'string' },
         power: { type: 'string' },
-        sum: { type: 'quantity', kind: QuantityKind.None },
-        lastTerm: { type: 'quantity', kind: QuantityKind.None },
+        sum: { type: 'complex', kind: QuantityKind.None },
+        lastTerm: { type: 'complex', kind: QuantityKind.None },
         converges: { type: 'boolean' },
       },
     },

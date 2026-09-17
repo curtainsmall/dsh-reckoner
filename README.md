@@ -4,6 +4,17 @@ An electrical & electronics calculation plugin for the DeepSeek Harness.
 
 [简体中文](README.zh-CN.md)
 
+## Contents
+
+- [Install](#install)
+- [ElectroLab Mode](#electrolab-mode)
+- [Records](#records)
+- [Article generation](#article-generation)
+- [External solvers](#external-solvers)
+- [Configuration](#configuration)
+- [Documentation](#documentation)
+- [License](#license)
+
 ## Install
 
 ```sh
@@ -12,32 +23,69 @@ dsh plugin --profile web add dsh-electro-lab
 
 ## ElectroLab Mode
 
-The plugin works as an agent preset: pick **ElectroLab Mode** when starting a session and ask any electrical or electronics calculation question in plain language. The session is isolated to the plugin's tools — no shell, no file system, no network — so every number in the answer comes from the engine, and the agent stops and asks when the conditions are insufficient.
+The plugin works as an agent preset: pick **ElectroLab Mode** when starting a session and ask any electrical or electronics question in plain language. The session is isolated to the plugin's tools, with no shell, file system or network, so every number in the answer comes from the engine, and the agent stops and asks when the conditions are insufficient.
 
-All calculation happens inside a deterministic **engine**. The agent operates it through three primitives — `set` (write a typed value into a slot), `get` (read a slot) and `call` (run one of 38 math solvers and store the result) — bracketed by the record markers `record_question` / `record_analyse` / `record_answer`. Typed values carry their own kind, variant and prefix (e.g. `{type: "number", value: 25, kind: "temperature", variant: "degC"}`); the engine stores them as given and performs SI and unit conversion only at calculation boundaries. Every step lands in a per-record trace file, so each solve is a reproducible process that can be replayed without re-computing.
+All calculation happens inside a deterministic **engine**. The agent writes typed values into slots, calls one of 38 built-in solvers, and reads the result back; the engine converts units at the calculation boundary and records every step into a readable record.
 
-The solver catalog covers expression algebra, series, transfer functions, DSP/DFT, signal quality (THD, jitter, ADC budget), circuits (impedance, resonance, transients, AC power), electronics (op-amps, dividers, LED), RF & Smith chart (reflection, matching networks), transmission lines, noise, and filter design. See the [engine manual](docs/engine.md).
+| primitive | effect |
+|---|---|
+| `set` | writes one typed value into a slot |
+| `get` | reads one slot back |
+| `call` | runs a registered solver and stores its result |
+| `solver_info` | returns a solver's signature before it is called |
+| `record_question` / `record_analyse` / `record_answer` | bracket a solve into a record |
 
-Settled records are listed in the client panel's **Records** tab (indexed from `record-index.jsonl`, refreshed every 5 s); incomplete records are marked as such. Record bodies are process traces under `~/.dsh-electro-lab/records/`. The list has a select mode (multi-select, select all, delete with confirmation) and each record opens a timeline detail page: collapsible cards for writes/reads/failures and calls, JSON tree values with zebra striping, and a fixed toolbar/title area with the timeline scrolling beneath it.
+The catalog covers expression algebra, series, transfer functions, DSP and DFT, signal quality, circuits, electronics, RF and Smith chart, transmission lines, noise and filter design.
+
+## Records
+
+Settled records are listed in the client panel's **Records** tab, refreshed every 5 s, and a record that was never sealed is marked incomplete. Opening one shows its timeline: a collapsible card per write, read, call and failure, values as JSON trees, the toolbar and title fixed while the timeline scrolls. The list supports multi-select and delete.
+
+A record is the process of one solve: every step reads on its own, and a solve that was interrupted continues from its record after a host restart.
 
 ## Article generation
 
-The record detail page's right rail offers **Markdown** and **LaTeX** generation: the host LLM writes a fluent, self-contained solution article from the record's trace (question, established conditions, analysis notes, solver steps with their resolved arguments and results, and the final answer), presented as the model's own calculation — never mentioning ElectroLab, solvers or the generation process. Each button opens its own setup dialog (article language, output directory with a host-driven directory browser, file name; remembered across runs), then runs a cancellable background job whose progress dialog can be minimized to a corner pill that survives navigation. LaTeX articles are proper XeLaTeX documents (ctexart for zh-CN, fontspec + unicode-math + siunitx for en — pure Unicode throughout); **PDF compilation is LaTeX-only**, delegated to a LaTeX driver (latexmk when it can run, else MiKTeX's texify). The setup dialog checks the toolchain once per host start — Generate is disabled without a usable driver and `xelatex`, and missing macros are only a warning — and the run compiles with the driver that check picked: the PDF path, or one failure line with the `.tex` kept, quoting the compiler or saying it gave no reason, with details in the log. Markdown output is written flat as `.md` and never compiled. The generated file is the primary artifact: open it or its folder straight from the progress dialog.
+Each record can be written up as a standalone solution article. The host LLM writes it from the trace — question, conditions, analysis, solver steps with their arguments and results, and the final answer — in the model's own voice, never mentioning the plugin.
 
-## Logs
+| format | output |
+|---|---|
+| Markdown | a flat `.md` file, never compiled |
+| LaTeX | a XeLaTeX document, compiled to PDF by a LaTeX driver |
 
-The plugin logs one text line per event to stdout and to one file per host run, `~/.dsh-electro-lab/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`.
+The setup dialog remembers the article language, the output directory and the file name. Compilation needs latexmk or MiKTeX's texify together with the `xelatex` engine, and the dialog checks the toolchain once per host start: without a usable driver Generate is disabled with the reason shown. A run is cancellable, and its progress dialog minimizes to a corner pill that survives navigation. The article or its folder can be opened from that dialog.
 
-`DSH_ELECTRO_LAB_LOG_LEVEL=debug|info|warn|error|off` (default `info`) is the only setting. The newest 20 run files up to 50 MB are kept. A log whose last line is not `plugin unmounted` belongs to a run that was killed.
+## External solvers
 
-## Development
+Beyond the built-in catalog you can register solvers of your own, reached over http. A declaration lives in `~/.dsh-electro-lab/external-solvers.jsonl` and is compiled into the solver registry at engine start, so `solver_info` and `call` treat it like a built-in.
 
-See [Contributing](.github/CONTRIBUTING.md) for the development setup, commit conventions, and release process.
+| way to declare | how |
+|---|---|
+| the panel | **External solvers** tab: list, add, edit, enable, disable, delete |
+| the agent | `external_solver_add`, `external_solver_update`, `external_solver_delete` |
+| the file | edit the archive directly |
 
-## Docs
+A declaration carries a name, a description, the parameters, an explicit `returns` shape and the endpoint, and it may be written in the panel's guided form. Changes apply after a host restart, and the panel shows a pending-restart notice until then.
 
-- [Engine manual](docs/engine.md) (also in [简体中文](docs/engine.zh-CN.md))
-- [Contributing](.github/CONTRIBUTING.md)
+The peer answers a POST of `{ "requestId": …, "args": … }` with `{ "requestId": …, "result": … }`, or with `{ "requestId": …, "error": "…" }` to report a failure. Arguments and results are typed values, so units travel as SI numbers rather than as symbols or unit words.
+
+[Engine manual §6](docs/engine.md#6-external-solvers) holds the full contract, and [`external-solvers-example/`](external-solvers-example/README.md) is a runnable peer with a field-by-field register guide.
+
+## Configuration
+
+| setting | meaning |
+|---|---|
+| `DSH_ELECTRO_LAB_HOME` | the plugin home, `~/.dsh-electro-lab` by default |
+| `DSH_ELECTRO_LAB_LOG_LEVEL` | `debug`, `info`, `warn`, `error` or `off`; default `info` |
+
+The home holds the records, the declaration archive, the plugin state and one log file per host run. Both are described in the engine manual: [storage](docs/engine.md#7-storage) and [logs](docs/engine.md#8-logs).
+
+## Documentation
+
+| document | content |
+|---|---|
+| [Engine manual](docs/engine.md) · [简体中文](docs/engine.zh-CN.md) | typed values, primitives, the solver catalog, external solvers, storage, logs |
+| [external-solvers-example](external-solvers-example/README.md) · [简体中文](external-solvers-example/README.zh-CN.md) | a runnable echo peer and the field-by-field register guide |
+| [Contributing](.github/CONTRIBUTING.md) · [简体中文](docs/CONTRIBUTING.zh-CN.md) | setup, commit conventions, release process |
 
 ## License
 

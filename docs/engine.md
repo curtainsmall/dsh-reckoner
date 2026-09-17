@@ -2,20 +2,45 @@
 
 [简体中文](engine.zh-CN.md)
 
-The DeepSeek Harness ElectroLab plugin runs all electrical & electronics calculation inside a deterministic **engine**. The language model never computes: it operates the engine through three primitives and three record markers, and the engine keeps a typed-value table, converts values at calculation boundaries, records every step, and seals each solve into a browsable record.
+Every electrical and electronics calculation in the ElectroLab plugin happens inside one deterministic **engine**. A language model never computes: it operates the engine through four primitives and three record markers, and the engine keeps a table of typed values, converts units at calculation boundaries, and records every step into a record that can be read back.
 
-This manual is the full reference for the engine surface — typed values, primitives, markers, the solver catalog, and storage. Sessions started in **ElectroLab Mode** carry the same rules in the `electro-lab-interface` skill (engine manual) and `electro-lab-template` skill (record protocol).
+Sessions started in **ElectroLab Mode** carry the same rules in the `electro-lab-interface` and `electro-lab-template` skills.
 
-## 1. How it works
+## Contents
 
-- **One global engine per host process.** Any session's markers act on the same engine; at most one record is open at a time (single-open invariant).
-- **The LLM surface is seven tools**: `set`, `get`, `call`, `solver_info`, `record_question`, `record_analyse`, `record_answer`. The ~40 domain tools, `solve_steps` and the text↔value codecs are gone; the math kernels live in the engine's solver registry and are invoked by `call`. `solver_info` exposes a solver's exact signature (parameter names, quantity kinds, allowed enums, optional flags, returns) straight from the registry — read it before calling an unfamiliar solver.
-- **A record is a process (timeline).** Each engine operation appends one fully self-describing trace line (input and output both stored); a record can be replayed to rebuild the recorded state at any point without re-computing anything.
-- **Input is value.** What the model gives is what the engine stores; a string stays a string.
+- [1. Overview](#1-overview)
+- [2. Typed values](#2-typed-values)
+- [3. Primitives](#3-primitives)
+- [4. Records & markers](#4-records--markers)
+- [5. Solver catalog](#5-solver-catalog)
+- [6. External solvers](#6-external-solvers)
+- [7. Storage](#7-storage)
+- [8. Logs](#8-logs)
+- [9. Host endpoints](#9-host-endpoints)
+
+## 1. Overview
+
+One engine runs per host process. Any session's markers act on it, and at most one record is open at a time.
+
+A solve is a loop of engine operations bracketed by markers:
+
+| step | tool | effect |
+|---|---|---|
+| 1 | `record_question` | opens a record and clears the table |
+| 2 | `set` | stores each given condition as a typed value |
+| 3 | `record_analyse` | states the knowns and the approach, before any calculation |
+| 4 | `solver_info` | reads the signature of a solver about to be called |
+| 5 | `call` | runs the solver and stores its result in a target slot |
+| 6 | `get` | reads a value back |
+| 7 | `record_answer` | submits the answer and seals the record |
+
+Every step appends one self-describing line to the record, inputs and outputs both. A host restart rebuilds the table of the record that is still open from those lines, using the stored results rather than recomputing them.
+
+The engine stores what it is given. A string stays a string, and no arithmetic happens outside a solver.
 
 ## 2. Typed values
 
-A typed value is a JSON object. `kind` is part of a quantity:
+A typed value is one JSON object. `kind` is part of a quantity, and so is the way it is written:
 
 ```json
 { "type": "number",  "value": 100,  "kind": "resistance" }
@@ -27,11 +52,21 @@ A typed value is a JSON object. `kind` is part of a quantity:
 { "type": "boolean", "value": true }
 ```
 
-- `type` — the shape discriminator: number / complex / string / boolean / array (items recurse) / object (fields recurse). A `slot` value (`{ "type": "slot", "value": "…" }`) is a reference resolved at the call/set boundary to a copy of the referenced value — it is never stored or returned (§3).
-- `kind` — the quantity class (resistance, voltage, time, frequency, temperature, angle, pressure, energy, length, mass, log, none, …). Kind is part of a quantity: a value exists with a kind; a bare number has kind `none`; a plain ratio has kind `log`.
-- `variant` — a representation choice *within* a kind. **Field absent (not null) = the SI base representation**; storage never adds keys. Only the following words are valid, and each only on its own kind:
+### 2.1 Fields
 
-| kind | variant words | base (no key) |
+| field | meaning |
+|---|---|
+| `type` | the shape: `number`, `complex`, `string`, `boolean`, `array`, `object` |
+| `value` | the payload; array items and object fields are typed values again |
+| `kind` | the quantity class: resistance, voltage, time, frequency, temperature, angle, pressure, energy, length, mass, log, none, … |
+| `variant` | how a quantity of that kind is written, when it is not the SI base unit |
+| `prefix` | a magnitude multiplier on `number` and `complex` |
+
+`{ "type": "slot", "value": "name" }` is not a value but a reference, resolved at the call boundary — see §3.3.
+
+### 2.2 Kinds, variants and prefixes
+
+| kind | variant words | base unit |
 |---|---|---|
 | temperature | degC, degF | K |
 | angle | deg | rad |
@@ -41,57 +76,94 @@ A typed value is a JSON object. `kind` is part of a quantity:
 | length | inch, foot, yard, mile | m |
 | mass | lb, oz | kg |
 
-- `prefix` — a magnitude multiplier on number/complex. **Field absent = multiplier 1.** Words are full lowercase English words, never symbols: `pico` `nano` `micro` `milli` `kilo` `mega` `giga` `tera`. A prefix is generally only valid on the SI base representation (variant words reject prefixes).
-- Words are short ASCII text everywhere; symbols (Ω, °, µ, …) never enter the value universe.
+Prefix words are `pico` `nano` `micro` `milli` `kilo` `mega` `giga` `tera`. A prefix is valid on an SI base representation only, never together with a variant word.
 
-### Conversion boundary
+A missing `variant` or `prefix` field means the SI base unit and multiplier 1; the engine never writes those keys itself. Every word is short ASCII text — symbols such as `Ω`, `°` or `µ` never enter the value universe.
 
-The table stores values **exactly as given** — `get` returns what `set` wrote, no normalization. Conversion happens only when a value is *referenced by a computation*: at the `call` boundary the engine converts variants to SI (degC → K, deg → rad, psi → Pa, …) and normalizes complex shapes (`{mag, ang}` → `{re, im}`, angles always radians). The table is untouched; the trace records both the original args and the resolved end values.
+### 2.3 Conversion boundary
+
+The table stores values exactly as given, so `get` returns what `set` wrote. Conversion happens when a value enters a computation: at the call boundary the engine converts variants to SI, normalizes complex payloads to `{ "re": …, "im": … }` with angles in radians, and applies prefixes. The boundary reaches inside arguments, so a quantity nested in an array or an object is converted like a top-level one.
+
+The table itself is untouched, and the trace records both what was passed and what the solver received.
 
 ## 3. Primitives
 
-```
-set  { name, value }     write one slot: value = a typed value; value: null deletes the slot
-get  { name }            read one slot (the stored typed value, exactly as written)
-call { solver, args, target }  call one registered solver; args values are typed values or slot references like { "type": "slot", "value": "R" }
-solver_info { solver }        inspect a solver's signature (parameters, enums, returns) before calling it
-```
+| primitive | arguments | effect |
+|---|---|---|
+| `set` | `name`, `value` | writes one slot; `value: null` deletes the slot |
+| `get` | `name` | reads one slot back, exactly as it was written |
+| `call` | `solver`, `args`, `target` | runs one registered solver and stores its result |
+| `solver_info` | `solver` | returns a solver's signature before it is called |
 
-Semantics:
+Arguments are typed values. `"100 kΩ"` is a string and nothing else; a resistance of 100 kΩ is `{ "type": "number", "value": 100, "kind": "resistance", "prefix": "kilo" }`.
 
-- `"100 kΩ"` is always a string; a resistance of 100 kΩ must be given as `{ "type": "number", "value": 100, "kind": "resistance", "prefix": "kilo" }`.
-- A slot reference is its own typed value: `{ "type": "slot", "value": "name" }`, where `value` is the full slot path (`"name"` or `"name.field"`). The engine expands it and kind/shape-checks it against the solver signature; a reference to a missing slot fails with `ENGINE_SLOT_UNDECLARED`. References may also sit inside array items and object fields of an argument or set value, resolving to the stored value before validation — `set` stores the resolved COPY, so later changes to the source slot do not affect the copy. Slot references exist only at the call/set boundary — they are never stored in the table, never returned, and a bare string is always a literal string, never a reference.
-- **Every call returns one receipt** — there is no "exception vs normal return" duality:
+### 3.1 Receipts
+
+Every call returns one receipt, and there is no second failure channel:
 
 ```
-success: set  → { ok: true, name, rev }   (delete: { ok: true, name, deleted })
+success: set  → { ok: true, name, rev }        delete: { ok: true, name, deleted }
          get  → { ok: true, name, value }
-         call → { ok: true, target, rev }  (void solver: { ok: true, target: null })
+         call → { ok: true, target, rev }        void solver: { ok: true, target: null }
 failure:      → { ok: false, code, error }
 ```
 
-  Check `ok` first. Receipts carry no business data (except `get`); read values only through `get`.
-- **target matches the solver signature** (the engine decides from the registry; the model does not need to remember rules): a void solver (declared `returns: null`) takes `target: null` (a named target → `ENGINE_VOID_TARGET`); a value solver requires a named target (missing/null → `ENGINE_TARGET_REQUIRED`).
-- **target always overwrites**: writing an existing slot replaces the whole value (kind check passes) and bumps `rev`; nothing is inherited from the old representation.
-- **Delete = `set` with `value: null`**: the slot disappears from the table, deleting a missing slot is an idempotent ok, re-creating later restarts at rev 1; the trace line carries `deleted: true`.
-- Slot kinds are pinned on first write: overwriting with a different kind fails (`ENGINE_KIND_MISMATCH`) and does not advance the revision.
-- Failed operations have **no side effects**: no slot is created, the table does not change, revisions do not move. The failure still lands in the trace.
+Check `ok` first. Only `get` carries a value; every other number in a solve comes from a slot written by `set` or `call` and read back with `get`.
+
+### 3.2 Slot rules
+
+| rule | behaviour |
+|---|---|
+| target | a value solver needs a named target; a void solver, declared `returns: null`, takes `target: null` |
+| overwrite | writing an existing slot replaces the whole value and bumps `rev`; nothing is inherited |
+| delete | `set` with `value: null` removes the slot; deleting a missing slot is an idempotent ok, and re-creating it starts at rev 1 |
+| pinned kind | a slot keeps the kind of its first write; a different kind fails and does not advance the revision |
+| failure | a failed operation has no side effects: no slot is created, the table is unchanged, revisions stay put |
+
+A failure still lands in the trace.
+
+### 3.3 Slot references
+
+A slot reference is `{ "type": "slot", "value": "name" }`, where `value` is the full path: `"name"` or `"name.field"`. The engine expands it, checks it against the solver signature, and fails with `ENGINE_SLOT_UNDECLARED` when the slot does not exist. References may sit inside array items and object fields as well as at the top level of an argument.
+
+`set` stores a copy of the referenced value, so a later change to the source slot leaves the copy alone. A reference never enters the table and is never returned. A bare string is always a literal string.
+
+### 3.4 Failure codes
+
+| code | raised when |
+|---|---|
+| `ENGINE_ARGS` | the arguments do not match the solver signature, or a required one is missing |
+| `ENGINE_SLOT_UNDECLARED` | a referenced slot does not exist |
+| `ENGINE_KIND_MISMATCH` | the kind of an argument conflicts with the parameter, or with the pinned kind of a slot |
+| `ENGINE_UNKNOWN_SOLVER` | the solver id is not registered |
+| `ENGINE_VOID_TARGET` | a void solver was given a named target |
+| `ENGINE_TARGET_REQUIRED` | a value solver was called without a named target |
+| `ENGINE_UNSUPPORTED_VARIANT` | the variant word does not apply to that kind |
+| `ENGINE_UNSUPPORTED_PREFIX` | the prefix word is unknown, or combined with a variant |
+| `ENGINE_SOLVER_FAILED` | the solver itself failed while running |
+| `EXTERNAL_ERROR` | an external endpoint reported a failure in its envelope |
+| `EXTERNAL_HTTP` | an external endpoint answered with a non-2xx status |
+| `EXTERNAL_TIMEOUT` | an external call exceeded the timeout of its declaration |
+| `EXTERNAL_RESPONSE` | an external response broke the envelope contract |
+| `TOOL_ERROR` | any other tool failure |
+
+Registration-time codes — `REGISTER_MISSING_RETURNS`, `REGISTER_DUPLICATE` — belong to the host plugin rather than to a solve.
 
 ## 4. Records & markers
 
-```
-record_question { text }    open a record (clears the table); a re-open seals the previous record as duplicate-start
-record_analyse  { text }    the analysis: knowns and the approach with formulas — no computed numbers
-record_answer   { text }    the final answer; seals the record
-```
+| marker | effect |
+|---|---|
+| `record_question` | opens a record and clears the table |
+| `record_analyse` | submits the analysis: the knowns and the approach with formulas, before any calculation |
+| `record_answer` | submits the final answer and seals the record |
 
-- One open record at most. A second `record_question` seals the open record (duplicate-start) and starts a new one — two open rows can never exist.
-- `record_answer` with no open record keeps a duplicate-end error record.
-- An interrupted record (index `sealedAt: null` with a body file) is resumed at the next engine start: the trace continues in the same file and the table is rebuilt from it. An incomplete record never completes itself — it is either sealed later (duplicate-start) or stays incomplete forever.
+At most one record is open. A second `record_question` seals the open one as an incomplete record and starts a new one, and `record_answer` without an open record keeps a short error record. An interrupted record is resumed at the next engine start: the trace continues in the same file and the table is rebuilt from it. A record that was never sealed stays marked as incomplete in the panel.
+
+Sealing closes a record for good: its trace is finished and never recomputed. §7 covers what a record holds on disk.
 
 ## 5. Solver catalog
 
-All solvers speak the same value contract: quantity arguments are typed values (see §2); array coefficients of transfer functions are kind-`none` quantities in descending power order. The catalog mirrors the math kernels one-to-one.
+Every solver takes typed values and returns one typed value, as described in §2. Transfer-function coefficients are arrays of kind-`none` quantities in descending power order. The catalog mirrors the math kernels one-to-one, and `solver_info` gives the exact signature of any entry.
 
 ### Expression & algebra
 
@@ -104,7 +176,7 @@ All solvers speak the same value contract: quantity arguments are typed values (
 
 | solver | purpose |
 |---|---|
-| `series_sum` | Sum of a number sequence: arithmetic, geometric (finite or convergent infinite), or power sum |
+| `series_sum` | Sum of a number sequence: arithmetic, geometric or power |
 
 ### Transfer functions & frequency domain
 
@@ -123,7 +195,7 @@ All solvers speak the same value contract: quantity arguments are typed values (
 | solver | purpose |
 |---|---|
 | `discrete_fourier_transform` | DFT of a complex sample sequence (optionally windowed) |
-| `inverse_discrete_fourier_transform` | IDFT of a spectrum: recovers the time-domain sequence (round-trip of the DFT) |
+| `inverse_discrete_fourier_transform` | IDFT of a spectrum: recovers the time-domain sequence |
 | `fourier_series_coefficients` | Fourier series coefficients (a₀, aₙ, bₙ) of a standard odd-symmetric waveform |
 | `signal_analysis` | Signal statistics plus the windowed spectrum in one call (RMS, peak, peak-to-peak, DC) |
 
@@ -140,7 +212,7 @@ All solvers speak the same value contract: quantity arguments are typed values (
 | solver | purpose |
 |---|---|
 | `equivalent_impedance` | Total impedance of a set of impedances combined in series (Z = Σ Zi) or in parallel (1/Z = Σ 1/Zi) |
-| `circuit_impedance` | Total driving-point impedance of a (possibly nested) series/parallel network at a frequency; network is JSON text of a tree of element leaves (kind resistance\|inductance\|capacitance) and series/parallel groups |
+| `circuit_impedance` | Total driving-point impedance of a series/parallel network at a frequency; the network is JSON text, see the notes below |
 | `resonance` | Series/parallel LC resonance: resonantFrequency, qualityFactor and bandwidth |
 | `ac_power` | AC power from RMS values: apparent = V·I, real = apparent·cosφ, reactive = apparent·sinφ, powerFactor = cosφ |
 | `transient_response` | First- or second-order charge/discharge transient at a list of time points; returns one point per time with voltage and current |
@@ -150,7 +222,7 @@ All solvers speak the same value contract: quantity arguments are typed values (
 | solver | purpose |
 |---|---|
 | `opamp_configurations` | Ideal op-amp gain and output for a configuration: inverting, non-inverting, voltage-follower, difference, integrator, differentiator |
-| `time_constant` | Time constant and cutoff frequency: τ = RC (give capacitance) or τ = L/R (give inductance) |
+| `time_constant` | Time constant and cutoff frequency from R and C, or from L and R |
 | `voltage_divider` | Resistive divider, loaded or unloaded, plus the Thévenin output resistance |
 | `led_resistor` | LED series resistor: R = (Vs − Vf)/I and its dissipated power P = I²·R |
 
@@ -184,47 +256,91 @@ All solvers speak the same value contract: quantity arguments are typed values (
 
 | solver | purpose |
 |---|---|
-| `filter_design` | Butterworth low-pass ladder design: order, cutoff frequency and equal source/load resistance give the element list (series inductors, shunt capacitors), with attenuation at the cutoff and query frequencies |
+| `filter_design` | Butterworth low-pass ladder design: order, cutoff frequency and equal source/load resistance give the element list of series inductors and shunt capacitors, with attenuation at the cutoff and query frequencies |
 
-### Solver surface notes
+### Reading a signature
 
-The solver surface is exactly the migrated kernels under the engine's one-shape-per-solver returns discipline. The notable consequences:
+`solver_info` returns the parameters, their kinds and enums, the optional flags and the `returns` shape. A quantity leaf names the set of values the position accepts:
 
-- `reflection_to_vswr` / `return_loss`: the |Γ| = 1 / |Γ| = 0 extremes are unbounded — the value universe holds no infinity, so those calls throw.
-- `circuit_impedance.network` is a JSON-text string (a closed spec cannot express a recursive heterogeneous tree).
-- `resonance.resistance` is required and the result always carries qualityFactor and bandwidth.
-- `filter_design.queryFrequency` is required (pass the cutoff frequency when only the design is wanted); element magnitudes are kind-`none` values whose unit is carried by the element kind string.
-- `opamp_configurations` covers the six single-input configurations (a summing amplifier has no single gain).
-- `transient_response` returns one fixed point shape ({time, voltage, current}) across rc/rl/rlc; the rlc damping characterization is not returned.
-- `voltage_divider` returns a fixed four-field object; unloaded, `unloadedOutputVoltage` equals `outputVoltage` and `loadCurrent` is 0.
-- `series_sum` returns one fixed shape (kind/power/sum/lastTerm/converges) across all branches; a diverging infinite input errors.
-- Unit-carrying echo fields follow the legacy declarations and use kind `none` (kelvin temperatures, wavelengths, coaxial diameters, echo frequency lists) — typed values for those quantities are SI base numbers.
+| leaf | accepts |
+|---|---|
+| `complex(kind)` | a real or a complex of that kind |
+| `number(kind)` | a real only; a complex is refused at the argument |
 
-## 6. Storage
+Widening is implicit and narrowing never is: a real stays a real until a solver that needs a complex converts it. `returns: null` marks a void solver, which takes `target: null` — see §3.2.
 
-The plugin home is `~/.dsh-electro-lab` (override with the `DSH_ELECTRO_LAB_HOME` environment variable):
+### Solver notes
+
+| solver | note |
+|---|---|
+| `reflection_to_vswr`, `return_loss` | the unbounded extremes are errors: the value universe holds no infinity |
+| `circuit_impedance.network` | JSON text: a leaf is `{ "kind": "resistance" \| "inductance" \| "capacitance", "value": <number> }`, a group is `{ "topology": "series" \| "parallel", "elements": [ … ] }`, and groups nest |
+| `resonance` | `resistance` is required; the result always carries qualityFactor and bandwidth |
+| `filter_design` | `queryFrequency` is required — pass the cutoff frequency when only the design is wanted; element magnitudes are kind-`none` values whose unit is in the element kind |
+| `opamp_configurations` | covers the six single-input configurations, so a summing amplifier has no gain to return |
+| `transient_response` | returns one point shape across rc, rl and rlc; the rlc damping characterization is not part of it |
+| `voltage_divider` | returns a fixed four-field object; unloaded, `unloadedOutputVoltage` equals `outputVoltage` and `loadCurrent` is 0 |
+| `series_sum` | returns one shape across all branches; a diverging infinite input is an error |
+| `time_constant` | give `capacitance` for τ = RC or `inductance` for τ = L/R |
+| unit-carrying fields | kelvin temperatures, wavelengths, coaxial diameters and frequency lists are kind-`none` values holding SI base numbers |
+
+## 6. External solvers
+
+Beyond the catalog you can register solvers of your own, reached over http. A declaration lives in `~/.dsh-electro-lab/external-solvers.jsonl`, one JSON object per line, and at engine start every enabled declaration with a mappable `returns` is compiled into the same registry as the built-ins. From then on there is no difference: `solver_info` and `call` treat it like any other solver, its arguments are resolved the same way, and its result is validated against the declared `returns` before it enters the table.
+
+| field | meaning |
+|---|---|
+| `name` | the solver id: lowercase start, `a-z0-9_` |
+| `description` | what the solver computes; this is what `solver_info` reports |
+| `enabled` | whether it registers at start; a missing flag counts as enabled |
+| `parameters` | parameter specs in the same leaf vocabulary as §5 |
+| `returns` | the result shape, or `null` for a void solver |
+| `transport` | `http` |
+| `transportOptions` | `url`, and optional `headers` |
+| `timeoutMs` | the call timeout, 30 s by default |
+
+### Declaring a solver
+
+A declaration is written through the panel's **External solvers** tab, by the agent through `external_solver_add`, `external_solver_update` and `external_solver_delete`, or by editing the archive file. The solver exists only after a host restart, and the panel shows a pending-restart notice until then. A declaration without a mappable `returns` is archived but skipped at start, with a warning in the log.
+
+### The envelope
+
+One POST per call, one JSON body back:
+
+| direction | body |
+|---|---|
+| request | `{ "requestId": "…", "args": { "…": … } }` |
+| result | `{ "requestId": "…", "result": … }`, `null` for a void solver |
+| failure | `{ "requestId": "…", "error": "…" }` |
+
+Arguments and results are typed values, so no symbols, variant or prefix words cross the wire; what arrives is SI and rect. A response whose `requestId` does not match, or that carries neither field, is refused. The failure codes are those of §3.4, and a call that fails before an envelope exists — an endpoint that is down, a host that does not resolve — fails as `ENGINE_SOLVER_FAILED` with the reason attached, for example `fetch failed: connect ECONNREFUSED 127.0.0.1:8787`. A peer must listen on a port the runtime is willing to dial: a well-known port is refused outright and reads as `bad port`.
+
+[`external-solvers-example/`](../external-solvers-example/README.md) is a runnable peer and a field-by-field register guide.
+
+## 7. Storage
+
+The plugin home is `~/.dsh-electro-lab`, and `DSH_ELECTRO_LAB_HOME` moves it.
 
 ```
 ~/.dsh-electro-lab/
-  record-index.jsonl     ← index (outside records/)
-  records/
-    <id>.jsonl           ← the trace body (id is a UUID v4)
-  state.json             ← plugin state: generation settings + restart flag
-  logs/
-    <YYYY-MM-DD_HH-mm-ss.SSS>.log   ← one host run, plain event lines
+  record-index.jsonl      index rows, one per record
+  records/<id>.jsonl      trace bodies, one file per record
+  external-solvers.jsonl  declarations, one per line
+  state.json              plugin state
+  logs/                   one file per host run
 ```
 
-### record-index.jsonl (index only)
+| file | holds |
+|---|---|
+| `record-index.jsonl` | `{ id, openedAt, sealedAt, question }` per record; `sealedAt: null` marks the record that is still open |
+| `records/<id>.jsonl` | one trace line per engine operation |
+| `external-solvers.jsonl` | the declarations of §6 |
+| `state.json` | the generation settings and the pending-restart flag |
+| `logs/` | the run logs of §8 |
 
-```json
-{ "id": "…", "openedAt": 1730000000000, "sealedAt": null, "question": "given R = 100ohm…" }
-```
+### Trace body
 
-Fields: id, openedAt, sealedAt (null = not sealed), question (immutable title). No errors, no stats, no content; line order is append order. Truncation is the UI's job.
-
-### Trace body (per-step, full)
-
-One line per engine operation or marker; every line carries everything needed to restore that step — input and output both:
+Every line carries everything needed to restore that step, input and output both:
 
 ```json
 { "seq": 1, "tool": "marker", "kind": "question", "ok": true, "text": "…", "at": … }
@@ -237,31 +353,49 @@ One line per engine operation or marker; every line carries everything needed to
 { "seq": 6, "tool": "marker", "kind": "answer", "ok": true, "text": "…", "at": … }
 ```
 
-- `call` lines store the result: any call's output enters the line as fact — restoring state uses the stored result directly and **never recomputes**.
-- `resolved` is the argument set that actually entered the run: references expanded and all conversions done (SI, rect). `args` keeps the originals; the two line up per key.
-- No kernel-internal intermediate steps and no model reasoning text are recorded; the granularity is one engine operation. The reader of a trace is a human — every step shows original input, converted values and result in place, and can be re-verified independently.
+| field | meaning |
+|---|---|
+| `args` | the arguments as they were passed, references included |
+| `resolved` | the arguments the solver actually received: references expanded, conversions done |
+| `result` | the value the solver returned, stored as fact |
+| `code`, `error` | present on a failed line |
 
-### Restore = replay
+A trace holds engine operations only: no kernel internals and no model reasoning. Its reader is a human, and every step shows the original input, the converted values and the result in place.
 
-Rebuilding state replays the lines in order: `set` lines set the slot to the stored value, `call` lines set the target slot to the stored result (non-void), set-null lines delete, marker lines are skipped. Pure engine — no recompute, no network, no randomness.
+### Recovery
+
+A host that starts with a record still open rebuilds the table by replaying that record's lines in order: a `set` line writes its value, a `call` line writes the stored result into its target slot, a deleted slot is removed, and markers are skipped. The stored results are taken as facts, so nothing is recomputed, nothing is fetched and nothing is random. A sealed record is history rather than state, and every one of its lines stays readable on its own.
 
 ### Consistency
 
-- Orphan index rows (sealedAt null without a body file) are cleared at engine start — the index is a projection and can be safely rebuilt.
-- The open record is the index row with `sealedAt: null` whose body exists; a restart recovers it from that pair, not from a pointer file.
-- Old-format `records.jsonl` / `open-record.json` are not read; leftovers are ignored and safe to delete.
+| situation | behaviour |
+|---|---|
+| an index row whose body file is missing | cleared at engine start |
+| an open record | the index row with `sealedAt: null` whose body exists; a restart recovers it from that pair |
+| `state.json` | written by one owner as read-modify-write and replaced atomically, so a crash mid-write leaves the previous file; an unreadable file reads as `{}` |
+| a declaration change | written to the archive and marked in `state.json`, applied at the next start |
 
-### state.json (plugin state)
+## 8. Logs
 
-The plugin's own state: the generation dialog's settings (`generateDir`, `generateLanguage`, `generateFormat`, `generateCompile`) and the external-declaration restart flag (`restartRequired`, cleared once declarations are registered at start). Writes go through one owner module as read-modify-write, so a writer touches only its own keys, and the file is replaced atomically (temporary file + rename), so a crash mid-write leaves the previous file intact. An unreadable file reads as `{}`.
+One file per host run, `<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, created exclusively and held open. Every line is `<timestamp> <LEVEL> <message>[ k=v …]` and goes to the file and to stdout. A field value is a JSON scalar; a nested object or array is one token, and an Error becomes its message plus `  | ` continuation lines carrying the stack.
 
-### logs/ (one file per host run)
+| setting | values |
+|---|---|
+| `DSH_ELECTRO_LAB_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, `off`; default `info` |
+| retention | the newest 20 files, up to 50 MB |
 
-One file per plugin mount: `<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, created exclusively and held open. Lines are `<timestamp> <LEVEL> <message>[ k=v …]`, written to the file and to stdout. Field values are JSON types expanded one level — a nested object or array is one token — and an Error becomes its message plus `  | ` continuation lines with the stack. `DSH_ELECTRO_LAB_LOG_LEVEL` (`debug` | `info` | `warn` | `error` | `off`, default `info`) is the only setting; the newest 20 files up to 50 MB are kept.
+The file describes its own run: the name is the start, the last line is the end, and a log whose last line is not `plugin unmounted` belongs to a run that was killed. Transport facts such as endpoint, request id and elapsed time are logged, never written into a record.
 
-The file is the run's whole record: the name is the start, the last line is the end, and a log whose last line is not `plugin unmounted` is a run that was killed. Transport facts (endpoint, request id, elapsed time) are logged, never written to a record.
+## 9. Host endpoints
 
-## 7. Host endpoints
+| endpoint | purpose |
+|---|---|
+| `GET /api/dsh-electro-lab/records-index` | index rows for the panel list, polled every 5 s; never reads a trace body |
+| `GET /api/dsh-electro-lab/records/<id>` | one record's trace rows |
+| `/api/dsh-electro-lab/external-solvers` | the declaration archive: `GET` lists declarations and the restart flag, `PUT` adds or replaces one, `DELETE ?name=` removes one |
+| `GET /api/dsh-electro-lab/generate-capability` | the LaTeX toolchain check behind the generation dialog |
+| `/api/dsh-electro-lab/generate`, `-progress`, `-cancel` | the article-generation job: start, poll, cancel |
+| `/api/dsh-electro-lab/list-roots`, `list-dirs`, `generate-dir` | the directory browser of the generation dialog, and the remembered directory |
+| `/api/dsh-electro-lab/reveal` | opens a generated file or its folder in the host's file manager |
 
-- `GET /api/dsh-electro-lab/records-index` — the index rows for the Records panel list (`{ rows: [{ id, openedAt, sealedAt, question }] }`). The list polls every 5 s; it never reads trace bodies.
 
