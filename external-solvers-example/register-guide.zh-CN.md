@@ -1,39 +1,61 @@
-# 注册示例求解器
+# 注册回显求解器
 
-对端必须先行启动（`node src/echo.ts http --port 8787`）。在插件的记录面板中打开**「外部求解器」页**，点击**「添加外部求解器」**，然后按下表填写对话框。更改在宿主重启后生效。
+对端先以 `node src/echo.ts http --port 8787` 启动，然后按下表把每个字段填入面板的 **「外部求解器」表单**。面板在保存时会重新校验；文末同时给出 JSON 形式的同一声明，供智能体使用。
 
-另一种方式是：在会话中让智能体注册该求解器，并把该求解器的 `agentDeclaration` JSON 原文粘贴给它；智能体会调用 `external_solver_add`。
+[English](register-guide.md)
 
-## echo_http
+## 目录
 
-| 对话框字段 | 填写 | 说明 |
+- [注册回显求解器](#注册回显求解器)
+  - [目录](#目录)
+  - [基本信息](#基本信息)
+  - [参数](#参数)
+  - [返回值](#返回值)
+  - [传输](#传输)
+  - [声明 JSON](#声明-json)
+  - [线协议](#线协议)
+
+## 基本信息
+
+| 字段 | 填写 | 说明 |
 |---|---|---|
-| 名称 | `echo_http` | 智能体将调用的 solver 名称；小写字母开头，仅 `a-z0-9_` |
-| URL | `http://127.0.0.1:8787/` | 唯一的传输方式：宿主向该地址 POST 类型化信封；`--port` 可覆盖 8787 |
-| 超时（毫秒） | `10000` | 可选；留空保持默认 30000 |
-| 描述 | `Echo peer over http (ElectroLab external-solver manual test): returns every parameter it receives, verbatim` | 智能体据此判断何时调用该 solver |
-| 启用 | 开 | 停用的声明会被保留，但不会被注册 |
+| 名称 | `echo_http` | 智能体调用的求解器 id；小写字母开头，仅 `a-z0-9_` |
+| 描述 | `Echo peer over http (ElectroLab external-solver manual test): returns every parameter it receives, verbatim` | 智能体据此判断何时调用它 |
+| 启用 | 开 | 停用的声明仍留在归档中，但不注册 |
 
-参数——每一行先点击一次「添加参数」：
+## 参数
 
 | 名称 | 类型 | 必填 | 其他字段 |
 |---|---|---|---|
 | `message` | string | 是 | 说明：`a text echoed back verbatim` |
-| `values` | array | 否 | 数组元素：`complex` · 数量类别：`none` · 说明：`values echoed back verbatim` |
+| `values` | array | 否 | 数组元素：`complex`；数量类别：`none`；说明：`values echoed back verbatim` |
 | `flag` | boolean | 否 | 说明：`a boolean echoed back verbatim` |
 
-量类型只有 `complex` 与 `number` 两种：`complex` 同时接受实数（ℝ ⊂ ℂ），`number` 只收实数 ——
-遇到复数会明确拒绝，而不是悄悄丢掉虚部。
+量元素有两种写法：
 
-Returns——**Returns** 区域（必填；没有 Returns 的声明永远不会注册）：类型选 `object`，然后为每个返回键添加一个字段：
+| 元素 | 接受 |
+|---|---|
+| `complex` | 该 kind 的实数或复数 |
+| `number` | 仅实数；复数在参数处被拒绝 |
+
+## 返回值
+
+必填：没有 `returns` 的声明永远不会注册。类型选 `object`，然后为每个返回键添加一个字段：
 
 | 字段名 | 类型 | 其他字段 |
 |---|---|---|
 | `message` | string | |
-| `values` | array | 数组元素：`number` · 数量类别：`none` |
+| `values` | array | 数组元素：`complex`；数量类别：`none` |
 | `flag` | boolean | |
 
-`agentDeclaration`：
+## 传输
+
+| 字段 | 填写 | 说明 |
+|---|---|---|
+| URL | `http://127.0.0.1:8787/` | 宿主向该地址 POST 类型化信封；`--port` 可改对端端口 |
+| 超时（毫秒） | `10000` | 可选；留空保持默认 30000 |
+
+## 声明 JSON
 
 ```json
 {
@@ -49,7 +71,7 @@ Returns——**Returns** 区域（必填；没有 Returns 的声明永远不会�
     "type": "object",
     "fields": {
       "message": { "type": "string" },
-      "values": { "type": "array", "items": { "type": "number", "kind": "none" } },
+      "values": { "type": "array", "items": { "type": "complex", "kind": "none" } },
       "flag": { "type": "boolean" }
     }
   },
@@ -59,12 +81,14 @@ Returns——**Returns** 区域（必填；没有 Returns 的声明永远不会�
 }
 ```
 
-## 线协议速览
+把这段 JSON 粘给会话，智能体会以 `external_solver_add` 注册它。
 
-```
-request:  { "requestId": "…", "args": { "message": { "type": "string", "value": "hi" }, … } }
-response: { "requestId": "…", "result": { "type": "object", "value": { "message": { "type": "string", "value": "hi" }, … } } }
-failure:  { "requestId": "…", "error": "…" }
-```
+## 线协议
 
-对端把收到的每个参数都以类型化值形式回显在一个对象结果里；不是类型化值的值会被包成字符串。完整协议见插件引擎源码（`src/engine/external-solvers.ts` 与 `src/engine/external.ts`）。
+| 方向 | 内容 |
+|---|---|
+| 请求 | `{ "requestId": "…", "args": { "message": { "type": "string", "value": "hi" }, … } }` |
+| 结果 | `{ "requestId": "…", "result": { "type": "object", "value": { … } } }` |
+| 失败 | `{ "requestId": "…", "error": "…" }` |
+
+对端把每个参数原样放进对象结果中回显；不是类型化值的参数会被包成字符串。实现见 [`src/echo.ts`](src/echo.ts)，完整声明语法见[引擎手册](../docs/engine.zh-CN.md#6-外部求解器)。

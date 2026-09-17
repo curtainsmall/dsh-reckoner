@@ -1,84 +1,64 @@
 # ElectroLab Echo Peer
 
-Manual test/demo counterpart for the DeepSeek Harness ElectroLab external-solver
-feature. The peer speaks the engine's typed envelope protocol on one
-transport — the request is `{requestId, args}` where every argument is a
-typed value, the response is `{requestId, result}` with a typed value (or
-`result: null` for void), and it echoes every argument back as typed values,
-so a full register → restart → model-call round trip can be verified by eye.
+A runnable counterpart for the ElectroLab external-solver feature: an http peer that speaks the typed envelope protocol and echoes every argument back, so a register → restart → call round trip can be verified by eye.
 
-## Independent project
+[简体中文](README.zh-CN.md)
 
-This directory is its **own npm project** (`package.json`, `tsconfig.json`),
-not part of the plugin's build: nothing in the plugin's `src/` references it,
-the plugin's typecheck/tests/package do not cover it, and the npm artifact
-never ships it. It only lives inside the repository for convenience.
+## Contents
 
-- **Zero runtime dependencies.** The peer runs on the Node.js standard
-  library only, via Node's built-in TypeScript type stripping — no build
-  step. Node ≥ 22.18 or ≥ 23.6 runs `.ts` files natively.
-- **Own quality gate.** `pnpm typecheck` (after `pnpm install` in this
-  directory) checks `src/` under strict settings with `erasableSyntaxOnly`
-  — the syntax Node can strip at runtime.
+- [Project](#project)
+- [1. Run the peer](#1-run-the-peer)
+- [2. Register the declaration](#2-register-the-declaration)
+- [3. Restart the host](#3-restart-the-host)
+- [4. Call it](#4-call-it)
+- [5. Check the peer without the plugin](#5-check-the-peer-without-the-plugin)
+- [Protocol reference](#protocol-reference)
 
-## 1. Run a peer
+## Project
 
-From this directory (`external-solvers-example/`):
+| item | value |
+|---|---|
+| layout | its own npm project, with `package.json` and `tsconfig.json` |
+| dependencies | none at runtime; the peer runs on the standard library |
+| TypeScript | erased at run time by Node ≥ 22.18 or ≥ 23.6, so there is no build step |
+| quality gate | `pnpm typecheck` in this directory, with `erasableSyntaxOnly` |
+| relationship to the plugin | nothing in the plugin's `src/` references it, the plugin's build and tests do not cover it, and the npm artifact never ships it |
+
+## 1. Run the peer
 
 ```bash
 node src/echo.ts http --port 8787
 # [http] echo peer listening on http://127.0.0.1:8787/
 ```
 
-Or install the dev tooling once and use the npm script:
-
-```bash
-pnpm install
-pnpm echo:http
-```
+Or install the dev tooling once and use the script: `pnpm install` and `pnpm echo:http`.
 
 ## 2. Register the declaration
 
-[`register-guide.md`](register-guide.md) lists the solver with the
-exact value for every dialog field, including the **returns** editor (a
-declaration without an explicit returns is archived but never registers). In
-the Records panel open the **External solvers** tab → **Add external solver** and
-fill the form accordingly, or ask the agent in a session to register the
-solver, pasting the solver's `agentDeclaration` JSON from the guide; the
-agent calls `external_solver_add`. Changes apply at the next host restart.
+[`register-guide.md`](register-guide.md) gives the solver with the value for every field, including the `returns` editor. Add it from the panel's **External solvers** tab, or paste its `agentDeclaration` JSON into a session and let the agent call `external_solver_add`.
 
 ## 3. Restart the host
 
-Declarations register at engine start: restart the DSH host process, then
-reload the page. `echo_http` now appears among the solvers the agent can `call`.
+Declarations are compiled at engine start, so the solver exists after a host restart. Reload the page, and `echo_http` is among the solvers the agent can call.
 
 ## 4. Call it
 
-Ask the agent to call `echo_http` with a `message`, optional `values` (an
-array of numbers — quantities accept bare numbers, `{re, im}` or `{mag, ang}`)
-and an optional `flag`. The engine stores the result in the named target
-slot; `get` returns exactly what the peer echoed back, as typed values:
+Ask the agent to call `echo_http` with a `message`, an optional `values` array of numbers and an optional `flag`. The engine stores the result in the named target slot, and `get` returns exactly what the peer echoed:
 
 ```json
 {
   "message": { "type": "string", "value": "round trip ok" },
-  "values": {
-    "type": "array",
-    "value": [
-      { "type": "number", "value": 1, "kind": "none" },
-      { "type": "number", "value": 2.5, "kind": "none" }
-    ]
-  },
+  "values": { "type": "array", "value": [
+    { "type": "number", "value": 1, "kind": "none" },
+    { "type": "number", "value": 2.5, "kind": "none" }
+  ] },
   "flag": { "type": "boolean", "value": true }
 }
 ```
 
-The Records panel shows the call arguments and the echoed result side by
-side in the trace, which is the point of the demo.
+The Records panel shows the call arguments and the echoed result side by side in the trace.
 
-## 5. Self-check without the plugin
-
-HTTP:
+## 5. Check the peer without the plugin
 
 ```bash
 curl -s -X POST http://127.0.0.1:8787/ \
@@ -90,23 +70,13 @@ curl -s -X POST http://127.0.0.1:8787/ \
 { "requestId": "manual-1", "result": { "type": "object", "value": { "message": { "type": "string", "value": "hi" }, "flag": { "type": "boolean", "value": true } } } }
 ```
 
-A response whose requestId does not match is rejected by the host; a
-non-JSON request body gets an `{error: "…"}` response. An endpoint signals a
-failed computation by returning `{ "requestId": "…", "error": "…" }` — the
-host raises it as the solver error (code `EXTERNAL_ERROR`), the same structured
-error any thrown failure produces. The host only ever sends **POST**; the
-typed args travel as the JSON body.
-
-A peer that is not running reads as `fetch failed: connect ECONNREFUSED
-127.0.0.1:8787` in the receipt and the log, so a dead peer is told apart from a
-wrong endpoint or a broken envelope; a port the runtime refuses to dial at all
-reads as `bad port`, which is why 8787 is used here rather than a well-known
-one.
-
 ## Protocol reference
 
-The full declaration grammar (name/description/enabled/parameters/returns/
-transport/transportOptions), the typed-value payload shapes and the wire
-protocol are implemented in the plugin's engine sources — see
-`src/engine/external-solvers.ts` (declaration compilation) and
-`src/engine/external.ts` (typed envelope transport) in the plugin repository.
+| situation | what happens |
+|---|---|
+| the peer is not running | the receipt reads `fetch failed: connect ECONNREFUSED 127.0.0.1:8787`, which tells a dead peer apart from a wrong endpoint or a broken envelope |
+| the response carries a different `requestId` | the host refuses it |
+| the request body is not JSON | the peer answers `{ "error": "…" }` |
+| the computation fails | the peer answers `{ "requestId": "…", "error": "…" }`, which the host raises as `EXTERNAL_ERROR` |
+
+The declaration grammar, the typed-value shapes and the envelope are defined in the [engine manual](../docs/engine.md#6-external-solvers) and implemented in `src/engine/external-solvers.ts` and `src/engine/external.ts`.

@@ -2,61 +2,68 @@
 
 Thanks for your interest in contributing to **DeepSeek Harness ElectroLab**.
 
-[English](CONTRIBUTING.md) | [简体中文](../docs/CONTRIBUTING.zh-CN.md)
+[简体中文](../docs/CONTRIBUTING.zh-CN.md)
 
-## Development process
+## Branches
 
-```
-develop   ← all development happens here
-main      ← release only (PR merge, tagged, GitHub Actions)
-```
-
-- **`develop`** — default branch. All work-in-progress commits, experiments, and merged feature branches land here.
-- **`feature/*`** — optional short-lived branches for contributors; merged back into `develop` via PR.
-- **`main`** — release only. No direct commits or pushes, ever.
+| branch | role |
+|---|---|
+| `develop` | the default branch; all development lands here |
+| `feature/*` | optional short-lived branches, merged back by pull request |
+| `main` | releases only; never committed to or pushed directly |
 
 ## Pull requests
 
-- All PRs target **`develop`** (or `feature/*` when the contributor prefers); **never `main`**.
-- Merging `develop` into `main`, tagging releases, and publishing versions are **reserved to the repo owner only**.
-- The remote enforces this: `main` requires a pull request (direct pushes are rejected), and only the owner can bypass `develop`/tag rules.
+| rule | detail |
+|---|---|
+| target | `develop`, or a `feature/*` branch; never `main` |
+| reserved to the owner | merging into `main`, tagging releases and publishing versions |
+| enforcement | `main` requires a pull request, so a direct push is rejected |
 
 ## Commit messages
 
-- Use **Conventional Commits**: `type(scope): subject` — e.g. `feat(expression): ...`, `fix(preset): ...`, `ci(release): ...`.
-- Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`, `revert`.
-- Write the subject in English, imperative mood, lowercase.
+Conventional Commits: `type(scope): subject`, for example `feat(expression): …`.
+
+| part | rule |
+|---|---|
+| type | `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`, `revert` |
+| subject | English, imperative mood, lowercase |
+
+A body is welcome whenever a change needs its reason stated, and it reads as prose rather than as a list of touched files.
 
 ## Development setup
 
-- Toolchain: **pnpm 11**, **Node ≥ 20** (CI runs Node 24), TypeScript + tsdown + vitest.
-- Setup and verify:
+| item | value |
+|---|---|
+| toolchain | pnpm 11 and Node ≥ 20; CI runs Node 24 |
+| build | TypeScript, tsdown, vitest |
 
-  ```sh
-  pnpm install
-  pnpm typecheck
-  pnpm test
-  pnpm build
-  ```
+```sh
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm build
+```
 
-- Tests live in `tests/` (sibling of `src/`, layout mirrored: `tests/math/`, `tests/engine/`, `tests/tool-declarations/`); each unit ships a `*.test.ts` next to its group.
-- The host plugin registers the engine tools (`set` / `get` / `call` + the record markers), skills, and the packaged `electro-lab` preset; `pnpm build` regenerates `lib/` (gitignored, built fresh on publish).
+Tests live in `tests/`, mirroring the `src/` layout with one `*.test.ts` per unit. `pnpm build` regenerates `lib/`, which is gitignored and built fresh on publish.
 
 ## Release
 
-Reserved to the owner. One release = one tag:
+Reserved to the owner. One release is one tag:
 
-1. Bump `package.json`, `dsh.plugin.json`, and add the matching `CHANGELOG.md` entry (latest entry must equal the new version).
-2. Push `develop`, open a PR to `main`, merge once CI (`build`) passes.
-3. Tag `vX.Y.Z` on `main` and push it — the release workflow guards tag-on-`main` and version consistency, then publishes to npm (OIDC trusted publishing with `NPM_TOKEN` fallback) and creates a GitHub Release.
-4. Prerelease versions (`x.y.z-*`) publish under the `beta` dist-tag and are marked prerelease on GitHub.
+1. Bump `package.json` and `dsh.plugin.json`, and add the matching `CHANGELOG.md` entry. The newest versioned entry must equal the new version.
+2. Push `develop` and open a pull request to `main`; merge it once the `build` workflow passes.
+3. Tag `vX.Y.Z` on `main` and push the tag. The release workflow checks the tag against the branch and both version files, then publishes to npm and creates a GitHub Release.
+4. A prerelease version `x.y.z-*` publishes under the `beta` dist-tag and is marked prerelease on GitHub.
 
 ## Documentation
 
-- README documents **implemented** features only — keep it simple and current.
-- Docs are **dual-language**: en-US version in the canonical location, the Simplified Chinese version next to it under `docs/` with matching name (`xxx.zh-CN.md`). The changelog is English-only.
-- In Simplified Chinese docs, write **分贝** for the decibel term; unit symbols (`dBm`, `dBu`, `dBµV`, `dBW`) stay unchanged.
-- Plan/roadmap items are not committed to the repo until they become real work; track them elsewhere.
+| rule | detail |
+|---|---|
+| scope | the README documents implemented features only |
+| languages | every document exists in en-US at its canonical path and in Simplified Chinese beside it as `xxx.zh-CN.md`; the changelog is English-only |
+| terms | write 分贝 for the decibel in Simplified Chinese; unit symbols such as `dBm`, `dBu`, `dBµV` and `dBW` stay unchanged |
+| roadmap | plan items stay out of the repository until they become real work |
 
 ## License
 
