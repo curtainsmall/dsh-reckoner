@@ -18,7 +18,7 @@ Every value to type into the panel's **External solvers** form, field by field, 
 | field | value | note |
 |---|---|---|
 | Name | `echo_http` | the solver id the agent calls; lowercase start, `a-z0-9_` only |
-| Description | `Echo peer over http (ElectroLab external-solver manual test): returns every parameter it receives, verbatim` | what the agent reads when deciding to call it |
+| Description | `Echo peer over http (Reckoner external-solver manual test): returns every parameter it receives, verbatim` | what the agent reads when deciding to call it |
 | Enabled | on | a disabled declaration stays in the archive but does not register |
 
 ## Parameters
@@ -58,7 +58,7 @@ Required: a declaration without `returns` never registers. Choose type `object` 
 ```json
 {
   "name": "echo_http",
-  "description": "Echo peer over http (ElectroLab external-solver manual test): returns every parameter it receives, verbatim",
+  "description": "Echo peer over http (Reckoner external-solver manual test): returns every parameter it receives, verbatim",
   "enabled": true,
   "parameters": {
     "message": { "type": "string", "description": "a text echoed back verbatim", "required": true },

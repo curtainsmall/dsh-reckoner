@@ -1,7 +1,7 @@
 /**
- * ElectroLab External solvers tab: one page with every external solver
+ * Reckoner External solvers tab: one page with every external solver
  * declaration (external-solvers.jsonl), read through the
- * `/api/dsh-electro-lab/external-solvers` endpoint and polled while the tab
+ * `/api/dsh-reckoner/external-solvers` endpoint and polled while the tab
  * is open. Declarations are edited through a guided form (add/edit dialog)
  * or through the LLM manager tools (external_solver_add/update/delete); both
  * paths only register the tools at the next host restart, so the dirty bit
@@ -38,7 +38,7 @@ interface ExternalSolversResponse {
   restartRequired: boolean
 }
 
-const EXTERNAL_ENDPOINT = '/api/dsh-electro-lab/external-solvers'
+const EXTERNAL_ENDPOINT = '/api/dsh-reckoner/external-solvers'
 const POLL_MS = 5000
 
 /** The transport target line: "http · <url>". */

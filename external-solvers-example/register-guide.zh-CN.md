@@ -20,7 +20,7 @@
 | 字段 | 填写 | 说明 |
 |---|---|---|
 | 名称 | `echo_http` | 智能体调用的求解器 id；小写字母开头，仅 `a-z0-9_` |
-| 描述 | `Echo peer over http (ElectroLab external-solver manual test): returns every parameter it receives, verbatim` | 智能体据此判断何时调用它 |
+| 描述 | `Echo peer over http (Reckoner external-solver manual test): returns every parameter it receives, verbatim` | 智能体据此判断何时调用它 |
 | 启用 | 开 | 停用的声明仍留在归档中，但不注册 |
 
 ## 参数
@@ -60,7 +60,7 @@
 ```json
 {
   "name": "echo_http",
-  "description": "Echo peer over http (ElectroLab external-solver manual test): returns every parameter it receives, verbatim",
+  "description": "Echo peer over http (Reckoner external-solver manual test): returns every parameter it receives, verbatim",
   "enabled": true,
   "parameters": {
     "message": { "type": "string", "description": "a text echoed back verbatim", "required": true },

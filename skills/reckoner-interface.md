@@ -1,10 +1,10 @@
 ---
-name: electro-lab-interface
-description: "ElectroLab engine manual: typed values, the set/get/call primitives, receipts and errors, the solver catalog — independent of any answer protocol"
-whenToUse: "Any session that operates the ElectroLab engine (set/get/call, record markers)"
+name: reckoner-interface
+description: "Reckoner engine manual: typed values, the set/get/call primitives, receipts and errors, the solver catalog — independent of any answer protocol"
+whenToUse: "Any session that operates the Reckoner engine (set/get/call, record markers)"
 ---
 
-# DeepSeek Harness ElectroLab — Engine Manual
+# DeepSeek Harness Reckoner — Engine Manual
 
 All calculation happens inside one deterministic engine. You operate it with three primitives and the record markers; the engine keeps a variable table, converts values at calculation boundaries and records every step. You never parse text into numbers and never convert units yourself — you pass typed values and the engine resolves everything against the solver signatures.
 
@@ -29,7 +29,7 @@ variant words: degC/degF (temperature), deg (angle), bar/psi/atm (pressure), cal
 - `get { name }` — read one slot; you receive the value exactly as written.
 - `call { solver, args, target }` — call one registered solver. Every argument is a typed value or a slot reference — `{ "type": "slot", "value": "name" }` with the full slot path (`"name"` or `"name.field"`); references may also sit inside array items and object fields, resolving to the stored value before validation. A value solver requires a named `target` (overwriting bumps the slot revision); a void solver takes `target: null`.
 - `solver_info { solver }` — inspect one registered solver before its first use: the parameter signature (names, quantity kinds, allowed enums, optional flags, nested items) and `returns` (a spec, or null for void), straight from the registry. A quantity leaf reads `complex(kind)` (a real is a legal complex) or `number(kind)` (reals only — a complex is refused, never narrowed).
-- External solvers are registry entries like any other: a declaration in `~/.dsh-electro-lab/external-solvers.jsonl` (managed with `external_solver_add` / `external_solver_update` / `external_solver_delete`) is compiled in at host start, so `solver_info` and `call` treat it unchanged, and its failures carry the `EXTERNAL_*` codes. A declaration change needs a host restart.
+- External solvers are registry entries like any other: a declaration in `~/.dsh-reckoner/external-solvers.jsonl` (managed with `external_solver_add` / `external_solver_update` / `external_solver_delete`) is compiled in at host start, so `solver_info` and `call` treat it unchanged, and its failures carry the `EXTERNAL_*` codes. A declaration change needs a host restart.
 
 Every call returns a receipt: `{ ok: true, … }` or `{ ok: false, code, error }`. Failed calls have no side effects; read values only through `get`. Read `solver_info` before the first call of a solver you have not used — guessing parameters from the one-line catalog is how retries happen.
 

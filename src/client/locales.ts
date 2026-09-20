@@ -1,5 +1,5 @@
 /**
- * ElectroLab UI dictionaries: zh/en copies for every user-facing string in
+ * Reckoner UI dictionaries: zh/en copies for every user-facing string in
  * the panel and the records page, registered into the DSH locale service
  * (dsh-client-locale) so the active language is the one the user chose.
  * Components subscribe through useAppLocale (LocaleFace) and translate with
@@ -7,7 +7,7 @@
  */
 import { useSyncExternalStore } from 'react'
 
-export const LOCALE_NS = 'dsh-electro-lab'
+export const LOCALE_NS = 'dsh-reckoner'
 
 const zh = {
   backToSession: '返回会话',
@@ -56,7 +56,7 @@ const zh = {
   duplicateParamName: '参数名重复：“{name}”。',
   urlRequired: '请输入 http(s) URL。',
   positiveNumberRequired: '“{label}”须为正数。',
-  emptyHint: '暂无 ElectroLab 记录——让智能体做一次计算。',
+  emptyHint: '暂无 Reckoner 记录——让智能体做一次计算。',
   unreachable: '暂未检测到记录——记录端点未响应,面板会自动重试;若刚更新插件,宿主可能需要重启。',
   confirm: '确定',
   irreversible: '此操作不可恢复。',
@@ -171,7 +171,7 @@ const en: Record<keyof typeof zh, string> = {
   duplicateParamName: 'Duplicate parameter name: “{name}”.',
   urlRequired: 'Enter an http(s) URL.',
   positiveNumberRequired: '“{label}” must be a positive number.',
-  emptyHint: 'No ElectroLab records yet — ask the agent for a calculation.',
+  emptyHint: 'No Reckoner records yet — ask the agent for a calculation.',
   unreachable: 'No records detected yet — the records endpoint is not responding; the panel keeps retrying automatically. If you just updated the plugin, the host process may need a restart.',
   confirm: 'OK',
   irreversible: 'This cannot be undone.',

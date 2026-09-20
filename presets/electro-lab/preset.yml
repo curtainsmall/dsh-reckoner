@@ -1,2 +1,0 @@
-name: ElectroLab
-description: 电气/电子计算沙箱——只提供 ElectroLab 插件工具，无 Shell、无文件系统、无网络；所有数值必须来自工具调用，条件不足即停止。

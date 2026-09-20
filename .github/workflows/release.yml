@@ -1,4 +1,4 @@
-name: Release
+ame: Release
 on:
   push:
     tags: ['v*']
@@ -111,23 +111,23 @@ jobs:
           VER="${{ needs.guard.outputs.version }}"
           TAG=latest
           [[ "$VER" == *-* ]] && TAG=beta
-          if npm view "dsh-electro-lab@$VER" version >/dev/null 2>&1; then
+          if npm view "dsh-reckoner@$VER" version >/dev/null 2>&1; then
             echo "published=false" >> "$GITHUB_OUTPUT"
-            echo "dsh-electro-lab@$VER already published — skipping (tag replay)"
+            echo "dsh-reckoner@$VER already published — skipping (tag replay)"
           elif OUT="$(pnpm publish --no-git-checks --access public --provenance --tag "$TAG" 2>&1)"; then
             echo "$OUT"
             echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "published dsh-electro-lab@$VER via OIDC trusted publishing"
+            echo "published dsh-reckoner@$VER via OIDC trusted publishing"
           elif echo "$OUT" | grep -q "previously staged"; then
             # npmjs keeps a version staged when an earlier publish run was
             # interrupted after the manifest write but before finalize: it is
             # invisible to npm view yet blocks republishing with a 409. Clear
             # the staged version and try once more.
             echo "unstaging $VER from an interrupted publish"
-            npm unpublish "dsh-electro-lab@$VER" --force
+            npm unpublish "dsh-reckoner@$VER" --force
             pnpm publish --no-git-checks --access public --provenance --tag "$TAG"
             echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "published dsh-electro-lab@$VER via OIDC trusted publishing (after unstage)"
+            echo "published dsh-reckoner@$VER via OIDC trusted publishing (after unstage)"
           else
             echo "$OUT" >&2
             exit 1

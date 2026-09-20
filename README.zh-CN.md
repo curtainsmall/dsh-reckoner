@@ -1,4 +1,4 @@
-# DeepSeek Harness ElectroLab
+# DeepSeek Harness Reckoner
 
 面向 DeepSeek Harness 的电气与电子计算插件。
 
@@ -6,10 +6,10 @@
 
 ## 目录
 
-- [DeepSeek Harness ElectroLab](#deepseek-harness-electrolab)
+- [DeepSeek Harness Reckoner](#deepseek-harness-reckoner)
   - [目录](#目录)
   - [安装](#安装)
-  - [ElectroLab 模式](#electrolab-模式)
+  - [Reckoner 模式](#reckoner-模式)
   - [记录](#记录)
   - [文章生成](#文章生成)
   - [外部求解器](#外部求解器)
@@ -20,12 +20,12 @@
 ## 安装
 
 ```sh
-dsh plugin --profile web add dsh-electro-lab
+dsh plugin --profile web add dsh-reckoner
 ```
 
-## ElectroLab 模式
+## Reckoner 模式
 
-插件以智能体预设的形式工作：启动会话时选择 **ElectroLab 模式**，用自然语言提出任何电气或电子问题即可。该会话被隔离在插件工具内，没有 shell、文件系统与网络，因此答案中的每个数字都来自引擎；条件不足时，智能体会停下来询问。
+插件以智能体预设的形式工作：启动会话时选择 **Reckoner 模式**，用自然语言提出任何电气或电子问题即可。该会话被隔离在插件工具内，没有 shell、文件系统与网络，因此答案中的每个数字都来自引擎；条件不足时，智能体会停下来询问。
 
 全部计算都在一台确定性的**引擎**内完成。智能体把类型化值写入槽、调用 38 个内置求解器之一，再把结果读回；引擎在计算边界换算单位，并把每一步记录成一条可回读的记录。
 
@@ -58,7 +58,7 @@ dsh plugin --profile web add dsh-electro-lab
 
 ## 外部求解器
 
-除内置目录外，你还可以注册自己的求解器，经 http 访问。声明存放在 `~/.dsh-electro-lab/external-solvers.jsonl`，在引擎启动时编译进 solver 注册表，因此 `solver_info` 与 `call` 对它与内置求解器一视同仁。
+除内置目录外，你还可以注册自己的求解器，经 http 访问。声明存放在 `~/.dsh-reckoner/external-solvers.jsonl`，在引擎启动时编译进 solver 注册表，因此 `solver_info` 与 `call` 对它与内置求解器一视同仁。
 
 | 声明途径 | 方式 |
 |---|---|
@@ -76,8 +76,8 @@ dsh plugin --profile web add dsh-electro-lab
 
 | 设置 | 含义 |
 |---|---|
-| `DSH_ELECTRO_LAB_HOME` | 插件主目录，默认 `~/.dsh-electro-lab` |
-| `DSH_ELECTRO_LAB_LOG_LEVEL` | `debug`、`info`、`warn`、`error` 或 `off`；默认 `info` |
+| `DSH_RECKONER_HOME` | 插件主目录，默认 `~/.dsh-reckoner` |
+| `DSH_RECKONER_LOG_LEVEL` | `debug`、`info`、`warn`、`error` 或 `off`；默认 `info` |
 
 主目录存放记录、声明归档、插件状态，以及每次宿主运行一个日志文件。两者都在引擎手册中说明：[存储](docs/engine.zh-CN.md#7-存储)与[日志](docs/engine.zh-CN.md#8-日志)。
 

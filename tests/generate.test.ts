@@ -41,8 +41,8 @@ describe('buildArticlePrompt', () => {
 
   it('requires the fixed title and author, and forbids ids and timestamps', () => {
     const { system } = buildArticlePrompt(sample)
-    expect(system).toContain('DeepSeek Harness ElectroLab Solution')
-    expect(system).toContain('DeepSeek Harness ElectroLab')
+    expect(system).toContain('DeepSeek Harness Reckoner Solution')
+    expect(system).toContain('DeepSeek Harness Reckoner')
     expect(system).toMatch(/Never include record ids or timestamps/)
     expect(system).toMatch(/language of the question/)
   })
@@ -126,8 +126,8 @@ describe('normalizeFileName', () => {
   })
 
   it('keeps the default base name when empty', () => {
-    expect(normalizeFileName('', ArticleFormat.Latex)).toBe('electro-lab-article.tex')
-    expect(normalizeFileName('  ', ArticleFormat.Markdown)).toBe('electro-lab-article.md')
+    expect(normalizeFileName('', ArticleFormat.Latex)).toBe('reckoner-article.tex')
+    expect(normalizeFileName('  ', ArticleFormat.Markdown)).toBe('reckoner-article.md')
   })
 })
 
@@ -169,8 +169,8 @@ describe('latex document shell', () => {
     if (document.ok) {
       expect(document.text).toContain('% !TeX program = xelatex')
       expect(document.text).toContain('\\documentclass{article}')
-      expect(document.text).toContain('\\title{DeepSeek Harness ElectroLab Solution}')
-      expect(document.text).toContain('\\author{DeepSeek Harness ElectroLab}')
+      expect(document.text).toContain('\\title{DeepSeek Harness Reckoner Solution}')
+      expect(document.text).toContain('\\author{DeepSeek Harness Reckoner}')
       expect(document.text).toContain('\\section{Question}')
       expect(document.text).toContain('\\end{document}')
     }

@@ -1,4 +1,4 @@
-# DeepSeek Harness ElectroLab
+# DeepSeek Harness Reckoner
 
 An electrical & electronics calculation plugin for the DeepSeek Harness.
 
@@ -7,7 +7,7 @@ An electrical & electronics calculation plugin for the DeepSeek Harness.
 ## Contents
 
 - [Install](#install)
-- [ElectroLab Mode](#electrolab-mode)
+- [Reckoner Mode](#reckoner-mode)
 - [Records](#records)
 - [Article generation](#article-generation)
 - [External solvers](#external-solvers)
@@ -18,12 +18,12 @@ An electrical & electronics calculation plugin for the DeepSeek Harness.
 ## Install
 
 ```sh
-dsh plugin --profile web add dsh-electro-lab
+dsh plugin --profile web add dsh-reckoner
 ```
 
-## ElectroLab Mode
+## Reckoner Mode
 
-The plugin works as an agent preset: pick **ElectroLab Mode** when starting a session and ask any electrical or electronics question in plain language. The session is isolated to the plugin's tools, with no shell, file system or network, so every number in the answer comes from the engine, and the agent stops and asks when the conditions are insufficient.
+The plugin works as an agent preset: pick **Reckoner Mode** when starting a session and ask any electrical or electronics question in plain language. The session is isolated to the plugin's tools, with no shell, file system or network, so every number in the answer comes from the engine, and the agent stops and asks when the conditions are insufficient.
 
 All calculation happens inside a deterministic **engine**. The agent writes typed values into slots, calls one of 38 built-in solvers, and reads the result back; the engine converts units at the calculation boundary and records every step into a readable record.
 
@@ -56,7 +56,7 @@ The setup dialog remembers the article language, the output directory and the fi
 
 ## External solvers
 
-Beyond the built-in catalog you can register solvers of your own, reached over http. A declaration lives in `~/.dsh-electro-lab/external-solvers.jsonl` and is compiled into the solver registry at engine start, so `solver_info` and `call` treat it like a built-in.
+Beyond the built-in catalog you can register solvers of your own, reached over http. A declaration lives in `~/.dsh-reckoner/external-solvers.jsonl` and is compiled into the solver registry at engine start, so `solver_info` and `call` treat it like a built-in.
 
 | way to declare | how |
 |---|---|
@@ -74,8 +74,8 @@ The peer answers a POST of `{ "requestId": …, "args": … }` with `{ "requestI
 
 | setting | meaning |
 |---|---|
-| `DSH_ELECTRO_LAB_HOME` | the plugin home, `~/.dsh-electro-lab` by default |
-| `DSH_ELECTRO_LAB_LOG_LEVEL` | `debug`, `info`, `warn`, `error` or `off`; default `info` |
+| `DSH_RECKONER_HOME` | the plugin home, `~/.dsh-reckoner` by default |
+| `DSH_RECKONER_LOG_LEVEL` | `debug`, `info`, `warn`, `error` or `off`; default `info` |
 
 The home holds the records, the declaration archive, the plugin state and one log file per host run. Both are described in the engine manual: [storage](docs/engine.md#7-storage) and [logs](docs/engine.md#8-logs).
 

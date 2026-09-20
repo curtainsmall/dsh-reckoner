@@ -1,5 +1,5 @@
 /**
- * Host half of dsh-electro-lab (engine era).
+ * Host half of dsh-reckoner (engine era).
  *
  * One process-wide global engine (Engine): variable table + solver registry + record storage.
  * apply assembly: registers the kernel and external solvers, registers the LLM tool surface (set/get/call +
@@ -29,7 +29,7 @@ import { installPresets } from './preset.ts'
 import { attachConsoleSink, attachFileSink, log, resolveLevel, setLevel } from './log.ts'
 
 /** Plugin identity for cordis.yml rows. */
-export const name = 'dsh-electro-lab'
+export const name = 'dsh-reckoner'
 
 /** Services required before mounting: the tool registry and the web server (endpoint host). */
 export const inject = ['tools', 'webServer']
@@ -83,15 +83,15 @@ interface RequestLike {
 }
 
 /** The records home: records/ + record-index.jsonl live here. */
-const recordsHome = process.env.DSH_ELECTRO_LAB_HOME ?? join(homedir(), '.dsh-electro-lab')
+const recordsHome = process.env.DSH_RECKONER_HOME ?? join(homedir(), '.dsh-reckoner')
 
 /** Global single engine: one engine per process; any session's markers act on it. */
 export const engine = new Engine(recordsHome)
 
-const RECORDS_INDEX_PATH = '/api/dsh-electro-lab/records-index'
+const RECORDS_INDEX_PATH = '/api/dsh-reckoner/records-index'
 // WebRoute paths carry no trailing slash; requests are /records/<id>.
-const RECORDS_BODY_PREFIX = '/api/dsh-electro-lab/records'
-const EXTERNAL_PATH = '/api/dsh-electro-lab/external-solvers'
+const RECORDS_BODY_PREFIX = '/api/dsh-reckoner/records'
+const EXTERNAL_PATH = '/api/dsh-reckoner/external-solvers'
 
 /**
  * Flatten one stored engine record into the article-generation facts: the
@@ -143,9 +143,9 @@ function loadGenerationRecord(id: string): Record | undefined {
 
 export function apply(ctx: Context): void {
   // Logging: one line per event on stdout, plus one file per host run. The level is the single
-  // knob (DSH_ELECTRO_LAB_LOG_LEVEL); a log file that cannot be created is reported and
+  // knob (DSH_RECKONER_LOG_LEVEL); a log file that cannot be created is reported and
   // skipped — logging must never keep the plugin from mounting.
-  const level = resolveLevel(process.env.DSH_ELECTRO_LAB_LOG_LEVEL)
+  const level = resolveLevel(process.env.DSH_RECKONER_LOG_LEVEL)
   setLevel(level)
   ctx.effect(() => {
     const startedAt = Date.now()
@@ -165,7 +165,7 @@ export function apply(ctx: Context): void {
       if (run !== undefined) run.close()
       detachConsole()
     }
-  }, 'dsh-electro-lab: logger')
+  }, 'dsh-reckoner: logger')
 
   ctx.effect(() => {
     const disposers: Array<() => void> = []
@@ -206,9 +206,9 @@ export function apply(ctx: Context): void {
     return () => {
       for (const off of disposers) off()
     }
-  }, 'dsh-electro-lab: engine')
+  }, 'dsh-reckoner: engine')
 
-  ctx.effect(() => registerSkills(ctx), 'dsh-electro-lab: skills')
+  ctx.effect(() => registerSkills(ctx), 'dsh-reckoner: skills')
 
   ctx.effect(() => {
     const disposers: Array<() => void> = []
@@ -229,7 +229,7 @@ export function apply(ctx: Context): void {
       }),
     }))
 
-    // Record body: GET /api/dsh-electro-lab/records/<id> — one record's trace
+    // Record body: GET /api/dsh-reckoner/records/<id> — one record's trace
     // rows plus its index meta (question/openedAt/sealedAt); DELETE removes a
     // record (body + index row). The currently open record cannot be deleted.
     disposers.push(ctx.webServer.register({
@@ -341,7 +341,7 @@ export function apply(ctx: Context): void {
     return () => {
       for (const off of disposers) off()
     }
-  }, 'dsh-electro-lab: web')
+  }, 'dsh-reckoner: web')
 
   try {
     const synced = installPresets()

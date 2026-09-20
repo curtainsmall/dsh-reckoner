@@ -1,10 +1,10 @@
-# ElectroLab 引擎手册
+# Reckoner 引擎手册
 
 [English](engine.md)
 
-ElectroLab 插件的全部电气电子计算都在一台确定性的**引擎**内完成。语言模型从不亲自计算：它通过四个原语与三个记录标记操作引擎，引擎维护一张类型化值变量表，在计算边界换算单位，并把每一步记录进一条可回读的记录。
+Reckoner 插件的全部电气电子计算都在一台确定性的**引擎**内完成。语言模型从不亲自计算：它通过四个原语与三个记录标记操作引擎，引擎维护一张类型化值变量表，在计算边界换算单位，并把每一步记录进一条可回读的记录。
 
-以 **ElectroLab 模式**启动的会话，会通过 `electro-lab-interface` 与 `electro-lab-template` 两个技能携带同样的规则。
+以 **Reckoner 模式**启动的会话，会通过 `reckoner-interface` 与 `reckoner-template` 两个技能携带同样的规则。
 
 ## 目录
 
@@ -286,7 +286,7 @@ failure:      → { ok: false, code, error }
 
 ## 6. 外部求解器
 
-除内置目录外，你还可以注册自己的求解器，经 http 访问。声明存放在 `~/.dsh-electro-lab/external-solvers.jsonl`，每行一个 JSON 对象；引擎启动时，每条启用且 `returns` 可映射的声明都会编译进与内置求解器同一个注册表。此后二者没有区别：`solver_info` 与 `call` 一视同仁，参数按同样方式解析，返回值在进入变量表之前先按声明的 `returns` 校验。
+除内置目录外，你还可以注册自己的求解器，经 http 访问。声明存放在 `~/.dsh-reckoner/external-solvers.jsonl`，每行一个 JSON 对象；引擎启动时，每条启用且 `returns` 可映射的声明都会编译进与内置求解器同一个注册表。此后二者没有区别：`solver_info` 与 `call` 一视同仁，参数按同样方式解析，返回值在进入变量表之前先按声明的 `returns` 校验。
 
 | 字段 | 含义 |
 |---|---|
@@ -319,10 +319,10 @@ failure:      → { ok: false, code, error }
 
 ## 7. 存储
 
-插件主目录是 `~/.dsh-electro-lab`，`DSH_ELECTRO_LAB_HOME` 可将其改到别处。
+插件主目录是 `~/.dsh-reckoner`，`DSH_RECKONER_HOME` 可将其改到别处。
 
 ```
-~/.dsh-electro-lab/
+~/.dsh-reckoner/
   record-index.jsonl      索引行，每条记录一行
   records/<id>.jsonl      轨迹本体，每条记录一个文件
   external-solvers.jsonl  声明，每行一条
@@ -381,7 +381,7 @@ failure:      → { ok: false, code, error }
 
 | 设置 | 取值 |
 |---|---|
-| `DSH_ELECTRO_LAB_LOG_LEVEL` | `debug`、`info`、`warn`、`error`、`off`；默认 `info` |
+| `DSH_RECKONER_LOG_LEVEL` | `debug`、`info`、`warn`、`error`、`off`；默认 `info` |
 | 保留 | 最新 20 个文件、总量不超过 50 MB |
 
 这个文件描述自己所属的那次 run：文件名是开始，末行是结束，末行不是 `plugin unmounted` 的日志属于被杀掉的 run。端点、请求 id、耗时这类传输事实只记入日志，不写入记录。
@@ -390,11 +390,11 @@ failure:      → { ok: false, code, error }
 
 | 端点 | 用途 |
 |---|---|
-| `GET /api/dsh-electro-lab/records-index` | 面板列表的索引行，每 5 秒轮询一次；从不读取轨迹本体 |
-| `GET /api/dsh-electro-lab/records/<id>` | 一条记录的轨迹行 |
-| `/api/dsh-electro-lab/external-solvers` | 声明归档：`GET` 列出声明与重启标记，`PUT` 添加或替换一条，`DELETE ?name=` 删除一条 |
-| `GET /api/dsh-electro-lab/generate-capability` | 生成对话框背后的 LaTeX 工具链检查 |
-| `/api/dsh-electro-lab/generate`、`-progress`、`-cancel` | 文章生成任务：启动、轮询、取消 |
-| `/api/dsh-electro-lab/list-roots`、`list-dirs`、`generate-dir` | 生成对话框的目录浏览与记忆目录 |
-| `/api/dsh-electro-lab/reveal` | 在宿主的文件管理器中打开生成的文件或其目录 |
+| `GET /api/dsh-reckoner/records-index` | 面板列表的索引行，每 5 秒轮询一次；从不读取轨迹本体 |
+| `GET /api/dsh-reckoner/records/<id>` | 一条记录的轨迹行 |
+| `/api/dsh-reckoner/external-solvers` | 声明归档：`GET` 列出声明与重启标记，`PUT` 添加或替换一条，`DELETE ?name=` 删除一条 |
+| `GET /api/dsh-reckoner/generate-capability` | 生成对话框背后的 LaTeX 工具链检查 |
+| `/api/dsh-reckoner/generate`、`-progress`、`-cancel` | 文章生成任务：启动、轮询、取消 |
+| `/api/dsh-reckoner/list-roots`、`list-dirs`、`generate-dir` | 生成对话框的目录浏览与记忆目录 |
+| `/api/dsh-reckoner/reveal` | 在宿主的文件管理器中打开生成的文件或其目录 |
 

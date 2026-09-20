@@ -1,6 +1,6 @@
-# ElectroLab Echo Peer
+# Reckoner Echo Peer
 
-A runnable counterpart for the ElectroLab external-solver feature: an http peer that speaks the typed envelope protocol and echoes every argument back, so a register → restart → call round trip can be verified by eye.
+A runnable counterpart for the Reckoner external-solver feature: an http peer that speaks the typed envelope protocol and echoes every argument back, so a register → restart → call round trip can be verified by eye.
 
 [简体中文](README.zh-CN.md)
 

@@ -16,12 +16,12 @@ describe('installPresets', () => {
     const home = mkdtempSync(join(tmpdir(), 'dsh-preset-test-'))
     process.env.DSH_HOME = home
     const installed = installPresets()
-    expect(installed).toContain('electro-lab')
-    const target = join(home, '.agent-presets', 'electro-lab')
+    expect(installed).toContain('reckoner')
+    const target = join(home, '.agent-presets', 'reckoner')
     expect(existsSync(join(target, 'agent.cordis.yml'))).toBe(true)
     expect(existsSync(join(target, 'preset.yml'))).toBe(true)
     // the copy matches the packaged source
-    const packaged = readFileSync(new URL('../presets/electro-lab/agent.cordis.yml', import.meta.url), 'utf8')
+    const packaged = readFileSync(new URL('../presets/reckoner/agent.cordis.yml', import.meta.url), 'utf8')
     expect(readFileSync(join(target, 'agent.cordis.yml'), 'utf8')).toBe(packaged)
     rmSync(home, { recursive: true, force: true })
   })
@@ -29,15 +29,15 @@ describe('installPresets', () => {
   it('always overwrites an existing preset with the packaged copy', () => {
     const home = mkdtempSync(join(tmpdir(), 'dsh-preset-test-'))
     process.env.DSH_HOME = home
-    const target = join(home, '.agent-presets', 'electro-lab')
+    const target = join(home, '.agent-presets', 'reckoner')
     installPresets()
     // a local edit is discarded on the next sync — the preset is plugin-owned
-    const packaged = readFileSync(new URL('../presets/electro-lab/agent.cordis.yml', import.meta.url), 'utf8')
+    const packaged = readFileSync(new URL('../presets/reckoner/agent.cordis.yml', import.meta.url), 'utf8')
     writeFileSync(join(target, 'agent.cordis.yml'), 'user-tampered\n')
-    expect(installPresets()).toContain('electro-lab')
+    expect(installPresets()).toContain('reckoner')
     expect(readFileSync(join(target, 'agent.cordis.yml'), 'utf8')).toBe(packaged)
     expect(readFileSync(join(target, 'preset.yml'), 'utf8')).toBe(
-      readFileSync(new URL('../presets/electro-lab/preset.yml', import.meta.url), 'utf8'),
+      readFileSync(new URL('../presets/reckoner/preset.yml', import.meta.url), 'utf8'),
     )
     rmSync(home, { recursive: true, force: true })
   })

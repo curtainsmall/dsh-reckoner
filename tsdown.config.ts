@@ -1,14 +1,14 @@
 /**
- * tsdown build for dsh-electro-lab: the host-half lib (lib/index.js, ESM
+ * tsdown build for dsh-reckoner: the host-half lib (lib/index.js, ESM
  * node) plus the two browser client bundles (lib/client.js and
  * lib/client-registry.js, CJS closure factory) — one per install channel:
  *
  * - `lib/client.js` serves the official profile channel, registering with
- *   the package-name id `dsh-electro-lab` (the client-modules compose keys
+ *   the package-name id `dsh-reckoner` (the client-modules compose keys
  *   on the package name; keep it in sync with package.json `name`),
  * - `lib/client-registry.js` serves the plugin-registry channel
  *   (dsh.plugin.json), registering with the manifest id
- *   `dsh-external/dsh-electro-lab`.
+ *   `dsh-external/dsh-reckoner`.
  *
  * Both bundles are compiled from the same src/client/index.tsx source — only
  * the registered id and the output file name differ, so they cannot drift:
@@ -91,7 +91,7 @@ export default [
     clean: false,
   },
   // Official profile channel: bundle id = package name (package.json `name`).
-  clientBundle('dsh-electro-lab', 'client.js'),
+  clientBundle('dsh-reckoner', 'client.js'),
   // Plugin-registry channel: bundle id = manifest id (dsh.plugin.json `id`).
-  clientBundle('dsh-external/dsh-electro-lab', 'client-registry.js'),
+  clientBundle('dsh-external/dsh-reckoner', 'client-registry.js'),
 ] satisfies UserConfig[]

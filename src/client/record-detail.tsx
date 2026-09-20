@@ -1,12 +1,12 @@
 /**
- * ElectroLab record detail: one record's trace as a human timeline.
+ * Reckoner record detail: one record's trace as a human timeline.
  *
  * The trace body is the process itself — every row carries its input and
  * output. The detail view renders rows in order with typed values shown in a
  * human form (units and prefixes), groups consecutive condition sets and
  * consecutive failed attempts into collapsible sections, highlights failures,
  * and links slot references back to the set row that created the slot.
- * Read-only: fetched from GET /api/dsh-electro-lab/records/<id>.
+ * Read-only: fetched from GET /api/dsh-reckoner/records/<id>.
  */
 import { useEffect, useState } from 'react'
 import { t, useAppLocale } from './locales.ts'
@@ -16,7 +16,7 @@ import { ArticleFormat } from '../generate.ts'
 import { useGenState } from './generation.ts'
 import { GenerationSetupDialog } from './generation-ui.tsx'
 
-const BODY_ENDPOINT = '/api/dsh-electro-lab/records/'
+const BODY_ENDPOINT = '/api/dsh-reckoner/records/'
 const POLL_MS = 5000
 
 /** Back button styling shared with the panel's back-to-session button. */

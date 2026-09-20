@@ -1,5 +1,5 @@
 /**
- * ElectroLab shared client UI: themed dialog + buttons and typed-value
+ * Reckoner shared client UI: themed dialog + buttons and typed-value
  * display helpers. Pure presentational code with no record imports, so any
  * page (record list, detail, editors) can use it without import cycles.
  */

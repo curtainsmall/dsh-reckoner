@@ -1,5 +1,5 @@
 /**
- * ElectroLab panel: SSH-style main-area panel with settled run records.
+ * Reckoner panel: SSH-style main-area panel with settled run records.
  *
  * The product has no seat for a center-column takeover panel (the
  * conversation slot is single-occupant and external plugins cannot declare
@@ -40,10 +40,10 @@ const panelStore = {
 /* ── Panel mount (SSH-style center-column takeover) ────────────────────────── */
 
 const CONVERSATION_COLUMN_SELECTOR = '[data-pane="conversation"], [class*="centerCol"]'
-const ACTIVE_ATTR = 'data-dsh-electrolab-active'
+const ACTIVE_ATTR = 'data-dsh-reckoner-active'
 /** Cross-plugin panel activation event (the SSH/task-board panels share it). */
 const ACTIVATE_EVENT = 'dsh-panel-activate'
-const PANEL_NAME = 'electrolab'
+const PANEL_NAME = 'reckoner'
 /** Sidebar rows whose click returns the user to the session. */
 const SIDEBAR_ROW_SELECTOR = '[class*="sessionRow"], [class*="projectRow"], [class*="searchResultRow"], [class*="searchResultWorkspace"], [class*="newSession"]'
 
@@ -53,9 +53,9 @@ const SIDEBAR_ROW_SELECTOR = '[class*="sessionRow"], [class*="projectRow"], [cla
  * when the user picks another sidebar row. Returns one disposer that removes
  * the DOM, the React root and every listener.
  */
-export function mountElectroLabPanel(): () => void {
+export function mountReckonerPanel(): () => void {
   const container = document.createElement('div')
-  container.dataset.dshElectrolabView = ''
+  container.dataset.dshReckonerView = ''
   container.style.display = 'none'
 
   // Generation overlay root: a body-level mount (independent of the panel
@@ -72,31 +72,31 @@ export function mountElectroLabPanel(): () => void {
   const style = document.createElement('style')
   style.textContent = `
     [data-pane="conversation"], [class*="centerCol"] { position: relative; }
-    [data-dsh-electrolab-view] { position: absolute; inset: 0; z-index: 40;
+    [data-dsh-reckoner-view] { position: absolute; inset: 0; z-index: 40;
       background: var(--dsw-alias-bg-base, #171a21); overflow: auto; }
     /* Visible scrollbars in both themes: the shell's scrollbar-bg-l2 is
        near-white in light themes, so label-tertiary is used — a solid color
        on dark and light backgrounds. Safe since the extension now scales the
        iframe with CSS zoom (relayout), not transform:scale (post-raster
        scaling that blurred everything). */
-    [data-dsh-electrolab-view]::-webkit-scrollbar,
-    [data-dsh-electrolab-view] ::-webkit-scrollbar { width: 10px; height: 10px; }
-    [data-dsh-electrolab-view]::-webkit-scrollbar-track,
-    [data-dsh-electrolab-view] ::-webkit-scrollbar-track { background: transparent; }
-    [data-dsh-electrolab-view]::-webkit-scrollbar-thumb,
-    [data-dsh-electrolab-view] ::-webkit-scrollbar-thumb {
+    [data-dsh-reckoner-view]::-webkit-scrollbar,
+    [data-dsh-reckoner-view] ::-webkit-scrollbar { width: 10px; height: 10px; }
+    [data-dsh-reckoner-view]::-webkit-scrollbar-track,
+    [data-dsh-reckoner-view] ::-webkit-scrollbar-track { background: transparent; }
+    [data-dsh-reckoner-view]::-webkit-scrollbar-thumb,
+    [data-dsh-reckoner-view] ::-webkit-scrollbar-thumb {
       background: var(--dsw-alias-label-tertiary);
       border: 2px solid transparent;
       border-radius: 5px;
       background-clip: padding-box; }
-    [data-dsh-electrolab-view]::-webkit-scrollbar-thumb:hover,
-    [data-dsh-electrolab-view] ::-webkit-scrollbar-thumb:hover {
+    [data-dsh-reckoner-view]::-webkit-scrollbar-thumb:hover,
+    [data-dsh-reckoner-view] ::-webkit-scrollbar-thumb:hover {
       background: var(--dsw-alias-label-primary); }
   `
   document.head.appendChild(style)
   // The vendored directory-tree stylesheet, served by the host (injected on
   // arrival so the bundle never has to inline the CSS).
-  void fetch('/api/dsh-electro-lab/directory-tree.css')
+  void fetch('/api/dsh-reckoner/directory-tree.css')
     .then((res) => (res.ok ? res.text() : ''))
     .then((css) => {
       if (css.length > 0) style.textContent += `\n${css}`
@@ -110,7 +110,7 @@ export function mountElectroLabPanel(): () => void {
     if (column === null) return
     column.appendChild(container)
     root ??= createRoot(container)
-    root.render(<ElectroLabPanel />)
+    root.render(<ReckonerPanel />)
   }
   const waitObserver = new MutationObserver(tryPlace)
   waitObserver.observe(document.body, { childList: true, subtree: true })
@@ -185,10 +185,10 @@ export function mountElectroLabPanel(): () => void {
 /* ── Nav entry (sidebar rail, beside SSH / task board / skills) ─────────────── */
 
 const SIDEBAR_COLUMN_SELECTOR = '[data-pane="sidebar"], [class*="sidebarCol"]'
-const ENTRY_ATTR = 'data-dsh-electrolab-entry'
+const ENTRY_ATTR = 'data-dsh-reckoner-entry'
 /** The rail family this entry joins, in shell order — placed after the last one. */
 const ENTRY_FAMILY = ['[data-dsh-taskboard-entry]', '[data-dsh-ssh-entry]', '[data-dsh-skill-explorer-entry]']
-/** Wave-square glyph (Font Awesome, CC BY 4.0) — the ElectroLab identity, rendered like the shell's line icons. */
+/** Wave-square glyph (Font Awesome, CC BY 4.0) — the Reckoner identity, rendered like the shell's line icons. */
 const ENTRY_ICON =
   '<svg viewBox="0 0 512 512" fill="currentColor" aria-hidden="true">' +
   '<path d="M64 96c0-17.7 14.3-32 32-32l160 0c17.7 0 32 14.3 32 32l0 288 96 0 0-128c0-17.7 14.3-32 32-32l64 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-32 0 0 128c0 17.7-14.3 32-32 32l-160 0c-17.7 0-32-14.3-32-32l0-288-96 0 0 128c0 17.7-14.3 32-32 32l-64 0c-17.7 0-32-14.3-32-32s14.3-32 32-32l32 0 0-128z"/></svg>'
@@ -213,16 +213,16 @@ const ENTRY_CSS = `
  * after the existing entry family, with self-healing observers that re-place
  * it when the shell re-renders. Returns one disposer that removes it.
  */
-export function mountElectroLabEntry(): () => void {
+export function mountReckonerEntry(): () => void {
   const entry = document.createElement('button')
   entry.type = 'button'
   entry.setAttribute(ENTRY_ATTR, '')
-  entry.setAttribute('data-dsh-plugin', 'electro-lab')
+  entry.setAttribute('data-dsh-plugin', 'reckoner')
   entry.setAttribute('data-dsh-part', 'sidebar-entry')
-  entry.setAttribute('aria-label', 'ElectroLab')
-  entry.setAttribute('title', 'ElectroLab')
+  entry.setAttribute('aria-label', 'Reckoner')
+  entry.setAttribute('title', 'Reckoner')
   entry.className = 'dsh-elab-entry'
-  entry.innerHTML = `<span class="dsh-elab-entryIcon">${ENTRY_ICON}</span><span class="dsh-elab-entryLabel">ElectroLab</span>`
+  entry.innerHTML = `<span class="dsh-elab-entryIcon">${ENTRY_ICON}</span><span class="dsh-elab-entryLabel">Reckoner</span>`
   const style = document.createElement('style')
   style.textContent = ENTRY_CSS
   document.head.appendChild(style)
@@ -351,7 +351,7 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
 }
 
 /** The panel body: title bar with a back-to-session button, tabs, content. */
-export function ElectroLabPanel(): React.JSX.Element | null {
+export function ReckonerPanel(): React.JSX.Element | null {
   useAppLocale() // Re-render when the active language changes.
   const open = useSyncExternalStore(panelStore.subscribe, () => panelStore.open)
   const [backHover, setBackHover] = useState(false)
@@ -386,7 +386,7 @@ export function ElectroLabPanel(): React.JSX.Element | null {
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}><IconChevronLeft size={16} /></span>
           <span style={{ lineHeight: 1 }}>{t('backToSession')}</span>
         </button>
-        <h2 style={{ margin: 0, fontSize: 15 }}>ElectroLab</h2>
+        <h2 style={{ margin: 0, fontSize: 15 }}>Reckoner</h2>
       </div>
       <div role="tablist" style={tabBarStyle} data-dsh-part="tab-bar">
         <TabButton active={tab === 'records'} label={t('tabRecords')} onClick={() => setTab('records')} />

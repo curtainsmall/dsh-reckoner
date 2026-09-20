@@ -1,5 +1,5 @@
 /**
- * Client half of DSH ElectroLab: the ElectroLab records panel.
+ * Client half of DSH Reckoner: the Reckoner records panel.
  *
  * Registers two pieces of UI:
  * - a nav entry in the sidebar rail (DOM-mounted beside the SSH, task-board
@@ -10,7 +10,7 @@
  * panel follows the user's chosen language (see locales.ts).
  */
 import type { Context } from 'cordis'
-import { mountElectroLabEntry, mountElectroLabPanel } from './panel.tsx'
+import { mountReckonerEntry, mountReckonerPanel } from './panel.tsx'
 import { installLocale, LOCALE_NS, dictionaries } from './locales.ts'
 
 /** The locale service the UI copy and language subscriptions ride on. */
@@ -37,17 +37,17 @@ export function apply(ctx: Context): void {
       // A missing locale service must never break the panel.
       return () => {}
     }
-  }, 'dsh-electro-lab: dictionaries')
+  }, 'dsh-reckoner: dictionaries')
 
   installLocale(ctx.locale)
 
   ctx.effect(() => {
     const disposers: Array<() => void> = [
-      mountElectroLabEntry(),
-      mountElectroLabPanel(),
+      mountReckonerEntry(),
+      mountReckonerPanel(),
     ]
     return () => {
       for (const off of disposers) off()
     }
-  }, 'dsh-electro-lab: panel UI')
+  }, 'dsh-reckoner: panel UI')
 }

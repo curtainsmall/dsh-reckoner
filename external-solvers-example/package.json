@@ -1,7 +1,7 @@
 {
-  "name": "dsh-electro-lab-peer",
+  "name": "dsh-reckoner-peer",
   "version": "0.1.0",
-  "description": "Independent echo peer for DeepSeek Harness ElectroLab external solvers (http transport)",
+  "description": "Independent echo peer for DeepSeek Harness Reckoner external solvers (http transport)",
   "private": true,
   "type": "module",
   "license": "MIT",

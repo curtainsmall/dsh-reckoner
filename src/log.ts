@@ -108,7 +108,7 @@ interface SinkEntry {
 let level: LogLevel = LogLevel.Info
 let sinks: SinkEntry[] = []
 
-/** Parse a `DSH_ELECTRO_LAB_LOG_LEVEL` word; anything unknown keeps the default. */
+/** Parse a `DSH_RECKONER_LOG_LEVEL` word; anything unknown keeps the default. */
 export function resolveLevel(word: string | undefined): LogLevel {
   switch (word?.trim().toLowerCase()) {
     case 'debug': return LogLevel.Debug
@@ -222,7 +222,7 @@ export function formatLine(severity: LogLevel, message: string, fields?: LogFiel
 
 /** Logger-internal trouble goes straight to stdout: it must never travel through a sink that may be the broken one. */
 function reportInternal(problem: string): void {
-  process.stdout.write(`[dsh-electro-lab] logger: ${problem}\n`)
+  process.stdout.write(`[dsh-reckoner] logger: ${problem}\n`)
 }
 
 function emit(severity: LogLevel, message: string, fields?: LogFields): void {

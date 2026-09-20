@@ -1,6 +1,6 @@
 {
-  "id": "dsh-external/dsh-electro-lab",
-  "version": "0.13.0",
+  "id": "dsh-external/dsh-reckoner",
+  "version": "0.1.0",
   "main": "./lib/index.js",
   "description": "DSH plugin: electrical & electronics problem solving",
   "engines": {

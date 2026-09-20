@@ -38,9 +38,9 @@ interface GenState {
   elapsed: number
 }
 
-const GENERATE_ENDPOINT = '/api/dsh-electro-lab/generate'
-const GENERATE_PROGRESS_ENDPOINT = '/api/dsh-electro-lab/generate-progress'
-const GENERATE_CANCEL_ENDPOINT = '/api/dsh-electro-lab/generate-cancel'
+const GENERATE_ENDPOINT = '/api/dsh-reckoner/generate'
+const GENERATE_PROGRESS_ENDPOINT = '/api/dsh-reckoner/generate-progress'
+const GENERATE_CANCEL_ENDPOINT = '/api/dsh-reckoner/generate-cancel'
 
 const listeners = new Set<() => void>()
 let state: GenState = { progress: null, minimized: false, elapsed: 0 }

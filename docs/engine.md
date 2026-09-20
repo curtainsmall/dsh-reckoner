@@ -1,10 +1,10 @@
-# ElectroLab Engine Manual
+# Reckoner Engine Manual
 
 [简体中文](engine.zh-CN.md)
 
-Every electrical and electronics calculation in the ElectroLab plugin happens inside one deterministic **engine**. A language model never computes: it operates the engine through four primitives and three record markers, and the engine keeps a table of typed values, converts units at calculation boundaries, and records every step into a record that can be read back.
+Every electrical and electronics calculation in the Reckoner plugin happens inside one deterministic **engine**. A language model never computes: it operates the engine through four primitives and three record markers, and the engine keeps a table of typed values, converts units at calculation boundaries, and records every step into a record that can be read back.
 
-Sessions started in **ElectroLab Mode** carry the same rules in the `electro-lab-interface` and `electro-lab-template` skills.
+Sessions started in **Reckoner Mode** carry the same rules in the `reckoner-interface` and `reckoner-template` skills.
 
 ## Contents
 
@@ -286,7 +286,7 @@ Widening is implicit and narrowing never is: a real stays a real until a solver 
 
 ## 6. External solvers
 
-Beyond the catalog you can register solvers of your own, reached over http. A declaration lives in `~/.dsh-electro-lab/external-solvers.jsonl`, one JSON object per line, and at engine start every enabled declaration with a mappable `returns` is compiled into the same registry as the built-ins. From then on there is no difference: `solver_info` and `call` treat it like any other solver, its arguments are resolved the same way, and its result is validated against the declared `returns` before it enters the table.
+Beyond the catalog you can register solvers of your own, reached over http. A declaration lives in `~/.dsh-reckoner/external-solvers.jsonl`, one JSON object per line, and at engine start every enabled declaration with a mappable `returns` is compiled into the same registry as the built-ins. From then on there is no difference: `solver_info` and `call` treat it like any other solver, its arguments are resolved the same way, and its result is validated against the declared `returns` before it enters the table.
 
 | field | meaning |
 |---|---|
@@ -319,10 +319,10 @@ Arguments and results are typed values, so no symbols, variant or prefix words c
 
 ## 7. Storage
 
-The plugin home is `~/.dsh-electro-lab`, and `DSH_ELECTRO_LAB_HOME` moves it.
+The plugin home is `~/.dsh-reckoner`, and `DSH_RECKONER_HOME` moves it.
 
 ```
-~/.dsh-electro-lab/
+~/.dsh-reckoner/
   record-index.jsonl      index rows, one per record
   records/<id>.jsonl      trace bodies, one file per record
   external-solvers.jsonl  declarations, one per line
@@ -381,7 +381,7 @@ One file per host run, `<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, created exclusive
 
 | setting | values |
 |---|---|
-| `DSH_ELECTRO_LAB_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, `off`; default `info` |
+| `DSH_RECKONER_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, `off`; default `info` |
 | retention | the newest 20 files, up to 50 MB |
 
 The file describes its own run: the name is the start, the last line is the end, and a log whose last line is not `plugin unmounted` belongs to a run that was killed. Transport facts such as endpoint, request id and elapsed time are logged, never written into a record.
@@ -390,12 +390,12 @@ The file describes its own run: the name is the start, the last line is the end,
 
 | endpoint | purpose |
 |---|---|
-| `GET /api/dsh-electro-lab/records-index` | index rows for the panel list, polled every 5 s; never reads a trace body |
-| `GET /api/dsh-electro-lab/records/<id>` | one record's trace rows |
-| `/api/dsh-electro-lab/external-solvers` | the declaration archive: `GET` lists declarations and the restart flag, `PUT` adds or replaces one, `DELETE ?name=` removes one |
-| `GET /api/dsh-electro-lab/generate-capability` | the LaTeX toolchain check behind the generation dialog |
-| `/api/dsh-electro-lab/generate`, `-progress`, `-cancel` | the article-generation job: start, poll, cancel |
-| `/api/dsh-electro-lab/list-roots`, `list-dirs`, `generate-dir` | the directory browser of the generation dialog, and the remembered directory |
-| `/api/dsh-electro-lab/reveal` | opens a generated file or its folder in the host's file manager |
+| `GET /api/dsh-reckoner/records-index` | index rows for the panel list, polled every 5 s; never reads a trace body |
+| `GET /api/dsh-reckoner/records/<id>` | one record's trace rows |
+| `/api/dsh-reckoner/external-solvers` | the declaration archive: `GET` lists declarations and the restart flag, `PUT` adds or replaces one, `DELETE ?name=` removes one |
+| `GET /api/dsh-reckoner/generate-capability` | the LaTeX toolchain check behind the generation dialog |
+| `/api/dsh-reckoner/generate`, `-progress`, `-cancel` | the article-generation job: start, poll, cancel |
+| `/api/dsh-reckoner/list-roots`, `list-dirs`, `generate-dir` | the directory browser of the generation dialog, and the remembered directory |
+| `/api/dsh-reckoner/reveal` | opens a generated file or its folder in the host's file manager |
 
 

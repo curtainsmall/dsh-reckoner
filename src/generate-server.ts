@@ -76,15 +76,15 @@ interface AgentDefaultModelLike {
 }
 
 /** The web paths of the generation subsystem (shared wire contract host ↔ client). */
-export const GENERATE_PATH = '/api/dsh-electro-lab/generate'
-export const GENERATE_PROGRESS_PATH = '/api/dsh-electro-lab/generate-progress'
-export const GENERATE_CANCEL_PATH = '/api/dsh-electro-lab/generate-cancel'
-export const REVEAL_PATH = '/api/dsh-electro-lab/reveal'
-export const LIST_DIRS_PATH = '/api/dsh-electro-lab/list-dirs'
-export const LIST_ROOTS_PATH = '/api/dsh-electro-lab/list-roots'
-export const DIRECTORY_TREE_CSS_PATH = '/api/dsh-electro-lab/directory-tree.css'
-export const GENERATE_DIR_PATH = '/api/dsh-electro-lab/generate-dir'
-export const GENERATE_CAPABILITY_PATH = '/api/dsh-electro-lab/generate-capability'
+export const GENERATE_PATH = '/api/dsh-reckoner/generate'
+export const GENERATE_PROGRESS_PATH = '/api/dsh-reckoner/generate-progress'
+export const GENERATE_CANCEL_PATH = '/api/dsh-reckoner/generate-cancel'
+export const REVEAL_PATH = '/api/dsh-reckoner/reveal'
+export const LIST_DIRS_PATH = '/api/dsh-reckoner/list-dirs'
+export const LIST_ROOTS_PATH = '/api/dsh-reckoner/list-roots'
+export const DIRECTORY_TREE_CSS_PATH = '/api/dsh-reckoner/directory-tree.css'
+export const GENERATE_DIR_PATH = '/api/dsh-reckoner/generate-dir'
+export const GENERATE_CAPABILITY_PATH = '/api/dsh-reckoner/generate-capability'
 
 /** Legacy plain-text location of the remembered directory (migrated on read). */
 const LEGACY_GENERATE_DIR_FILE = 'generate-dir.txt'
@@ -667,7 +667,7 @@ async function beginGenerate(ctx: GenerateContext, deps: GenerateDeps, url: stri
 
   const rawName = (params.get('fileName') ?? '').trim()
   const fileName = rawName.length === 0
-    ? normalizeFileName(`electro-lab-${record.id.slice(0, 8)}`, formatParam)
+    ? normalizeFileName(`reckoner-${record.id.slice(0, 8)}`, formatParam)
     : normalizeFileName(rawName, formatParam)
 
   const compile = params.get('compile') === 'true'

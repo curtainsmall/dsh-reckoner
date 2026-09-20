@@ -1,10 +1,10 @@
 {
-  "name": "dsh-electro-lab",
-  "version": "0.13.0",
+  "name": "dsh-reckoner",
+  "version": "0.1.0",
   "description": "DSH plugin: electrical & electronics problem solving",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/curtainsmall/dsh-electro-lab.git"
+    "url": "git+https://github.com/curtainsmall/dsh-reckoner.git"
   },
   "type": "module",
   "license": "MIT",

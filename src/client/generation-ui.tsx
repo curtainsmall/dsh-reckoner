@@ -13,8 +13,8 @@ import { IconArrowUp, IconFile, IconFolder, IconMinus } from './icons.tsx'
 import { useGenState, startGenerate, cancelGenerate, clearProgress, setMinimized, type GenProgress } from './generation.ts'
 import { ArticleFormat, ArticleLanguage, GenerationPhase } from '../generate.ts'
 
-const GENERATE_DIR_ENDPOINT = '/api/dsh-electro-lab/generate-dir'
-const GENERATE_CAPABILITY_ENDPOINT = '/api/dsh-electro-lab/generate-capability'
+const GENERATE_DIR_ENDPOINT = '/api/dsh-reckoner/generate-dir'
+const GENERATE_CAPABILITY_ENDPOINT = '/api/dsh-reckoner/generate-capability'
 
 /** What the host can compile with, mirrored from the capability endpoint (LaTeX setup only). */
 interface CapabilityReport {
@@ -25,9 +25,9 @@ interface CapabilityReport {
   missingPackages: string[]
 }
 
-const REVEAL_ENDPOINT = '/api/dsh-electro-lab/reveal'
-const LIST_DIRS_ENDPOINT = '/api/dsh-electro-lab/list-dirs'
-const LIST_ROOTS_ENDPOINT = '/api/dsh-electro-lab/list-roots'
+const REVEAL_ENDPOINT = '/api/dsh-reckoner/reveal'
+const LIST_DIRS_ENDPOINT = '/api/dsh-reckoner/list-dirs'
+const LIST_ROOTS_ENDPOINT = '/api/dsh-reckoner/list-roots'
 
 /* ── Small shared bits ─────────────────────────────────────────────────────── */
 
@@ -168,7 +168,7 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   }, [open, settingsLoaded, format, genLanguage])
 
   /** Default file name placeholder of the dialog. */
-  const defaultFileName = `electro-lab-${recordId.slice(0, 8)}.${formatExtension(format)}`
+  const defaultFileName = `reckoner-${recordId.slice(0, 8)}.${formatExtension(format)}`
 
   /** The host checked and cannot compile: the run would fail, so refuse it here. */
   const toolchainMissing = format === ArticleFormat.Latex && capability !== null && !capability.ready

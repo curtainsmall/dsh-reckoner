@@ -1,5 +1,5 @@
 /**
- * ElectroLab record list page.
+ * Reckoner record list page.
  * The list reads the host's /records-index (a projection of record-index.jsonl);
  * clicking a row opens the record's trace timeline (record-detail.tsx).
  */
@@ -18,8 +18,8 @@ interface IndexRow {
   question: string
 }
 
-const INDEX_ENDPOINT = '/api/dsh-electro-lab/records-index'
-const RECORD_ENDPOINT = '/api/dsh-electro-lab/records/'
+const INDEX_ENDPOINT = '/api/dsh-reckoner/records-index'
+const RECORD_ENDPOINT = '/api/dsh-reckoner/records/'
 const POLL_MS = 5000
 
 const rowStyle: React.CSSProperties = {

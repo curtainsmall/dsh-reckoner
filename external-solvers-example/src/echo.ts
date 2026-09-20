@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ElectroLab external-solver echo peer — a manual test/demo counterpart.
+ * Reckoner external-solver echo peer — a manual test/demo counterpart.
  *
  * Envelope protocol (typed values): the request carries {requestId, args}
  * where every argument is a typed value; the response is {requestId, result}
@@ -83,7 +83,7 @@ function serveHttp(host: string, port: number): void {
 }
 
 function usage(): void {
-  console.log('ElectroLab external-solver echo peer (http transport)')
+  console.log('Reckoner external-solver echo peer (http transport)')
   console.log('')
   console.log('  node src/echo.ts http [--host 127.0.0.1] [--port 8787]')
   process.exitCode = 1

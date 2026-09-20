@@ -1,5 +1,5 @@
 /**
- * Packaged-preset installation: the plugin ships an `electro-lab` agent
+ * Packaged-preset installation: the plugin ships an `reckoner` agent
  * preset under its own `presets/` directory (no plugin, no tools — the
  * preset travels with the package). On apply it is synced into the DSH
  * user preset root ($DSH_HOME/.agent-presets/<id>), where the agentPresets

@@ -30,18 +30,18 @@ describe('parseSkillFile', () => {
   })
 
   it('parses the shipped template skill (format guard)', () => {
-    const text = readFileSync(new URL('../skills/electro-lab-template.md', import.meta.url), 'utf8')
+    const text = readFileSync(new URL('../skills/reckoner-template.md', import.meta.url), 'utf8')
     const skill = parseSkillFile(text)
-    expect(skill.name).toBe('electro-lab-template')
+    expect(skill.name).toBe('reckoner-template')
     expect(skill.description).toContain('record_question')
-    expect(skill.whenToUse).toContain('electro-lab workflow')
+    expect(skill.whenToUse).toContain('reckoner workflow')
     expect(skill.content).toContain('## Record protocol')
   })
 
   it('parses the shipped interface skill (format guard)', () => {
-    const text = readFileSync(new URL('../skills/electro-lab-interface.md', import.meta.url), 'utf8')
+    const text = readFileSync(new URL('../skills/reckoner-interface.md', import.meta.url), 'utf8')
     const skill = parseSkillFile(text)
-    expect(skill.name).toBe('electro-lab-interface')
+    expect(skill.name).toBe('reckoner-interface')
     expect(skill.description).toContain('engine manual')
     expect(skill.whenToUse).toContain('engine')
     expect(skill.content).toContain('## Typed values')

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to **DeepSeek Harness ElectroLab**.
+Thanks for your interest in contributing to **DeepSeek Harness Reckoner**.
 
 [简体中文](../docs/CONTRIBUTING.zh-CN.md)
 
