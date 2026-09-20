@@ -18,6 +18,9 @@ assistant-summary.txt
 !.env.example
 *.local
 
+# --- plans and working notes (decision records, not project content) ---
+notes/
+
 # --- logs & misc ---
 *.log
 npm-debug.log*
