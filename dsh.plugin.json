@@ -2,7 +2,7 @@
   "id": "dsh-external/dsh-reckoner",
   "version": "0.1.0",
   "main": "./lib/index.js",
-  "description": "DSH plugin: electrical & electronics problem solving",
+  "description": "DSH plugin: a deterministic calculation engine — values, formulas and dimensional analysis, recorded step by step",
   "engines": {
     "dsh": ">=0.0.1"
   },
