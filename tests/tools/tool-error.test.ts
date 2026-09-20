@@ -26,13 +26,19 @@ describe('ToolError', () => {
     expect(error).toBeInstanceOf(Error)
     expect(error.name).toBe('ToolError')
     expect(error.code).toBe(ToolErrorCode.Tool)
-    expect(new ToolError('x', ToolErrorCode.ExternalTimeout).code).toBe('EXTERNAL_TIMEOUT')
-    expect(Object.values(ToolErrorCode)).toEqual([
-      'TOOL_ERROR', 'EXTERNAL_ERROR', 'EXTERNAL_HTTP', 'EXTERNAL_TIMEOUT', 'EXTERNAL_RESPONSE',
-      'ENGINE_SLOT_UNDECLARED', 'ENGINE_KIND_MISMATCH', 'ENGINE_UNKNOWN_SOLVER', 'ENGINE_ARGS',
-      'ENGINE_VOID_TARGET', 'ENGINE_TARGET_REQUIRED', 'ENGINE_UNSUPPORTED_VARIANT',
-      'ENGINE_UNSUPPORTED_PREFIX', 'ENGINE_SOLVER_FAILED', 'REGISTER_MISSING_RETURNS', 'REGISTER_DUPLICATE',
-    ])
+    expect(error.code).toBe('ENGINE_TOOL')
+    expect(new ToolError('x', ToolErrorCode.RangeDomain).code).toBe('ENGINE_RANGE_DOMAIN')
+  })
+
+  it('names every code ENGINE_<position>_<reason>', () => {
+    for (const code of Object.values(ToolErrorCode)) {
+      expect(code).toMatch(/^ENGINE_[A-Z0-9_]+$/)
+    }
+  })
+
+  it('has no duplicate codes', () => {
+    const codes = Object.values(ToolErrorCode)
+    expect(new Set(codes).size).toBe(codes.length)
   })
 })
 
@@ -52,7 +58,7 @@ describe('defineJsonTool unified failure path', () => {
     })
     await expect(tool.execute({}, fakeExec())).rejects.toMatchObject({
       name: 'ToolError',
-      code: 'TOOL_ERROR',
+      code: 'ENGINE_TOOL',
       message: 'inductance must be a finite positive number (H)',
     })
   })
@@ -62,8 +68,8 @@ describe('defineJsonTool unified failure path', () => {
       name: 'error_test_passthrough',
       description: 'test tool',
       parameters: {},
-      execute: () => { throw new ToolError('denied', ToolErrorCode.ExternalError) },
+      execute: () => { throw new ToolError('denied', ToolErrorCode.DimMismatch) },
     })
-    await expect(tool.execute({}, fakeExec())).rejects.toMatchObject({ name: 'ToolError', code: 'EXTERNAL_ERROR', message: 'denied' })
+    await expect(tool.execute({}, fakeExec())).rejects.toMatchObject({ name: 'ToolError', code: 'ENGINE_DIM_MISMATCH', message: 'denied' })
   })
 })

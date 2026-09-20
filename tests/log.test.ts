@@ -39,15 +39,15 @@ afterEach(() => {
 
 describe('formatLine', () => {
   it('renders the head as timestamp, padded level label and message', () => {
-    expect(line('external call failed')).toBe(`${HEAD}external call failed`)
+    expect(line('engine call failed')).toBe(`${HEAD}engine call failed`)
     expect(formatLine(LogLevel.Debug, 'x', undefined, AT)).toBe('2025-06-14 12:03:41.882 DEBUG x')
     expect(formatLine(LogLevel.Info, 'x', undefined, AT)).toBe('2025-06-14 12:03:41.882 INFO  x')
     expect(formatLine(LogLevel.Error, 'x', undefined, AT)).toBe('2025-06-14 12:03:41.882 ERROR x')
   })
 
   it('renders bare values unquoted and quotes only what carries a separator', () => {
-    expect(line('m', { solver: 'echo', took_ms: 1523, ok: true, none: null, ep: 'http://127.0.0.1:8787' }))
-      .toBe(`${HEAD}m solver=echo took_ms=1523 ok=true none=null ep=http://127.0.0.1:8787`)
+    expect(line('m', { tool: 'eval', took_ms: 1523, ok: true, none: null, ep: 'http://127.0.0.1:8787' }))
+      .toBe(`${HEAD}m tool=eval took_ms=1523 ok=true none=null ep=http://127.0.0.1:8787`)
     expect(line('m', { error: 'two words' })).toBe(`${HEAD}m error="two words"`)
     expect(line('m', { query: 'a=b' })).toBe(`${HEAD}m query="a=b"`)
     expect(line('m', { empty: '' })).toBe(`${HEAD}m empty=""`)
@@ -148,10 +148,10 @@ describe('file sink', () => {
     cleanup(() => { run.close() })
     expect(run.file.startsWith(join(home, 'logs'))).toBe(true)
     expect(basename(run.file)).toMatch(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.\d{3}\.log$/)
-    log.warn('external call failed', { code: 'EXTERNAL_TIMEOUT', took_ms: 30001 })
+    log.warn('engine call failed', { code: 'ENGINE_DIM_MISMATCH', took_ms: 30001 })
     // the run's own record is the file: the name is the start instant, the last line is the end
     expect(readFileSync(run.file, 'utf8'))
-      .toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} WARN {2}external call failed code=EXTERNAL_TIMEOUT took_ms=30001\n$/)
+      .toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} WARN {2}engine call failed code=ENGINE_DIM_MISMATCH took_ms=30001\n$/)
     // logging is not plugin state: it writes no state file and no sibling of the log
     expect(existsSync(join(home, 'state.json'))).toBe(false)
     expect(readdirSync(home)).toEqual(['logs'])

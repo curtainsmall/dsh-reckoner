@@ -19,13 +19,19 @@ const sample: Record = {
   question: '给定 R = 100 Ω 与 C = 100 mF，初始电压 100 V，求 1 秒后电压。',
   analyse: 'RC 放电：τ = R·C，v(t) = V₀·e^(−t/τ)。',
   answer: 'v(1 s) ≈ 90.48 V。',
-  calls: [
-    { callId: 'call_1', name: 'time_constant', arguments: '{"resistance":{"form":"rect","re":100,"im":0,"kind":"resistance"},"capacitance":{"form":"rect","re":0.1,"im":0,"kind":"capacitance"}}' },
-    { callId: 'call_2', name: 'transient_response', arguments: '{"kind":"rc","mode":"discharge","resistance":{"form":"rect","re":100,"im":0,"kind":"resistance"}}' },
-  ],
-  results: [
-    { callId: 'call_1', content: '{"re":10,"im":0,"kind":"time","mag":10,"ang":0}' },
-    { callId: 'call_2', content: '{"re":90.48374180359595,"im":0,"kind":"voltage","mag":90.48374180359595,"ang":0}' },
+  steps: [
+    {
+      seq: '5',
+      formula: '@R*@C',
+      vars: '{"R":{"type":"number","value":100,"kind":"resistance"},"C":{"type":"number","value":0.1,"kind":"capacitance"}}',
+      result: '{"type":"number","value":10,"kind":"time"}',
+    },
+    {
+      seq: '7',
+      formula: '@V0*$e^(-1/@tau)',
+      vars: '{"V0":{"type":"number","value":100,"kind":"voltage"},"tau":{"type":"number","value":10,"kind":"time"}}',
+      result: '{"type":"number","value":90.48374180359595,"kind":"voltage"}',
+    },
   ],
 }
 
@@ -35,7 +41,7 @@ describe('buildArticlePrompt', () => {
     expect(user).toContain(sample.question)
     expect(user).toContain(sample.analyse)
     expect(user).toContain(sample.answer)
-    expect(user).toContain('time_constant')
+    expect(user).toContain('@R*@C')
     expect(user).toContain('90.48374180359595')
   })
 

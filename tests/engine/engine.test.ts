@@ -10,10 +10,15 @@ import { toCanonical, validateValue } from '../../src/engine/values.ts'
 let home = ''
 
 function makeEngine(): Engine {
-  home = mkdtempSync(join(tmpdir(), 'elab-engine-'))
+  home = mkdtempSync(join(tmpdir(), 'reckoner-engine-'))
   const engine = new Engine(home)
   engine.start()
   return engine
+}
+
+/** Put a value in a slot without going through the (not yet written) value parser. */
+function seedTable(engine: Engine, name: string, value: Parameters<VariableTable['set']>[1]): void {
+  engine.table.set(name, value)
 }
 
 afterEach(() => {
@@ -21,46 +26,37 @@ afterEach(() => {
 })
 
 describe('value universe validateValue', () => {
-  it('accepts typed values and rejects malformed shapes', () => {
+  it('accepts canonical typed values and rejects malformed shapes', () => {
     expect(validateValue({ type: 'number', value: 100, kind: 'resistance' })).toBeUndefined()
-    expect(validateValue({ type: 'number', value: 25, kind: 'temperature', variant: 'degC' })).toBeUndefined()
-    expect(validateValue({ type: 'number', value: 1500, kind: 'resistance', prefix: 'kilo' })).toBeUndefined()
+    expect(validateValue({ type: 'number', value: 25, kind: 'temperature' })).toBeUndefined()
     expect(validateValue({ type: 'complex', value: { re: 1, im: 2 }, kind: 'voltage' })).toBeUndefined()
-    expect(validateValue({ type: 'complex', value: { mag: 3, ang: 0.5 }, kind: 'voltage' })).toBeUndefined()
     expect(validateValue({ type: 'string', value: 'x' })).toBeUndefined()
-    expect(validateValue({ type: 'boolean', value: true })).toBeUndefined()
+    expect(validateValue({ type: 'boolean', value: true })).toMatch(/unknown type "boolean"/)
     expect(validateValue(5)).toMatch(/typed-value/)
     expect(validateValue({ type: 'number', value: 1, kind: 'bogus' })).toMatch(/unknown kind/)
-    expect(validateValue({ type: 'number', value: 1, kind: 'resistance', prefix: 'k' })).toMatch(/unknown prefix/)
-    expect(validateValue({ type: 'number', value: 1, kind: 'resistance', prefix: 'kilo', variant: 'degC' })).toMatch(/not supported for kind "resistance"/)
-    expect(validateValue({ type: 'number', value: 1, kind: 'temperature', variant: 'kelvin' })).toMatch(/not supported for kind "temperature"/)
-    expect(validateValue({ type: 'number', value: 25, kind: 'temperature', variant: 'degC', prefix: 'milli' })).toMatch(/SI base representation/)
+    expect(validateValue({ type: 'number', value: 1 })).toMatch(/requires a kind/)
   })
 })
 
 describe('toCanonical', () => {
-  it('converts a quantity nested in an array or an object like a top-level one', () => {
+  it('normalises a polar complex to rectangular, recursing into arrays and objects', () => {
     expect(toCanonical({
-      type: 'array',
-      value: [
-        { type: 'number', value: 0.1, kind: QuantityKind.Resistance, prefix: 'kilo' },
-        { type: 'number', value: 25, kind: QuantityKind.Temperature, variant: 'degC' },
-        { type: 'complex', value: { mag: 2, ang: Math.PI / 2 }, kind: QuantityKind.Voltage },
-      ],
-    })).toEqual({
-      type: 'array',
-      value: [
-        { type: 'number', value: 100, kind: QuantityKind.Resistance },
-        { type: 'number', value: 298.15, kind: QuantityKind.Temperature },
-        { type: 'complex', value: { re: Math.cos(Math.PI / 2) * 2, im: Math.sin(Math.PI / 2) * 2 }, kind: QuantityKind.Voltage },
-      ],
+      type: 'complex', value: { mag: 2, ang: Math.PI / 2 }, kind: QuantityKind.Voltage,
+    } as never)).toEqual({
+      type: 'complex', value: { re: Math.cos(Math.PI / 2) * 2, im: Math.sin(Math.PI / 2) * 2 }, kind: QuantityKind.Voltage,
     })
     expect(toCanonical({
       type: 'object',
-      value: { note: { type: 'string', value: 'kept' }, length: { type: 'number', value: 2, kind: QuantityKind.Length, variant: 'inch' } },
-    })).toEqual({
+      value: {
+        note: { type: 'string', value: 'kept' },
+        z: { type: 'complex', value: { mag: 1, ang: 0 }, kind: QuantityKind.Resistance },
+      },
+    } as never)).toEqual({
       type: 'object',
-      value: { note: { type: 'string', value: 'kept' }, length: { type: 'number', value: 0.0508, kind: QuantityKind.Length } },
+      value: {
+        note: { type: 'string', value: 'kept' },
+        z: { type: 'complex', value: { re: 1, im: 0 }, kind: QuantityKind.Resistance },
+      },
     })
   })
 })
@@ -78,246 +74,180 @@ describe('variable table', () => {
   })
 })
 
-describe('engine (set/get/call + markers + trace)', () => {
+describe('engine (markers + trace + lifecycle)', () => {
   it('lifecycle: question opens, answer settles; reopening seals the old record as duplicate-start', () => {
     const engine = makeEngine()
-    const opened = engine.markerQuestion('q1')
-    expect(opened.ok).toBe(true)
+    expect(engine.markerQuestion('q1').ok).toBe(true)
     engine.markerAnswer('answer one')
     expect(engine.isOpen()).toBe(false)
     const reopened = engine.markerQuestion('q2')
     const oldId = String((reopened as unknown as { record: string }).record)
     engine.markerQuestion('q3') // reopening → q2 is sealed as duplicate-start
     expect(engine.isOpen()).toBe(true)
-    const oldRows = engine.store.readRows(oldId)
-    expect(oldRows.some((row) => row.tool === 'seal' && row.kind === 'duplicate-start')).toBe(true)
-    const index = engine.indexRows()
-    expect(index.find((row) => row.id === oldId)?.sealedAt).not.toBeNull()
+    expect(engine.store.readRows(oldId).some((row) => row.tool === 'seal' && row.kind === 'duplicate-start')).toBe(true)
+    expect(engine.indexRows().find((row) => row.id === oldId)?.sealedAt).not.toBeNull()
     engine.markerAnswer('final')
+  })
+
+  it('answer with no open record keeps a duplicate-end error record', () => {
+    const engine = makeEngine()
+    expect(engine.markerAnswer('stray')).toMatchObject({ ok: true, error: 'duplicate-end' })
+    expect(engine.isOpen()).toBe(false)
+    const index = engine.indexRows()
+    expect(index).toHaveLength(1)
+    expect(index[0]!.sealedAt).not.toBeNull()
   })
 
   it('a new question clears the table and resets slot revisions', () => {
     const engine = makeEngine()
     engine.markerQuestion('q1')
-    engine.opSet('test', { type: 'string', value: 'old' })
-    engine.opSet('R', { type: 'number', value: 100, kind: QuantityKind.Resistance })
-    expect(engine.opSet('R', { type: 'number', value: 220, kind: QuantityKind.Resistance })).toMatchObject({ ok: true, rev: 2 })
+    seedTable(engine, 'test', { type: 'string', value: 'old' })
+    seedTable(engine, 'R', { type: 'number', value: 100, kind: QuantityKind.Resistance })
+    expect(engine.table.set('R', { type: 'number', value: 220, kind: QuantityKind.Resistance }).rev).toBe(2)
     engine.markerAnswer('done')
     // The next question starts from an empty table: old slots are gone, rev restarts at 1.
     engine.markerQuestion('q2')
-    expect(engine.opGet('test')).toMatchObject({ ok: false })
-    expect(engine.opGet('R')).toMatchObject({ ok: false })
-    expect(engine.opSet('R', { type: 'number', value: 5, kind: QuantityKind.Resistance })).toMatchObject({ ok: true, rev: 1 })
+    expect(engine.table.get('test')).toBeUndefined()
+    expect(engine.table.get('R')).toBeUndefined()
+    expect(engine.table.set('R', { type: 'number', value: 5, kind: QuantityKind.Resistance }).rev).toBe(1)
     engine.markerAnswer('done again')
   })
 
-  it('set/get round-trip and delete; get on an undeclared slot errors with no side effects', () => {
+  it('refuses a slot name that is not an identifier, with no side effects', () => {
     const engine = makeEngine()
     engine.markerQuestion('q')
-    const setReceipt = engine.opSet('R', { type: 'number', value: 100, kind: QuantityKind.Resistance, prefix: 'kilo' })
-    expect(setReceipt).toMatchObject({ ok: true, rev: 1 })
-    const get = engine.opGet('R')
-    expect(get).toMatchObject({ ok: true })
-    expect((get as unknown as { value: { value: number } }).value.value).toBe(100)
-    // The table stores verbatim: get reads back with the prefix still attached
-    expect((get as unknown as { value: { prefix: string } }).value.prefix).toBe('kilo')
-    const missing = engine.opGet('X')
-    expect(missing).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
-    // A slot reference in set stores a COPY of the referenced value (verbatim representation)
-    expect(engine.opSet('Y', { type: 'slot', value: 'R' })).toMatchObject({ ok: true, rev: 1 })
-    const y = engine.opGet('Y')
-    expect((y as unknown as { value: { value: number } }).value.value).toBe(100)
-    expect((y as unknown as { value: { prefix: string } }).value.prefix).toBe('kilo')
-    // Overwriting the source leaves the copy untouched
-    engine.opSet('R', { type: 'number', value: 200, kind: QuantityKind.Resistance, prefix: 'kilo' })
-    const y2 = engine.opGet('Y')
-    expect((y2 as unknown as { value: { value: number } }).value.value).toBe(100)
-    // Copying a missing slot errors with no side effects
-    expect(engine.opSet('Z', { type: 'slot', value: 'missing' })).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
-    expect(engine.opGet('Z')).toMatchObject({ ok: false })
-    const del = engine.opSet('R', null)
-    expect(del).toMatchObject({ ok: true, deleted: true })
-    expect(engine.opGet('R')).toMatchObject({ ok: false })
-  })
-
-  it('call executes a local solver: resolved/result land in the trace row, target is always overwritten', async () => {
-    const engine = makeEngine()
-    engine.registry.register({
-      id: 'double_rc',
-      summary: 'double',
-      parameters: { r: { type: 'complex', kind: QuantityKind.Resistance } },
-      returns: { type: 'complex', kind: QuantityKind.Resistance },
-      run: (args) => ({ re: (args.r as number) * 2, im: 0 }),
-    })
-    engine.markerQuestion('q')
-    engine.opSet('R', { type: 'number', value: 10, kind: QuantityKind.Resistance })
-    const receipt = await engine.opCall('double_rc', { r: { type: 'slot', value: 'R' } }, 'D')
-    expect(receipt).toMatchObject({ ok: true, target: 'D', rev: 1 })
-    const second = await engine.opCall('double_rc', { r: { type: 'slot', value: 'R' } }, 'D')
-    expect(second).toMatchObject({ ok: true, rev: 2 })
-    const got = engine.opGet('D')
-    expect((got as unknown as { value: { value: { re: number } } }).value.value.re).toBe(20)
-    // Trace rows carry result (both inputs and outputs are recorded)
+    expect(engine.opGet('1R')).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(engine.opGet('R')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+    // The failure is recorded, and nothing was created.
     const rows = engine.store.readRows(String(engine.openId()))
-    const callRow = rows.find((row) => row.tool === 'call' && row.solver === 'double_rc')
-    expect(callRow).toBeDefined()
-    expect(callRow!.result).toBeDefined()
-    expect((callRow!.resolved as { r: { value: number } }).r.value).toBe(10)
+    expect(rows.filter((row) => row.ok === false)).toHaveLength(2)
+    expect(engine.table.get('R')).toBeUndefined()
     engine.markerAnswer('done')
   })
 
-  it('call validation: undeclared reference, kind mismatch, void target, non-void without target', async () => {
+  it('set with null deletes a slot and records the deletion', () => {
     const engine = makeEngine()
-    engine.registry.register({
-      id: 'needs_r',
-      summary: 'needs r',
-      parameters: { r: { type: 'complex', kind: QuantityKind.Resistance } },
-      returns: { type: 'complex', kind: QuantityKind.None },
-      run: (args) => (args.r as number),
-    })
-    engine.registry.register({
-      id: 'does_nothing',
-      summary: 'void',
-      parameters: {},
-      returns: null,
-      run: () => undefined,
-    })
     engine.markerQuestion('q')
-    engine.opSet('C', { type: 'number', value: 5, kind: QuantityKind.Capacitance })
-    await expect(engine.opCall('needs_r', { r: { type: 'slot', value: 'X' } }, 'D')).resolves.toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
-    await expect(engine.opCall('needs_r', { r: { type: 'slot', value: 'C' } }, 'D')).resolves.toMatchObject({ ok: false, code: 'ENGINE_KIND_MISMATCH' })
-    // A bare string is a literal, never a reference: it fails the typed-value check
-    await expect(engine.opCall('needs_r', { r: '@X' }, 'D')).resolves.toMatchObject({ ok: false, code: 'ENGINE_ARGS' })
-    await expect(engine.opCall('does_nothing', {}, 'D')).resolves.toMatchObject({ ok: false, code: 'ENGINE_VOID_TARGET' })
-    await expect(engine.opCall('does_nothing', {}, null)).resolves.toMatchObject({ ok: true, target: null })
-    await expect(engine.opCall('needs_r', { r: { type: 'number', value: 1, kind: QuantityKind.Resistance } }, null)).resolves.toMatchObject({ ok: false, code: 'ENGINE_TARGET_REQUIRED' })
-    await expect(engine.opCall('ghost', {}, null)).resolves.toMatchObject({ ok: false, code: 'ENGINE_UNKNOWN_SOLVER' })
-  })
-
-  it('failure receipts name the argument, the expected spec and the slot-reference form', async () => {
-    const engine = makeEngine()
-    engine.registry.register({
-      id: 'two_args',
-      summary: 'two args',
-      parameters: {
-        a: { type: 'complex', kind: QuantityKind.Resistance },
-        b: { type: 'string', enum: ['x', 'y'] },
-      },
-      returns: { type: 'complex', kind: QuantityKind.None },
-      run: (args) => (args.a as number),
-    })
-    engine.markerQuestion('q')
-    // Missing arguments are all listed at once, each with its expected spec
-    await expect(engine.opCall('two_args', {}, 'D')).resolves.toMatchObject({
-      ok: false,
-      code: 'ENGINE_ARGS',
-      error: expect.stringMatching(/missing required arguments: a: complex\(resistance\), b: string\(x\|y\)/),
-    })
-    // A bad literal names the argument and the expected spec
-    await expect(engine.opCall('two_args', { a: 5, b: { type: 'string', value: 'x' } }, 'D')).resolves.toMatchObject({
-      ok: false,
-      code: 'ENGINE_ARGS',
-      error: expect.stringMatching(/argument "a": .*expected complex\(resistance\)/),
-    })
-    // A bare "@name" string gets the migration hint instead of a silent loop
-    await expect(engine.opCall('two_args', { a: '@R', b: { type: 'string', value: 'x' } }, 'D')).resolves.toMatchObject({
-      ok: false,
-      code: 'ENGINE_ARGS',
-      error: expect.stringMatching(/"@name" strings are no longer references/),
-    })
-  })
-
-  it('slot references nested inside array/object arguments expand at the call boundary', async () => {
-    const engine = makeEngine()
-    engine.registry.register({
-      id: 'nested_refs',
-      summary: 'nested refs',
-      parameters: {
-        times: { type: 'array', items: { type: 'complex', kind: QuantityKind.Time } },
-        cfg: { type: 'object', fields: { gain: { type: 'complex', kind: QuantityKind.None } } },
-      },
-      returns: { type: 'complex', kind: QuantityKind.None },
-      run: (args) => (args.cfg as { gain: number }).gain,
-    })
-    engine.markerQuestion('q')
-    engine.opSet('t', { type: 'number', value: 1, kind: QuantityKind.Time })
-    engine.opSet('g', { type: 'number', value: 2, kind: QuantityKind.None })
-    // Array items and object fields may be slot references
-    const ok = await engine.opCall('nested_refs', {
-      times: { type: 'array', value: [{ type: 'slot', value: 't' }] },
-      cfg: { type: 'object', value: { gain: { type: 'slot', value: 'g' } } },
-    }, 'D')
-    expect(ok).toMatchObject({ ok: true })
+    // Seed through the table, then delete through the engine op (null is a real input).
+    seedTable(engine, 'R', { type: 'number', value: 100, kind: QuantityKind.Resistance })
+    expect(engine.opSet('R', null)).toMatchObject({ ok: true, deleted: true })
+    expect(engine.table.get('R')).toBeUndefined()
+    expect(engine.opSet('R', null)).toMatchObject({ ok: true, deleted: false })
     const rows = engine.store.readRows(String(engine.openId()))
-    const callRow = rows.find((row) => row.tool === 'call' && row.solver === 'nested_refs')
-    expect((callRow!.resolved as { times: { value: { value: number }[] } }).times.value[0]!.value).toBe(1)
-    // A missing nested slot is a declared-slot failure, not a shape failure
-    await expect(engine.opCall('nested_refs', {
-      times: { type: 'array', value: [{ type: 'slot', value: 'missing' }] },
-      cfg: { type: 'object', value: { gain: { type: 'number', value: 1, kind: QuantityKind.None } } },
-    }, 'D')).resolves.toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+    expect(rows.filter((row) => row.tool === 'set' && row.deleted === true)).toHaveLength(1)
+    engine.markerAnswer('done')
   })
 
-  it('converts a quantity nested in an array or object argument, and says so in the trace', async () => {
-    const engine = makeEngine()
-    engine.registry.register({
-      id: 'sum_lengths',
-      summary: 'adds the items up',
-      parameters: { lengths: { type: 'array', items: { type: 'complex', kind: QuantityKind.Length } } },
-      returns: { type: 'complex', kind: QuantityKind.Length },
-      run: (args) => (args.lengths as number[]).reduce((total, item) => total + item, 0),
-    })
-    engine.markerQuestion('q')
-    engine.opSet('L', { type: 'number', value: 2, kind: QuantityKind.Length, variant: 'inch' })
-    // 0.1 kilo-metre + 2 inch (via a slot) = 100.0508 m; before the recursion the kernel saw 0.1 + 2
-    const receipt = await engine.opCall('sum_lengths', {
-      lengths: { type: 'array', value: [{ type: 'number', value: 0.1, kind: QuantityKind.Length, prefix: 'kilo' }, { type: 'slot', value: 'L' }] },
-    }, 'total')
-    expect(receipt).toMatchObject({ ok: true })
-    expect((engine.opGet('total') as unknown as { value: { value: number } }).value.value).toBeCloseTo(100.0508, 10)
-    const rows = engine.store.readRows(String(engine.openId()))
-    const callRow = rows.find((row) => row.tool === 'call' && row.solver === 'sum_lengths')
-    const resolved = (callRow!.resolved as { lengths: { value: { value: number }[] } }).lengths.value
-    expect(resolved.map((item) => item.value)).toEqual([100, 0.0508])
-  })
-
-  it('solver run throws → ok:false ENGINE_SOLVER_FAILED, no slot is created', async () => {
-    const engine = makeEngine()
-    engine.registry.register({
-      id: 'boom',
-      summary: 'boom',
-      parameters: {},
-      returns: { type: 'complex', kind: QuantityKind.None },
-      run: () => {
-        throw new Error('singular system')
-      },
-    })
-    engine.markerQuestion('q')
-    await expect(engine.opCall('boom', {}, 'X')).resolves.toMatchObject({ ok: false, code: 'ENGINE_SOLVER_FAILED', error: 'singular system' })
-    expect(engine.opGet('X')).toMatchObject({ ok: false })
-  })
-
-  it('interruption recovery: a restart rebuilds the table and continues the same file', () => {
+  it('interruption recovery: a restart replays the trace and continues the same file', () => {
     const engine = makeEngine()
     engine.markerQuestion('q')
-    engine.opSet('R', { type: 'number', value: 100, kind: QuantityKind.Resistance })
+    // A row written the way opSet writes it; the value parser lands in the next phase.
+    engine.store.appendRow(String(engine.openId()), {
+      seq: 2, at: Date.now(), tool: 'set', ok: true, name: 'R', rev: 1,
+      value: { type: 'number', value: 100, kind: QuantityKind.Resistance },
+    } as never)
+    engine.table.set('R', { type: 'number', value: 100, kind: QuantityKind.Resistance })
     const id = String(engine.openId())
-    // Simulate a restart: a new engine on the same home
+    // Simulate a restart: a new engine on the same home.
     const revived = new Engine(home)
     revived.start()
     expect(revived.openId()).toBe(id)
-    const got = revived.opGet('R')
-    expect((got as unknown as { value: { value: number } }).value.value).toBe(100)
+    // The table comes back from the stored trace — not from recomputation.
+    expect(revived.table.get('R')?.value).toMatchObject({ type: 'number', value: 100, kind: 'resistance' })
     revived.markerAnswer('done')
     expect(revived.isOpen()).toBe(false)
   })
 })
 
-describe('receipts are serializable (tool boundary)', () => {
-  it('every receipt is a JSON-serializable object', () => {
+describe('eval: writes the target and traces the step', () => {
+  it('evaluates a formula, writes the target, and records formula/vars/result', () => {
+    const engine = makeEngine()
+    engine.markerQuestion('divider')
+    expect(engine.opSet('V_in', '12volt')).toMatchObject({ ok: true, rev: 1 })
+    expect(engine.opSet('R1', '4.7kohm')).toMatchObject({ ok: true, rev: 1 })
+    expect(engine.opSet('R2', '220ohm')).toMatchObject({ ok: true, rev: 1 })
+
+    expect(engine.opEval('@V_in*@R2/(@R1+@R2)', 'V_out')).toMatchObject({ ok: true, target: 'V_out', rev: 1 })
+    // eval does not return the value: the model reads it with get.
+    expect(engine.opGet('V_out')).toMatchObject({ ok: true, value: '0.536585365854volt' })
+
+    const row = engine.store.readRows(String(engine.openId())).find((item) => item.tool === 'eval')
+    expect(row).toMatchObject({
+      tool: 'eval', ok: true, formula: '@V_in*@R2/(@R1+@R2)', target: 'V_out', rev: 1,
+      vars: {
+        V_in: { type: 'number', value: 12, kind: 'voltage' },
+        R1: { type: 'number', value: 4700, kind: 'resistance' },
+        R2: { type: 'number', value: 220, kind: 'resistance' },
+      },
+      result: { type: 'number', value: 12 * (220 / 4920), kind: 'voltage' },
+    })
+    engine.markerAnswer('done')
+  })
+
+  it('overwrites the same slot with the same kind and bumps rev', () => {
     const engine = makeEngine()
     engine.markerQuestion('q')
-    const receipt = engine.opSet('R', { type: 'number', value: 1, kind: QuantityKind.None })
+    engine.opSet('R', '100ohm')
+    expect(engine.opEval('2*@R', 'R2')).toMatchObject({ ok: true, rev: 1 })
+    expect(engine.opEval('3*@R', 'R2')).toMatchObject({ ok: true, rev: 2 })
+    engine.markerAnswer('done')
+  })
+
+  it('refuses a result whose kind differs from the slot it would write, with no side effect', () => {
+    const engine = makeEngine()
+    engine.markerQuestion('q')
+    engine.opSet('R', '100ohm')
+    // 100 * R is an unnamed dimension (ohm^2), and R2 is pinned to resistance.
+    const refused = engine.opEval('@R*@R', 'R2')
+    expect(refused).toMatchObject({ ok: false, code: 'ENGINE_DIM_MISMATCH' })
+    expect(engine.table.get('R2')).toBeUndefined()
+    // R2 pinned to resistance, then a current written there is refused.
+    engine.opEval('1*@R', 'R2')
+    expect(engine.opEval('@R/@R', 'R2')).toMatchObject({ ok: false, code: 'ENGINE_DIM_MISMATCH' })
+    expect(engine.table.get('R2')?.rev).toBe(1)
+    engine.markerAnswer('done')
+  })
+
+  it('with target null evaluates without writing a slot', () => {
+    const engine = makeEngine()
+    engine.markerQuestion('q')
+    engine.opSet('R', '100ohm')
+    expect(engine.opEval('@R/@R', null)).toMatchObject({ ok: true, target: null, rev: null })
+    expect(engine.table.has('P')).toBe(false)
+    const row = engine.store.readRows(String(engine.openId())).find((item) => item.tool === 'eval')
+    expect(row).toMatchObject({ target: null, result: { type: 'number', value: 1, kind: 'none' } })
+    engine.markerAnswer('done')
+  })
+
+  it('refuses an undeclared slot and a bad target name, recording the failure and nothing else', () => {
+    const engine = makeEngine()
+    engine.markerQuestion('q')
+    expect(engine.opEval('@nope*2', 'X')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+    expect(engine.opEval('1+1', 'not a name')).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(engine.table.entries()).toHaveLength(0)
+    const rows = engine.store.readRows(String(engine.openId())).filter((row) => row.ok === false)
+    expect(rows).toHaveLength(2)
+    engine.markerAnswer('done')
+  })
+
+  it('recovering a record replays eval results from their stored values', () => {
+    const engine = makeEngine()
+    engine.markerQuestion('q')
+    engine.opSet('V', '12volt')
+    engine.opSet('R', '4ohm')
+    engine.opEval('@V/@R', 'I')
+    const revived = new Engine(home)
+    revived.start()
+    expect(revived.table.get('I')?.value).toMatchObject({ type: 'number', value: 3, kind: 'current' })
+    revived.markerAnswer('done')
+  })
+})
+
+describe('receipts are serializable (tool boundary)', () => {
+  it('a receipt is a JSON-serializable object', () => {
+    const engine = makeEngine()
+    engine.markerQuestion('q')
+    const receipt = engine.markerAnalyse('approach')
     expect(() => JSON.stringify(receipt)).not.toThrow()
     expect(JSON.parse(JSON.stringify(receipt))).toMatchObject({ ok: true })
   })

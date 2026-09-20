@@ -1,11 +1,15 @@
 /**
- * Engine tool surface: the set / get / call primitives, solver_info
- * introspection and the record markers.
+ * Engine tool surface: the set / get / eval primitives and the record markers.
  * Thin wrapper: arguments pass schema validation then go to the engine shell; a uniform receipt (ok) is returned.
+ *
+ * Every input is a plain string. The model writes `4.7kohm` or a formula — not
+ * a JSON envelope — and the engine parses it; nothing here asks the model to
+ * build an object per value.
  */
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { defineJsonTool } from '../tool.ts'
 import type { Engine } from '../engine/engine.ts'
+import { prefixVocabulary, unitVocabulary } from '../engine/units.ts'
 
 declare module 'cordis' {
   interface Context {
@@ -13,60 +17,73 @@ declare module 'cordis' {
   }
 }
 
-/** Typed-value syntax: the generic passage taught to the model (value universe). */
+/** Value grammar: the string forms a slot accepts. The vocabularies come from the engine's tables. */
 const VALUE_GUIDE =
-  'A typed value is a JSON object: ' +
-  '{ "type": "number", "value": <number>, "kind": <quantity kind>, "variant"?: <word>, "prefix"?: <word> } or ' +
-  '{ "type": "complex", "value": { "re": …, "im": … } or { "mag": …, "ang": … (radians) }, "kind": <kind> } or ' +
-  '{ "type": "string", "value": "…" } / { "type": "boolean", "value": true } / ' +
-  '{ "type": "array", "value": [<typed values>] } / { "type": "object", "value": { <field>: <typed value> } }. ' +
-  'kind is part of a quantity (resistance, voltage, time, frequency, none, …). ' +
-  'variant words (degC/degF for temperature, deg for angle, bar/psi/atm for pressure, cal/Wh, hp, inch/foot/yard/mile, lb/oz) ' +
-  'select a non-SI representation; omit the field for the SI base. ' +
-  'prefix words: pico/nano/micro/milli/kilo/mega/giga/tera — omit for 1. ' +
-  'The engine stores values as given; SI conversion happens only at calculation boundaries.'
+  'A value is ONE string, written the way it is said: "4.7kohm", "100uohm", "12volt", "1.5second", "50hertz", ' +
+  '"25degC", "14.7psi", "2hp", "5" (a bare count). ' +
+  `Prefixes are one letter and must be followed by a unit: ${prefixVocabulary()} (10^-12 … 10^12). ` +
+  `Units and variants are full words: ${unitVocabulary()}. ` +
+  'Complex: "2j", "3+4i"; scientific notation "1e5" (lowercase e only). ' +
+  'Structures: "[100ohm, 220ohm]", "{v: 12volt, r: 100ohm}". ' +
+  'The engine parses the string into SI and keeps the kind; the prefix and the variant word are never stored.'
 
 const NAME_DESC = 'slot name: letters, digits, underscore; start with a letter or underscore'
+const FORMAT_DESC =
+  'how to print the value: a unit ("ohm"), a prefix+unit ("kohm"), a variant ("degC"), or "deg" / "rad" / "polar" / "json". Omit for the SI form ("4700ohm"). Printing never changes the stored value.'
+
+/** The `$` vocabulary, one line per family, phrased the way the engine reports it. */
+const NOTATION_GUIDE =
+  'Constants: $pi $e $inf $i $j. ' +
+  'Functions: $abs $sqrt $exp $ln $log $sin $cos $tan $asin $acos $atan $floor $ceil $sign $re $im $arg $conj $transpose; ' +
+  'two-argument: $atan2 $min $max $mod. ' +
+  'Bounded forms (subscript is the variable and its lower bound): $sum_{k=a}^{b}(body), $prod_{k=a}^{b}(body), $seq_{k=a}^{b}(body); ' +
+  '$seq builds an array, which [$index] then walks. ' +
+  '$integral_{a}^{b}(body, x), $diff(body, x) and $limit_{x->a}(body) can be written but NOT evaluated — use a closed form instead. ' +
+  'Data access: @x[k] takes an element (the index is an expression), @th.field takes an object field (a literal name). ' +
+  'Operators: + - * / ^ (multiplication always needs *, there is no implicit multiplication). ' +
+  'No comparison, no logic, no conditional, no assignment. ' +
+  'A bare name is a bound variable only; to read a slot write @name.'
 
 /** Factory: binds the global single-engine instance and produces LLM-visible tool definitions. */
 export function createEngineTools(engine: Engine): Array<ReturnType<typeof defineJsonTool>> {
-  const solverEnum = engine.registry.ids()
-  const solverList = solverEnum.length > 0 ? ` Available solver ids: ${solverEnum.join(', ')}.` : ''
   return [
     defineJsonTool({
       name: 'set',
-      description: `Write one slot in the engine. ${VALUE_GUIDE} Pass value: null to delete the slot (idempotent; re-creating later restarts at rev 1). Writing a slot with a different kind than its pinned kind fails — delete the slot first (value: null) to replace it with a different kind/type.`,
+      description: `Write one slot in the engine — the conditions the user gave, transcribed. ${VALUE_GUIDE} Pass value: null to delete the slot. Writing a different kind than the slot's pinned kind fails; delete the slot first (value: null) to replace it with a different kind.`,
       parameters: {
         name: { type: 'string', description: NAME_DESC, required: true },
-        value: { type: 'json', description: 'a typed value object, a slot reference (stores a copy of the referenced slot value), or null to delete the slot', required: true },
+        value: { type: 'json', description: 'one value string as above, or null to delete the slot', required: true },
       },
-      execute: (args) => engine.opSet(args.name as string, args.value) as never,
+      execute: (args) => engine.opSet(args.name as string, args.value as string | null) as never,
     }),
     defineJsonTool({
       name: 'get',
-      description: 'Read one slot from the engine. Returns the stored typed value exactly as written (no normalization).',
+      description: `Read one slot. Returns the value printed as text — this is the only way to read a slot, because eval does not return its value. ${FORMAT_DESC}`,
       parameters: {
         name: { type: 'string', description: NAME_DESC, required: true },
+        format: { type: 'string', description: FORMAT_DESC },
       },
-      execute: (args) => engine.opGet(args.name as string) as never,
+      execute: (args) => engine.opGet(args.name as string, args.format as string | undefined) as never,
     }),
     defineJsonTool({
-      name: 'call',
-      description: `Call one registered solver and store its result into a named slot. Every argument must be a TYPED value ({"type": "string", "value": "rc"}, {"type": "number", "value": 100, "kind": "resistance"}, {"type": "array", "value": [...]}) or a slot reference — { "type": "slot", "value": "name" } with the full slot path; bare strings, numbers and arrays are rejected. Slot references may also sit inside array items and object fields — they resolve to the stored value before validation. The engine kind-checks arguments against the solver signature. A void solver (declared returns: null) takes target: null; a value solver requires a named target. Overwriting an existing slot replaces its value (rev +1).${solverList}`,
+      name: 'eval',
+      description:
+        'Evaluate ONE formula and, when target is given, store the result in that slot. ' +
+        'The formula is a single expression — there is no assignment inside it: `@name` READS a slot, and `target` is the slot this call WRITES. ' +
+        'Example: formula "@Vin*@R2/(@R1+@R2)" with target "Vout". ' +
+        NOTATION_GUIDE +
+        ' The engine derives dimensions as it evaluates: a result whose kind does not match the target slot\'s kind is refused, and so is a formula that adds a bare count to a quantity (5+@Vin) — write 5volt. ' +
+        'It does not return the value — read it with `get`. ' +
+        'Prefer SEVERAL eval calls over one deeply nested expression: whenever the same sub-expression appears twice, the parentheses nest more than about three deep, or the line stops being readable, evaluate the intermediate first with its own target and read it back with `@` in the next call. Each call then leaves its own formula and result in the record.',
       parameters: {
-        solver: { type: 'string', enum: solverEnum, description: 'the registered solver to call', required: true },
-        args: { type: 'json', description: `solver arguments: an object mapping each parameter name to a typed value or a slot reference — run solver_info first to see each parameter's expected shape and a ready-to-send example`, required: true },
-        target: { type: 'json', description: 'result slot name (string), or null for void solvers', required: true },
+        formula: { type: 'string', description: 'the formula: one expression, referencing slots with @name', required: true },
+        target: {
+          type: 'json',
+          description: 'the slot to write the result into (a name string), or null to evaluate without storing anything',
+          required: true,
+        },
       },
-      execute: async (args) => engine.opCall(args.solver as string, args.args as Record<string, unknown> | undefined, args.target as string | null) as never,
-    }),
-    defineJsonTool({
-      name: 'solver_info',
-      description: `Inspect one registered solver before calling it: its parameter signature (parameter names, types, quantity kinds, allowed enum values, optional flags, nested items) and its returns (spec, or null for void). Read this whenever you are about to call a solver you have not used yet.${solverList}`,
-      parameters: {
-        solver: { type: 'string', enum: solverEnum, description: 'the registered solver to inspect', required: true },
-      },
-      execute: (args) => engine.opInfo(args.solver as string) as never,
+      execute: (args) => engine.opEval(args.formula as string, args.target as string | null) as never,
     }),
     defineJsonTool({
       name: 'record_question',

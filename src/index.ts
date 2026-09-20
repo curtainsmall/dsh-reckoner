@@ -1,28 +1,18 @@
 /**
- * Host half of dsh-reckoner (engine era).
+ * Host half of dsh-reckoner.
  *
- * One process-wide global engine (Engine): variable table + solver registry + record storage.
- * apply assembly: registers the kernel and external solvers, registers the LLM tool surface (set/get/call +
- * markers) and the declaration management tools (external_solver_add/update/delete), and mounts two
- * endpoints (record index, external solver archive management).
+ * One process-wide global engine (Engine): variable table + record storage.
+ * apply assembly: registers the LLM tool surface (set/get/eval + markers) and
+ * mounts the record and article-generation endpoints.
+ * The engine holds no domain knowledge: the model supplies the formula.
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from 'cordis'
 import { Engine } from './engine/engine.ts'
+import { recordFacts } from './engine/record-facts.ts'
 import { createEngineTools } from './tools/engine-tools.ts'
-import { createDeclarationTools } from './tools/declaration-tools.ts'
-import { compileExternalSolver } from './engine/external-solvers.ts'
-import { registerKernelSolvers } from './solvers/index.ts'
-import type { GenerationCall, GenerationResult, Record } from './generate.ts'
-import {
-  clearRestartRequired,
-  deleteDeclaration,
-  readDeclarations,
-  restartRequired,
-  upsertDeclaration,
-  validateDeclaration,
-} from './tool.ts'
+import type { Record } from './generate.ts'
 import { registerGenerateEndpoints } from './generate-server.ts'
 import { registerSkills } from './skill.ts'
 import { installPresets } from './preset.ts'
@@ -91,54 +81,12 @@ export const engine = new Engine(recordsHome)
 const RECORDS_INDEX_PATH = '/api/dsh-reckoner/records-index'
 // WebRoute paths carry no trailing slash; requests are /records/<id>.
 const RECORDS_BODY_PREFIX = '/api/dsh-reckoner/records'
-const EXTERNAL_PATH = '/api/dsh-reckoner/external-solvers'
 
-/**
- * Flatten one stored engine record into the article-generation facts: the
- * question, established conditions, analysis notes, successful solver steps
- * with their resolved arguments and results, and the final answer. Failed
- * attempts and introspection rows are skipped.
- */
+/** The article-generation facts of one stored record, or undefined when it does not exist. */
 function loadGenerationRecord(id: string): Record | undefined {
   const meta = engine.indexRows().find((row) => row.id === id)
   if (meta === undefined) return undefined
-  const conditions: string[] = []
-  const notes: string[] = []
-  const calls: GenerationCall[] = []
-  const results: GenerationResult[] = []
-  let answer = ''
-  for (const row of engine.store.readRows(id)) {
-    if (row.ok !== true) continue
-    if (row.tool === 'marker') {
-      const text = typeof row.text === 'string' ? row.text.trim() : ''
-      if (text.length === 0) continue
-      if (row.kind === 'analyse') notes.push(text)
-      else if (row.kind === 'answer') answer = text
-      continue
-    }
-    if (row.tool === 'set') {
-      const name = typeof row.name === 'string' ? row.name : ''
-      if (row.deleted === true) conditions.push(`${name}: removed`)
-      else conditions.push(`${name}: ${JSON.stringify(row.value)}`)
-      continue
-    }
-    if (row.tool === 'call' && typeof row.solver === 'string') {
-      const callId = String(row.seq)
-      calls.push({
-        callId,
-        name: row.solver,
-        arguments: JSON.stringify(row.resolved ?? row.args ?? {}),
-      })
-      if (row.result !== null && row.result !== undefined) {
-        results.push({ callId, content: JSON.stringify(row.result) })
-      }
-    }
-  }
-  const analyse = [
-    conditions.length > 0 ? `Established conditions:\n${conditions.map((line) => `- ${line}`).join('\n')}` : '',
-    ...notes,
-  ].filter((line) => line.length > 0).join('\n\n')
-  return { id, question: meta.question, analyse, answer, calls, results }
+  return recordFacts(meta, engine.store.readRows(id))
 }
 
 export function apply(ctx: Context): void {
@@ -170,36 +118,12 @@ export function apply(ctx: Context): void {
   ctx.effect(() => {
     const disposers: Array<() => void> = []
 
-    // Engine wiring: recover the open record (clear orphans + rebuild the table), register all kernel and external solvers.
+    // Engine wiring: recover the open record (clear orphans + rebuild the table).
+    // There is nothing to register — the engine holds no domain knowledge.
     engine.start()
-    for (const solver of registerKernelSolvers()) {
-      if (engine.registry.get(solver.id) === undefined) engine.registry.register(solver)
-    }
-    // External solvers: every enabled declaration in the archive is compiled
-    // into the registry at start (changes apply on the next host restart).
-    for (const declaration of readDeclarations(recordsHome)) {
-      if (declaration.enabled === false) continue
-      try {
-        const solver = compileExternalSolver(declaration)
-        if (solver !== null && engine.registry.get(solver.id) === undefined) engine.registry.register(solver)
-      } catch (error) {
-        log.warn('declaration skipped', { solver: declaration.name, error })
-      }
-    }
-    // A host restart consumes the pending-changes flag: whatever the archive held has been loaded by
-    // now. Never fatal — a state file that cannot be written must not keep the plugin from mounting.
-    try {
-      clearRestartRequired(recordsHome)
-    } catch (error) {
-      log.warn('restart flag not cleared', { home: recordsHome, error })
-    }
 
     // LLM tool surface: engine primitives + markers.
     for (const tool of createEngineTools(engine)) {
-      disposers.push(ctx.tools.register(tool))
-    }
-    // Declaration management tools (the management surface lives outside the engine).
-    for (const tool of createDeclarationTools(recordsHome)) {
       disposers.push(ctx.tools.register(tool))
     }
 
@@ -280,55 +204,6 @@ export function apply(ctx: Context): void {
           question: meta.question,
           rows: engine.store.readRows(id),
         }))
-      }),
-    }))
-
-    // External solver archive management: GET lists + dirty bit; PUT overwrites/adds (base64 JSON query parameter);
-    // DELETE ?name= removes. Every write sets the dirty bit (registered via compileExternalSolver after a restart).
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: EXTERNAL_PATH,
-      handler: guard(EXTERNAL_PATH, (req, res) => {
-        const request = req as RequestLike
-        const method = request.method ?? 'GET'
-        res.setHeader('content-type', 'application/json')
-        if (method === 'PUT') {
-          const encoded = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('config')
-          if (encoded === null) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: 'config parameter is required (base64 JSON)' }))
-            return
-          }
-          let config: unknown
-          try {
-            config = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
-          } catch {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: 'config is not valid base64 JSON' }))
-            return
-          }
-          const errors = validateDeclaration(config)
-          if (errors.length > 0) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: errors.join('; ') }))
-            return
-          }
-          upsertDeclaration(recordsHome, config as never)
-          res.end(JSON.stringify({ saved: true, restartRequired: true }))
-          return
-        }
-        if (method === 'DELETE') {
-          const name = request.url === undefined ? null : new URL(request.url, 'http://dsh.local').searchParams.get('name')
-          const deleted = name !== null && deleteDeclaration(recordsHome, name)
-          res.end(JSON.stringify({ deleted, restartRequired: restartRequired(recordsHome) }))
-          return
-        }
-        if (method !== 'GET') {
-          res.statusCode = 405
-          res.end('method not allowed')
-          return
-        }
-        res.end(JSON.stringify({ solvers: readDeclarations(recordsHome), restartRequired: restartRequired(recordsHome) }))
       }),
     }))
 

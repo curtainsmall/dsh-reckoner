@@ -14,7 +14,7 @@ export interface Slot {
 export class VariableTable {
   private slots = new Map<string, Slot>()
 
-  /** A slot's semantic identity: number/complex use kind; other types use type (string/boolean/array/object). */
+  /** A slot's semantic identity: number/complex use kind; other types use type (string/array/object). */
   static identity(value: TypedValue): string {
     if (value.type === 'number' || value.type === 'complex') return `${value.type}:${value.kind}`
     return value.type
@@ -39,7 +39,7 @@ export class VariableTable {
     if (VariableTable.identity(existing.value) !== VariableTable.identity(value)) {
       throw new ToolError(
         `slot "${name}" is pinned to ${VariableTable.identity(existing.value)}, got ${VariableTable.identity(value)} — delete it first (set "${name}" = null) to replace it with a different kind/type`,
-        ToolErrorCode.KindMismatch,
+        ToolErrorCode.SlotKind,
       )
     }
     const slot = { value, rev: existing.rev + 1 }

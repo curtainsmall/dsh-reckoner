@@ -7,22 +7,25 @@
  *
  * The generation call has its own independent context — only this prompt is
  * visible to the model — so the record is presented as plain facts, WITHOUT
- * the bracketed record-section labels (question/analysis/tool calls/results/
- * answer), which would steer the model toward a sectioned five-part output.
+ * the bracketed record-section labels (question/analysis/steps/answer), which
+ * would steer the model toward a sectioned output.
  */
 
-/** One successful call row of the trace, flattened for the prompt. */
-export interface GenerationCall {
-  callId: string
-  name: string
-  arguments: string
-}
-
-/** One successful result row of the trace, flattened for the prompt. */
-export interface GenerationResult {
-  callId: string
-  content: string
-  error?: { name: string; code: string }
+/**
+ * One successful `eval` row of the trace, flattened for the prompt: the formula
+ * the model wrote, the slot values it substituted, and the result.
+ *
+ * The record is the only place the formula survives — there is no catalog name
+ * to fall back on — so `formula` is what lets the article show the derivation
+ * rather than just its outcome.
+ */
+export interface GenerationStep {
+  seq: string
+  formula: string
+  /** Injected slot values, as JSON text. */
+  vars: string
+  /** The step's result, as JSON text. */
+  result: string
 }
 
 /** The record facts the generation prompt is built from (engine trace → this shape). */
@@ -33,8 +36,7 @@ export interface Record {
   question: string
   analyse: string
   answer: string
-  calls: GenerationCall[]
-  results: GenerationResult[]
+  steps: GenerationStep[]
 }
 
 /** System + user prompt pair for one record. */
@@ -122,16 +124,17 @@ export function normalizeFileName(fileName: string, format: ArticleFormat): stri
 }
 
 /** The record rendered as neutral facts for the model (values verbatim). */
-function renderRecord(record: Record): string {
+export function renderRecordFacts(record: Record): string {
   const lines: string[] = ['Record information to base the article on:', '']
   lines.push(`- The question to solve: ${record.question}`)
   if (record.analyse.length > 0) lines.push(`- Approach notes: ${record.analyse}`)
-  for (const call of record.calls) {
-    lines.push(`- Calculation step ${call.name}: ${call.arguments.length > 0 ? call.arguments : '(no arguments)'}`)
-  }
-  for (const result of record.results) {
-    const content = result.content.trim()
-    if (content.length > 0) lines.push(`- Step result: ${content}`)
+  for (const step of record.steps) {
+    const formula = step.formula.trim()
+    if (formula.length > 0) lines.push(`- Derivation step: ${formula}`)
+    const vars = step.vars.trim()
+    if (vars.length > 0 && vars !== '{}') lines.push(`  substituting: ${vars}`)
+    const result = step.result.trim()
+    if (result.length > 0) lines.push(`  result: ${result}`)
   }
   lines.push(`- Final answer: ${record.answer}`)
   return lines.join('\n')
@@ -139,9 +142,9 @@ function renderRecord(record: Record): string {
 
 const MARKDOWN_SHARED_RULES = [
   "Restate the question clearly at the start, in the user's own words. Remove any meta or filler text that was added while merging multiple inputs into one question.",
-  'Every number must come from the provided step results and the final answer — never invent or recompute values.',
+  'Every number must come from the provided derivation steps and the final answer — never invent or recompute values.',
   'Never include record ids or timestamps anywhere in the article.',
-  "Never mention Reckoner, DeepSeek Harness, the harness, solvers, calculation steps, records or the generation process in the article — present the work as if you carried out the calculation yourself, from the problem statement to the final result. The only allowed occurrences of the name are the document's fixed title 'DeepSeek Harness Reckoner Solution' and the author line 'DeepSeek Harness Reckoner'.",
+  "Never mention Reckoner, DeepSeek Harness, the harness, formulae, derivation steps, records or the generation process in the article — present the work as if you carried out the calculation yourself, from the problem statement to the final result. The only allowed occurrences of the name are the document's fixed title 'DeepSeek Harness Reckoner Solution' and the author line 'DeepSeek Harness Reckoner'.",
 ]
 
 /**
@@ -153,7 +156,7 @@ const MARKDOWN_SHARED_RULES = [
  */
 export function buildArticlePrompt(record: Record, language: ArticleLanguage = ArticleLanguage.Auto, format: ArticleFormat = ArticleFormat.Markdown): GeneratePrompt {
   const languageNote = language === ArticleLanguage.Auto ? '' : `\n\nImportant: ${articleLanguageInstruction(language)}`
-  const user = renderRecord(record) + languageNote
+  const user = renderRecordFacts(record) + languageNote
   switch (format) {
     case ArticleFormat.Latex:
       return {

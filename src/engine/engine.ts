@@ -1,18 +1,22 @@
 /**
  * Engine.
- * Global singleton: variable table + solver registry + record storage + a single open lifecycle.
- * Primitives (set/get/call) and markers execute through it; every step appends one trace row (with inputs and outputs).
+ * Global singleton: variable table + record storage + a single open lifecycle.
+ * Primitives (set/get/eval) and markers execute through it; every step appends
+ * one trace row (with inputs and outputs).
+ *
+ * The engine does no domain calculation: it parses values, evaluates formulas,
+ * checks dimensions and records. It holds no catalog of named formulas — the
+ * model supplies the mathematics as a formula, one expression per `eval`.
  */
 import { ToolError, ToolErrorCode } from '../errors.ts'
 import { log } from '../log.ts'
+import { checkDimension } from './dimension.ts'
+import { evaluateFormula } from './formula.ts'
+import { parseValueString } from './parse-value.ts'
+import { printValue } from './print-value.ts'
 import { VariableTable } from './table.ts'
-import { SolverRegistry, type SolverDef } from './registry.ts'
 import { RecordStore, type IndexRow, type TraceRow } from './storage.ts'
-import { callExternal } from './external.ts'
-import {
-  fromNative, isSlotValue, refPath, toCanonical, validateAgainstSpec, validateValue,
-  type Spec, type TypedValue,
-} from './values.ts'
+import { kindOf, toCanonical, validateValue, type TypedValue } from './values.ts'
 
 export type Receipt = { ok: true; [key: string]: unknown } | { ok: false; code: ToolErrorCode; error: string }
 
@@ -25,7 +29,6 @@ interface OpenState {
 
 export class Engine {
   readonly table = new VariableTable()
-  readonly registry = new SolverRegistry()
   readonly store: RecordStore
   private open: OpenState | null = null
 
@@ -56,17 +59,21 @@ export class Engine {
     return this.open?.id ?? null
   }
 
-  /** Rebuild engine state: set/call/set-null are applied per row; markers are skipped. */
+  /**
+   * Rebuild engine state from a stored trace: `set` rows are re-applied,
+   * everything else is skipped. `eval` rows carry their target, so the table
+   * comes back without recomputing anything.
+   */
   private replayInto(rows: TraceRow[]): void {
     for (const row of rows) {
       if (row.ok !== true) continue
       if (row.tool === 'set') {
         if (row.deleted === true) this.table.delete(String(row.name))
         else this.table.set(String(row.name), row.value as TypedValue)
-      } else if (row.tool === 'call') {
-        if (row.result !== null && row.result !== undefined && typeof row.target === 'string') {
-          this.table.set(row.target, row.result as TypedValue)
-        }
+        continue
+      }
+      if (row.tool === 'eval' && typeof row.target === 'string' && row.result !== null && row.result !== undefined) {
+        this.table.set(row.target, row.result as TypedValue)
       }
     }
   }
@@ -132,9 +139,14 @@ export class Engine {
     this.open = null
   }
 
-  /* ── set / get / call ────────────────────────────────────────────────── */
+  /* ── set / get / eval ────────────────────────────────────────────────── */
 
-  opSet(name: string, value: unknown): Receipt {
+  /**
+   * set: parse one value string and write the slot.
+   * The parse happens before anything is written — a value that does not parse
+   * leaves no trace row and no slot behind.
+   */
+  opSet(name: string, value: string | null): Receipt {
     try {
       this.validateName(name)
       if (value === null) {
@@ -142,200 +154,89 @@ export class Engine {
         this.trace({ tool: 'set', ok: true, name, value: null, deleted })
         return { ok: true, name, deleted }
       }
-      // Slot references (including nested ones) resolve to a COPY of the
-      // referenced value — references themselves are never stored.
-      const expanded = this.expandSlots(value, `set "${name}"`)
-      const error = validateValue(expanded)
-      if (error !== undefined) throw new ToolError(`set: ${error}`, ToolErrorCode.InvalidArgs)
-      const typed = expanded as TypedValue
-      const slot = this.table.set(name, typed)
-      this.trace({ tool: 'set', ok: true, name, value: typed, rev: slot.rev })
-      return { ok: true, name, rev: slot.rev }
+      const parsed = toCanonical(this.parseValue(value))
+      const problem = validateValue(parsed)
+      if (problem !== undefined) throw new ToolError(`${problem} — this is an engine bug, the parser produced a malformed value`, ToolErrorCode.Tool)
+      const slot = this.table.set(name, parsed)
+      this.trace({ tool: 'set', ok: true, name, value: parsed, rev: slot.rev })
+      return { ok: true, name, rev: slot.rev, value: this.printValue(parsed) }
     } catch (error) {
       return this.failure('set', error)
     }
   }
 
-  opGet(name: string): Receipt {
+  /** get: read one slot and print it in the requested format (default: SI). */
+  opGet(name: string, format?: string): Receipt {
     try {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new ToolError(`slot name "${name}" must match ^[A-Za-z_][A-Za-z0-9_]*$`, ToolErrorCode.ArgsInvalid)
+      }
       const slot = this.table.get(name)
-      if (slot === undefined) throw new ToolError(`slot "${name}" is not declared`, ToolErrorCode.SlotUndeclared)
-      this.trace({ tool: 'get', ok: true, name, value: slot.value })
-      return { ok: true, name, value: slot.value }
+      if (slot === undefined) {
+        throw new ToolError(
+          `slot "${name}" is not declared — only conditions given by the user, or the target of an earlier eval, exist`,
+          ToolErrorCode.SlotUndeclared,
+        )
+      }
+      const printed = this.printValue(slot.value, format)
+      this.trace({ tool: 'get', ok: true, name, format: format ?? null, value: slot.value })
+      return { ok: true, name, format: format ?? 'si', value: printed }
     } catch (error) {
       return this.failure('get', error)
     }
   }
 
-  /** Inspect one solver: its exact signature from the registry, traced as its own row. */
-  opInfo(solverId: string): Receipt {
+  /**
+   * eval: evaluate one formula and, when target is given, write the result there.
+   *
+   * The formula is a single expression: there is no assignment inside it. `@name`
+   * reads a slot, the target parameter writes one. The value is not returned —
+   * the model reads it with `get`, and the trace carries the result for the
+   * record.
+   *
+   * The write goes through the same path as `set`: the result's kind must match
+   * the kind the slot already pins, and a refusal leaves the slot untouched and
+   * records one failed row.
+   */
+  opEval(formula: string, target: string | null): Receipt {
     try {
-      const solver = this.registry.require(solverId)
-      this.trace({ tool: 'solver_info', ok: true, solver: solverId })
-      // Specs are plain JSON by design; round-trip them so the receipt carries plain data.
-      const signature = JSON.parse(JSON.stringify({ parameters: solver.parameters, returns: solver.returns })) as {
-        parameters: unknown
-        returns: unknown
+      const used = new Map<string, TypedValue>()
+      const result = evaluateFormula(formula, { readSlot: (name) => this.table.get(name)?.value, used })
+      if (target === null) {
+        this.trace({ tool: 'eval', ok: true, formula, target: null, rev: null, vars: Object.fromEntries(used), result })
+        return { ok: true, target: null, rev: null }
       }
-      // Per-parameter usage lines: expected shape plus a ready-to-send typed example.
-      const usage: Record<string, string> = {}
-      for (const [name, spec] of Object.entries(solver.parameters)) {
-        const optional = spec.optional === true ? ' (optional)' : ''
-        usage[name] = `${describeSpec(spec)}${optional} — send ${typedForm(spec)}`
+      this.validateName(target)
+      const existing = this.table.get(target)
+      if (existing !== undefined) {
+        // The dimensions say why: "expected voltage (kg·m²·s⁻³·A⁻¹), got current".
+        const derived = kindOf(result)
+        const pinned = kindOf(existing.value)
+        if (derived !== undefined && pinned !== undefined) {
+          const problem = checkDimension(derived, pinned)
+          if (problem !== undefined) throw new ToolError(problem, ToolErrorCode.DimMismatch)
+        }
       }
-      return {
-        ok: true,
-        solver: solver.id,
-        summary: solver.summary,
-        parameters: signature.parameters,
-        returns: signature.returns,
-        signature: usage,
-      }
-    } catch (error) {
-      return this.failure('solver_info', error)
-    }
-  }
-
-  async opCall(solverId: string, rawArgs: Record<string, unknown> | undefined, target: string | null): Promise<Receipt> {
-    const args: Record<string, unknown> = rawArgs ?? {}
-    try {
-      const solver = this.registry.require(solverId)
-      const { resolved, native } = this.resolveArgs(solver, args)
-      if (solver.returns === null) {
-        if (target !== null) throw new ToolError(`solver "${solverId}" returns void — target must be null`, ToolErrorCode.VoidTarget)
-        await this.runVoid(solver, resolved, native)
-        this.trace({ tool: 'call', ok: true, solver: solverId, args, resolved, result: null, target: null })
-        return { ok: true, target: null }
-      }
-      if (target === null) throw new ToolError(`solver "${solverId}" returns a value — a named target is required`, ToolErrorCode.TargetRequired)
-      const result = await this.execute(solver, resolved, native)
       const slot = this.table.set(target, result)
-      this.trace({ tool: 'call', ok: true, solver: solverId, args, resolved, result, target, rev: slot.rev })
+      this.trace({ tool: 'eval', ok: true, formula, target, rev: slot.rev, vars: Object.fromEntries(used), result })
       return { ok: true, target, rev: slot.rev }
     } catch (error) {
-      return this.failure('call', error)
+      return this.failure('eval', error)
     }
   }
 
-  private async runVoid(solver: SolverDef, resolved: Record<string, TypedValue>, native: Record<string, unknown>): Promise<void> {
-    try {
-      if (solver.external !== undefined) {
-        const result = await callExternal(solver.id, solver.external, resolved)
-        if (result !== null) throw new ToolError(`solver "${solver.id}" is void but the endpoint returned a result`, ToolErrorCode.ExternalResponse)
-        return
-      }
-      await solver.run(native)
-    } catch (error) {
-      if (error instanceof ToolError) throw error
-      throw new ToolError(error instanceof Error ? error.message : String(error), ToolErrorCode.SolverFailed)
-    }
+  /** Parse a value string into a canonical typed value (SI, rect complex). */
+  private parseValue(source: string): TypedValue {
+    return parseValueString(source)
   }
 
-  /** Resolve args: expand slot references + validate typed values + kind/shape checks + conversion (resolved = SI rect endpoint). */
-  private resolveArgs(solver: SolverDef, args: Record<string, unknown>): { resolved: Record<string, TypedValue>; native: Record<string, unknown> } {
-    const resolved: Record<string, TypedValue> = {}
-    const native: Record<string, unknown> = {}
-    const missing: string[] = []
-    for (const [name, spec] of Object.entries(solver.parameters)) {
-      const raw = args[name]
-      if (raw === undefined) {
-        if (spec.optional === true) continue
-        missing.push(`${name}: ${describeSpec(spec)}`)
-        continue
-      }
-      const typed = this.resolveValue(raw, name, spec)
-      const error = validateAgainstSpec(spec, typed, `argument "${name}"`)
-      if (error !== undefined) throw new ToolError(`solver "${solver.id}": ${error}`, ToolErrorCode.KindMismatch)
-      const canonical = toCanonical(typed)
-      resolved[name] = canonical
-      native[name] = nativeValue(spec, canonical)
-    }
-    if (missing.length > 0) {
-      throw new ToolError(`solver "${solver.id}" is missing required arguments: ${missing.join(', ')}`, ToolErrorCode.InvalidArgs)
-    }
-    return { resolved, native }
-  }
-
-  /** One argument value: a slot reference ({type: 'slot', value: full path}) or a typed-value literal
-   *  whose array items / object fields may themselves be slot references (expanded recursively). */
-  private resolveValue(raw: unknown, name: string, spec: Spec): TypedValue {
-    const expanded = this.expandSlots(raw, `argument "${name}"`)
-    const error = validateValue(expanded)
-    if (error !== undefined) {
-      const hint = typeof raw === 'string' && raw.startsWith('@')
-        ? ' — "@name" strings are no longer references: pass { "type": "slot", "value": "name" }'
-        : ''
-      const arrayHint = spec.type === 'array'
-        ? ' (or pass a slot reference to a slot that already holds the array)'
-        : ''
-      throw new ToolError(
-        `argument "${name}": ${error}; expected ${describeSpec(spec)} — send a typed value like ${typedForm(spec)}${arrayHint}${hint}`,
-        ToolErrorCode.InvalidArgs,
-      )
-    }
-    return expanded as TypedValue
-  }
-
-  /**
-   * Expand every slot reference in a value bound for the table or a call: a
-   * reference at the top level, or nested as an array item / object field,
-   * resolves to the stored typed value (or the field path inside it).
-   * References never survive into the table, the trace or kernel arguments.
-   * `ctx` labels the receiver in errors ("argument \"times\"" or "set \"B\"").
-   */
-  private expandSlots(raw: unknown, ctx: string): unknown {
-    if (isSlotValue(raw)) {
-      const reference = raw.value
-      const dot = reference.indexOf('.')
-      const slotName = dot === -1 ? reference : reference.slice(0, dot)
-      const path = dot === -1 ? undefined : reference.slice(dot + 1)
-      const slot = this.table.get(slotName)
-      if (slot === undefined) throw new ToolError(`${ctx}: slot "${slotName}" is not declared`, ToolErrorCode.SlotUndeclared)
-      return refPath(slot.value, path)
-    }
-    if (typeof raw === 'object' && raw !== null) {
-      const box = raw as { type?: unknown; value?: unknown }
-      if (box.type === 'array' && Array.isArray(box.value)) {
-        return { ...box, value: (box.value as unknown[]).map((item) => this.expandSlots(item, ctx)) }
-      }
-      if (box.type === 'object' && typeof box.value === 'object' && box.value !== null && !Array.isArray(box.value)) {
-        const fields: Record<string, unknown> = {}
-        for (const [key, field] of Object.entries(box.value as Record<string, unknown>)) {
-          fields[key] = this.expandSlots(field, ctx)
-        }
-        return { ...box, value: fields }
-      }
-    }
-    return raw
-  }
-
-  /** Run a non-void solver (local run or external transport); shape the result per its returns spec. */
-  private async execute(solver: SolverDef, resolved: Record<string, TypedValue>, native: Record<string, unknown>): Promise<TypedValue> {
-    const spec = solver.returns
-    if (spec === null) throw new ToolError(`solver "${solver.id}" is void`, ToolErrorCode.InvalidArgs)
-    let raw: unknown
-    try {
-      if (solver.external !== undefined) {
-        const result = await callExternal(solver.id, solver.external, resolved)
-        if (result === null) throw new ToolError(`solver "${solver.id}" is not void but the endpoint returned result: null`, ToolErrorCode.ExternalResponse)
-        const error = validateAgainstSpec(spec, result, `solver "${solver.id}" result`)
-        if (error !== undefined) throw new ToolError(`solver "${solver.id}": ${error}`, ToolErrorCode.ExternalResponse)
-        return result
-      }
-      raw = await solver.run(native)
-    } catch (error) {
-      if (error instanceof ToolError) throw error
-      throw new ToolError(error instanceof Error ? error.message : String(error), ToolErrorCode.SolverFailed)
-    }
-    try {
-      return fromNative(spec, raw, `solver "${solver.id}" result`)
-    } catch (error) {
-      throw new ToolError(error instanceof Error ? error.message : String(error), ToolErrorCode.SolverFailed)
-    }
+  /** Print a canonical value; `format` names a unit, prefix+unit, variant or `json`. */
+  private printValue(value: TypedValue, format?: string): string {
+    return printValue(value, format)
   }
 
   private validateName(name: string): void {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new ToolError(`slot name "${name}" must match ^[A-Za-z_][A-Za-z0-9_]*$`, ToolErrorCode.InvalidArgs)
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new ToolError(`slot name "${name}" must match ^[A-Za-z_][A-Za-z0-9_]*$`, ToolErrorCode.ArgsInvalid)
   }
 
   private failure(tool: string, error: unknown): Receipt {
@@ -347,75 +248,5 @@ export class Engine {
       this.trace({ tool, ok: false, code, error: message })
     }
     return { ok: false, code, error: message }
-  }
-}
-
-/** Compact human description of a spec, used in failure receipts so the model can self-correct. */
-function describeSpec(spec: Spec): string {
-  switch (spec.type) {
-    case 'number':
-      return `number(${spec.kind})`
-    case 'complex':
-      return `complex(${spec.kind})`
-    case 'string':
-      return spec.enum === undefined ? 'string' : `string(${spec.enum.join('|')})`
-    case 'boolean':
-      return 'boolean'
-    case 'array':
-      return `array of ${describeSpec(spec.items)}`
-    case 'object':
-      return `object with fields {${Object.keys(spec.fields).join(', ')}}`
-  }
-}
-
-/** A ready-to-send typed-value example for a spec (enum strings take their first allowed value). */
-function exampleTypedValue(spec: Spec): unknown {
-  switch (spec.type) {
-    case 'number':
-    case 'complex':
-      return { type: 'number', value: 1, kind: spec.kind }
-    case 'string':
-      return { type: 'string', value: spec.enum?.[0] ?? '…' }
-    case 'boolean':
-      return { type: 'boolean', value: true }
-    case 'array':
-      return { type: 'array', value: [exampleTypedValue(spec.items)] }
-    case 'object': {
-      const value: Record<string, unknown> = {}
-      for (const [key, fieldSpec] of Object.entries(spec.fields)) value[key] = exampleTypedValue(fieldSpec)
-      return { type: 'object', value }
-    }
-  }
-}
-
-/** The typed form a caller should send for this spec, as compact JSON text. */
-function typedForm(spec: Spec): string {
-  return JSON.stringify(exampleTypedValue(spec))
-}
-
-/** resolved typed value → kernel-native JS (a real stays a number, a complex goes in as rect; the rest recurse). */
-function nativeValue(spec: Spec, canonical: TypedValue): unknown {
-  switch (spec.type) {
-    case 'number':
-    case 'complex': {
-      if (canonical.type === 'number') return canonical.value
-      return canonical.value
-    }
-    case 'string':
-    case 'boolean':
-      return canonical.value
-    case 'array': {
-      if (canonical.type !== 'array') return canonical.value
-      return canonical.value.map((item) => nativeValue(spec.items, item))
-    }
-    case 'object': {
-      if (canonical.type !== 'object') return canonical.value
-      const out: Record<string, unknown> = {}
-      for (const [key, fieldSpec] of Object.entries(spec.fields)) {
-        const field = canonical.value[key]
-        if (field !== undefined) out[key] = nativeValue(fieldSpec, field)
-      }
-      return out
-    }
   }
 }

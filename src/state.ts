@@ -2,11 +2,10 @@
  * The plugin's one state file: `<home>/state.json`.
  *
  * Everything the plugin carries across host runs that is not a record lives in this single root
- * file: the remembered generation settings and the restart dirty bit for external declarations.
- * Logging is not state and never writes here — a run is described by its own log file. Two modules
- * share this file, so this module owns the read-modify-write: a writer names only the keys it owns
- * and every other key survives. Every key is a current value, so the file stays small and needs no
- * retention.
+ * file: the remembered generation settings. Logging is not state and never writes here — a run is
+ * described by its own log file. Two modules share this file, so this module owns the
+ * read-modify-write: a writer names only the keys it owns and every other key survives. Every key
+ * is a current value, so the file stays small and needs no retention.
  *
  * The file is replaced atomically (write a temporary file, then rename it over the target), so a
  * crash mid-write leaves the previous file intact rather than a truncated one. A missing, corrupt
