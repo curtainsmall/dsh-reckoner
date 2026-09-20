@@ -1,20 +1,17 @@
 /**
- * Quantity-kind system: the semantic-category enum (QuantityKind), plus
- * comparison helpers.
+ * The quantity-kind enum: the eighteen names a stored value's `kind` can take.
  *
- * IO is JSON-and-complex-only by contract: every value on the tool boundary
- * is a self-describing object { re, im, kind } where `kind` is the value of
- * a QuantityKind enum member — the quantity name (frequency, resistance).
- * Under the SI base system a quantity and its unit are one-to-one
- * (frequency ↔ hertz), and this codebase always speaks in quantity names:
- * the code uses `QuantityKind` (TS), the JSON contract uses `kind` as the
- * field with the quantity name as its value; the two always match.
+ * A kind is the name of a quantity, never a unit: `frequency` is `hertz`, and
+ * the unit words that express a kind live in the units table. Seven kinds are
+ * SI base quantities, nine are derived quantities whose dimension vector the
+ * engine knows, and two (`log`, `none`) are dimensionless without being counts
+ * — the distinction that makes `none + voltage` a refusal.
  *
- * All base quantities are always in scope; derived quantities are added
- * when a tool uses them. No strings, no symbols, no prefixes.
+ * `kindOf`/`dimensionOf` in the engine resolve a name to its vector; nothing
+ * outside them needs the arithmetic helpers that the old solver kernels used.
  */
 
-/** The semantic category a value belongs to (drives semantics and checks). */
+/** The semantic category a value belongs to (drives dimensions and checks). */
 export enum QuantityKind {
   // base quantities
   Time = 'time',
@@ -24,7 +21,7 @@ export enum QuantityKind {
   Temperature = 'temperature',
   AmountOfSubstance = 'amount-of-substance',
   LuminousIntensity = 'luminous-intensity',
-  // derived quantities in use
+  // derived quantities
   Frequency = 'frequency',
   Resistance = 'resistance',
   Capacitance = 'capacitance',
@@ -34,44 +31,10 @@ export enum QuantityKind {
   Angle = 'angle',
   Pressure = 'pressure',
   Energy = 'energy',
-  // scale/category modifiers
+  // dimensionless, each with its own identity
   Log = 'log',
   None = 'none',
 }
 
-/** The lowercase kind names (derived from the enum, no drift). Pure — usable from the browser. */
+/** The kind names, derived from the enum so the two cannot drift. */
 export const QUANTITY_KIND_NAMES: readonly string[] = Object.values(QuantityKind)
-
-/** Pure relative tolerance comparison (no absolute floor). Zero matches zero exactly. */
-export function isNearlyEqual(a: number, b: number, tol = 1e-9): boolean {
-  if (a === 0 && b === 0) return true
-  const scale = Math.max(Math.abs(a), Math.abs(b))
-  if (scale === 0) return a === b
-  return Math.abs(a - b) <= tol * scale
-}
-
-/** Quantity-kind-aware zero check: absolute threshold per kind (engineering floors). */
-export function isNegligible(value: number, kind: QuantityKind): boolean {
-  if (kind === QuantityKind.None) return Math.abs(value) <= 1e-12
-  const thresholds: Record<QuantityKind, number> = {
-    [QuantityKind.Time]: 1e-12,
-    [QuantityKind.Length]: 1e-9,
-    [QuantityKind.Mass]: 1e-12,
-    [QuantityKind.Current]: 1e-12,
-    [QuantityKind.Temperature]: 1e-9,
-    [QuantityKind.AmountOfSubstance]: 1e-12,
-    [QuantityKind.LuminousIntensity]: 1e-12,
-    [QuantityKind.Frequency]: 1e-3,
-    [QuantityKind.Resistance]: 1e-6,
-    [QuantityKind.Capacitance]: 1e-14,
-    [QuantityKind.Inductance]: 1e-12,
-    [QuantityKind.Voltage]: 1e-9,
-    [QuantityKind.Power]: 1e-12,
-    [QuantityKind.Angle]: 1e-9,
-    [QuantityKind.Pressure]: 1e-6,
-    [QuantityKind.Energy]: 1e-12,
-    [QuantityKind.Log]: 0,
-    [QuantityKind.None]: 1e-12,
-  }
-  return Math.abs(value) < thresholds[kind]
-}
