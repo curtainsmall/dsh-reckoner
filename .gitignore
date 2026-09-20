@@ -1,0 +1,24 @@
+# --- dependencies ---
+node_modules/
+.pnpm-store/
+
+# --- build output ---
+lib/
+dist/
+registry/
+*.tsbuildinfo
+
+# --- local env / secrets ---
+.env
+.env.*
+!.env.example
+*.local
+
+# --- plans and working notes (decision records, not project content) ---
+notes/
+
+# --- logs & misc ---
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
