@@ -8,7 +8,7 @@ describe('parseSkillFile', () => {
       [
         '---',
         'name: worked-solution',
-        'description: "Worked electrical/electronics solutions: analyse, plan"',
+        'description: "Worked solutions: analyse, plan, derive"',
         'whenToUse: "The user asks for a worked calculation"',
         '---',
         '# Worked Solution',
@@ -18,7 +18,7 @@ describe('parseSkillFile', () => {
       ].join('\n'),
     )
     expect(skill.name).toBe('worked-solution')
-    expect(skill.description).toBe('Worked electrical/electronics solutions: analyse, plan')
+    expect(skill.description).toBe('Worked solutions: analyse, plan, derive')
     expect(skill.whenToUse).toBe('The user asks for a worked calculation')
     expect(skill.content).toContain('# Worked Solution')
     expect(skill.content).toContain('Some instructions.')
@@ -44,6 +44,8 @@ describe('parseSkillFile', () => {
     expect(skill.name).toBe('reckoner-interface')
     expect(skill.description).toContain('engine manual')
     expect(skill.whenToUse).toContain('engine')
-    expect(skill.content).toContain('## Typed values')
+    for (const section of ['## Values', '## Tools', '## Receipts and errors', '## Record markers', '## Notation', '## Dimensions', '## Discipline']) {
+      expect(skill.content).toContain(section)
+    }
   })
 })

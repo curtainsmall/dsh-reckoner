@@ -7,10 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **The 38-solver catalog is gone: the model writes the formulas.** `call` and `solver_info` are replaced by `eval`, which takes one expression (`formula`) and the slot it writes (`target`, or `null` to evaluate without storing). The engine ships no solver, no registry and no domain knowledge at all; it parses values, applies every numerical rule and derives dimensions as it evaluates. Values are plain strings (`4.7kohm`, `12volt`, `2j`, `1e5`, `[100ohm, 220ohm]`, `{v: 12volt, r: 100ohm}`) instead of typed envelopes, and the `prefix`, `variant`, `boolean` and `{type:'slot'}` forms are gone — `@name` inside a formula is the only slot reference.
+- **A result must measure something the engine can name.** Every kind maps to a vector of the seven SI base dimensions; the engine carries the vector through the whole expression, so `@V/@R` is a current, an intermediate may be an unnamed dimension (`(@V)^2/@R` squares a voltage on the way to a power), and a result whose kind contradicts the target slot's kind — or lands on no kind at all — is refused before anything is written. There is no comparison, no logic, no conditional and no assignment in a formula: there is no `if`, no `==`, no `x = …` and no statement sequence, and a bare identifier is a binding variable introduced by `$sum`/`$prod`/`$seq`/`$diff`/`$integral`/`$limit`.
+- **External solvers are removed entirely** — the declaration archive, the registration HTTP protocol, the `external_solver_*` tools, the panel tab and the runnable example peer. The engine has no registry to register into.
+
+### Added
+
+- The `$` notation: 5 constants (`$pi` `$e` `$inf` `$i` `$j`), 19 unary and 4 binary functions, and 6 bounded forms (`$sum`, `$prod` and `$seq` evaluate; `$integral`, `$diff` and `$limit` parse but are refused with `ENGINE_SYMBOL_NOT_EVALUABLE`). Arrays are element-wise, `@x[k]` takes an element and `@th.field` a field, and `->` appears only in `$limit`'s subscript.
+- The `eval` trace row: `{seq, tool:'eval', ok, formula, target, rev, vars, result}`, where `vars` maps each slot the formula read to its stored value. Failed rows keep the shape `{seq, tool, ok:false, code, error}`. Recovery after a restart replays the stored results instead of recomputing them.
+- The records panel renders one card per `eval` step — the formula, the slot it was written to with its revision, the slots it substituted and the result — with `@name` chips that jump to the definition of each slot.
+- Error codes are unified as `ENGINE_<position>_<reason>`, every message carries the concrete value that failed and a fix, and `error` stays the only text the model sees.
+
 ### Changed
 
-- **The project is renamed to dsh-reckoner.** The package name, plugin id, cordis row, environment variable prefix, plugin home, agent preset, skills, locale namespace, route prefix and client bundle ids all move from electro-lab to reckoner, so this plugin and its predecessor can be installed side by side without sharing a row, a data directory or a skill name. No behaviour changes with the rename.
-- **The version line restarts at 0.1.0.** This project derives from `dsh-electro-lab` v0.13.0 (MIT, © curtainsmall) and is not API-continuous with it: the tool surface changes next. The entries below `[Unreleased]` are that project's history, kept under its own name.
+- **The project is renamed to dsh-reckoner.** The package name, plugin id, cordis row, environment variable prefix, plugin home, agent preset, skills, locale namespace, route prefix and client bundle ids all move from electro-lab to reckoner, so this plugin and its predecessor can be installed side by side without sharing a row, a data directory or a skill name.
+- **The version line restarts at 0.1.0.** This project derives from `dsh-electro-lab` v0.13.0 (MIT, © curtainsmall) and is not API-continuous with it. The entries below `[Unreleased]` are that project's history, kept under its own name.
+- The persona, both skills, the engine manual and the readmes are rewritten for the formula surface: the tool table, the `$` notation, the dimension rules and the "prefer several `eval` calls over one deep expression" discipline replace the solver catalog and the external-solver guide.
+- The plugin is no longer an electrical-engineering product: it describes itself as a deterministic calculation engine, and `complex.js` — used only by the deleted kernels — is no longer a dependency.
+
+### Removed
+
+- The 38-solver catalog and the 12 domain kernels behind it, the solver registry and the external-solver client, the `solver_info`/`call`/`convert` primitives, and the `boolean` value type.
 
 ## [0.13.0] - 2026-09-17
 
@@ -235,8 +254,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Tool surface normalized to SI quantity naming: arguments and outputs are named by quantity instead of by unit for SI quantities (`phaseAngle`, `phase`, `snr`, `returnLoss`…), while dB quantities keep the `Db` suffix (
-oiseFigureDb`, `gainDb`, `magnitudeDb`, `returnLossDb`…) — dB is a log scale that can represent values beyond the linear number range, so it is not implied by the kind. Units stay documented in the descriptions and in the value `kind`.
+- Tool surface normalized to SI quantity naming: arguments and outputs are named by quantity instead of by unit for SI quantities (`phaseAngle`, `phase`, `snr`, `returnLoss`…), while dB quantities keep the `Db` suffix (`noiseFigureDb`, `gainDb`, `magnitudeDb`, `returnLossDb`…) — dB is a log scale that can represent values beyond the linear number range, so it is not implied by the kind. Units stay documented in the descriptions and in the value `kind`.
 - Angles are radians everywhere on the tool boundary (SI): the polar value form carries `angRad` only, `ac_power.phaseAngle` and the Bode `phase` output are in radians.
 
 ## [0.1.0-beta.1] - 2026-08-26

@@ -1,92 +1,110 @@
 ---
 name: reckoner-interface
-description: "Reckoner engine manual: typed values, the set/get/call primitives, receipts and errors, the solver catalog — independent of any answer protocol"
-whenToUse: "Any session that operates the Reckoner engine (set/get/call, record markers)"
+description: "Reckoner engine manual: values, the set/get/eval tools, receipts and error codes, the $ notation, dimension rules and the discipline that keeps every number inside the engine"
+whenToUse: "Any session that operates the Reckoner engine (set/get/eval, record markers)"
 ---
 
 # DeepSeek Harness Reckoner — Engine Manual
 
-All calculation happens inside one deterministic engine. You operate it with three primitives and the record markers; the engine keeps a variable table, converts values at calculation boundaries and records every step. You never parse text into numbers and never convert units yourself — you pass typed values and the engine resolves everything against the solver signatures.
+The engine is a deterministic calculator. It parses values, evaluates the formulas **you** write, derives dimensions, and records every step. It knows no physics, no electronics and no named formulas: the mathematics comes from you, the numerical rules (units, prefixes, complex arithmetic, dimensions) come from the engine. You never parse text into numbers, never convert a prefix or a unit variant, and never do arithmetic yourself.
 
-## Typed values
+## Values
 
-A typed value is a JSON object. kind is part of a quantity:
+A value is ONE string, written the way it is said:
 
-- `{ "type": "number", "value": 25, "kind": "temperature", "variant": "degC" }`
-- `{ "type": "number", "value": 1500, "kind": "resistance", "prefix": "kilo" }`
-- `{ "type": "complex", "value": { "re": 1, "im": 2 } | { "mag": 3, "ang": 0.5 }, "kind": "voltage" }` (angles in radians)
-- `{ "type": "string", "value": "…" }`, `{ "type": "boolean", "value": true }`
-- `{ "type": "array", "value": [<typed values>] }`, `{ "type": "object", "value": { <field>: <typed value> } }`
-- `{ "type": "slot", "value": "name" }` — a slot reference (call arguments and set values; expands to a copy — never stored as a reference)
+```
+4.7kohm        4700ohm       100uohm       12volt       1.5second     50hertz
+25degC         14.7psi       2hp           5            (a bare count)
+2j             3+4i          1e5                          (complex, scientific notation)
+[100ohm, 220ohm]             {v: 12volt, r: 100ohm}       (array, object)
+"a string"
+```
 
-kind names: time, frequency, resistance, capacitance, inductance, voltage, current, power, temperature, angle, pressure, energy, length, mass, log, none, … A bare number is kind `none`; log is a plain ratio. Omit the variant field for the SI base representation; omit prefix for multiplier 1.
+- **Prefix is one letter, the unit is a whole word**: `p n u m k M G T` (10^-12 through 10^12) + `second metre gram amp kelvin radian decibel hertz ohm farad henry volt watt pascal joule`, plus the variants `degC degF deg bar psi atm cal Wh hp inch foot yard mile lb oz`. A prefix must be followed by a unit - `5k` is refused, `5kohm` is fine.
+- **Whole words only**: `ohm` never `Ω`, `second` never `s`, `degC` never `°C`, `metre` never `m` as a unit. Symbols are refused at the character level; everything is ASCII.
+- **Scientific notation is lowercase `e`**: `1e5`. Uppercase `E` is refused, and `2e` is refused with the fix.
+- **A bare number is a plain count** (`kind: none`). It never inherits a neighbour's unit, which is why `5 + @V_in` is refused: write `5volt`.
+- **What is stored is SI**: `4.7kohm` and `4700ohm` are the same stored value; `25degC` becomes 298.15 kelvin. Prefix and variant exist only while parsing and printing.
+- **`get`'s `format` uses the same words**: `get { name: "R1", format: "kohm" }` prints a string you can feed straight back into `set` or into a formula.
 
-variant words: degC/degF (temperature), deg (angle), bar/psi/atm (pressure), cal/Wh (energy), hp (power), inch/foot/yard/mile (length), lb/oz (mass). prefix words: pico/nano/micro/milli/kilo/mega/giga/tera. A prefix is only valid without a variant. Words are ASCII; symbols never enter values.
+## Tools
 
-## Primitives
+| tool | parameters | receipt |
+|---|---|---|
+| `set` | `name`, `value` (one value string, or `null` to delete the slot) | `{ ok, name, rev, value }` |
+| `get` | `name`, `format` (optional) | `{ ok, name, format, value }` — the printed text |
+| `eval` | `formula` (one expression), `target` (slot name, or `null`) | `{ ok, target, rev }` |
+| `record_question` | `text` | `{ ok, record }` — clears the table, opens a record |
+| `record_analyse` | `text` | `{ ok }` |
+| `record_answer` | `text` | `{ ok, record }` — seals the record |
 
-- `set { name, value }` — write one slot. `value: null` deletes the slot (idempotent). Re-writing with a different kind than the pinned slot kind fails. `value` may be a slot reference: the referenced value is stored as a COPY.
-- `get { name }` — read one slot; you receive the value exactly as written.
-- `call { solver, args, target }` — call one registered solver. Every argument is a typed value or a slot reference — `{ "type": "slot", "value": "name" }` with the full slot path (`"name"` or `"name.field"`); references may also sit inside array items and object fields, resolving to the stored value before validation. A value solver requires a named `target` (overwriting bumps the slot revision); a void solver takes `target: null`.
-- `solver_info { solver }` — inspect one registered solver before its first use: the parameter signature (names, quantity kinds, allowed enums, optional flags, nested items) and `returns` (a spec, or null for void), straight from the registry. A quantity leaf reads `complex(kind)` (a real is a legal complex) or `number(kind)` (reals only — a complex is refused, never narrowed).
-- External solvers are registry entries like any other: a declaration in `~/.dsh-reckoner/external-solvers.jsonl` (managed with `external_solver_add` / `external_solver_update` / `external_solver_delete`) is compiled in at host start, so `solver_info` and `call` treat it unchanged, and its failures carry the `EXTERNAL_*` codes. A declaration change needs a host restart.
+- `set` writes **the conditions the user gave** (transcription). A slot pins its kind on first write; overwriting with a different kind is refused — delete it first (`value: null`).
+- `eval` writes **a computed quantity**. `target` is the slot the result is stored in; `target: null` evaluates without storing anything.
+- **`eval` does not return its value.** To see a number, call `get` on the slot you wrote it into.
+- `get`'s `format`: a unit (`ohm`), a prefix+unit (`kohm`), a variant (`degC`), or `deg` / `rad` / `polar` / `json`. Omit it for the SI form. Printing never changes what is stored.
 
-Every call returns a receipt: `{ ok: true, … }` or `{ ok: false, code, error }`. Failed calls have no side effects; read values only through `get`. Read `solver_info` before the first call of a solver you have not used — guessing parameters from the one-line catalog is how retries happen.
+## Receipts and errors
+
+Every call returns `{ ok: true, … }` or `{ ok: false, code, error }`.
+
+- **A failed call has no side effects**: no slot is written, no value is changed. Read the receipt, fix what `error` names, call again.
+- `error` is the one sentence written for you — it names the position, the reason and the fix. Read it and follow it; do not retry the same call unchanged.
+- `code` is for machines: `ENGINE_<position>_<reason>`, e.g. `ENGINE_PARSE_UNIT`, `ENGINE_SLOT_UNDECLARED`, `ENGINE_DIM_MISMATCH`, `ENGINE_PARSE_ARITY`.
 
 ## Record markers
 
-- `record_question { text }` — open a record (table cleared). A re-open seals the previous record as duplicate-start.
-- `record_analyse { text }` — the analysis: knowns and the approach with formulas. No computed numbers here.
+- `record_question { text }` — open a record; the variable table is cleared. Re-opening seals the previous record as duplicate-start.
+- `record_analyse { text }` — the approach: the knowns, the relations you will use, the plan. **No computed numbers here.**
 - `record_answer { text }` — the final answer; seals the record.
 
-Conditions from the question are stored with `set` as typed values (translate the user's wording into typed values yourself — transcription, not calculation). Computed numbers appear only after the `call` that produced them; answers quote slot values or `get` results.
+Conditions are stored with `set` before anything else. Computed numbers exist only after the `eval` that produced them; an answer quotes slot values or `get` results, never a number from your own head.
 
-## Solver catalog
+## Notation
 
-| solver | purpose |
+A formula is **one expression**. `@name` READS a slot (it is read-only and never appears on the left of anything); the slot that receives the result is `eval`'s `target` parameter. Bare names are binding variables only, introduced by the bounded notations below.
+
+| family | forms |
 |---|---|
-| `ac_power` | AC power from RMS values: apparent = V·I, real = apparent·cosφ, reactive = apparent·sinφ, powerFactor = cosφ; phaseAngle (radians) is the V–I phase angle |
-| `adc_budget` | ADC noise budget: quantization, jitter and optional thermal SNR into a total SNR and ENOB |
-| `bode_response` | Bode plot of a ratio-form transfer function on a logarithmic frequency grid |
-| `calculate` | Evaluate a string math expression and return the complex result |
-| `cascade_noise_figure` | Total noise figure of cascaded stages (Friis) from per-stage noise figures and gains in dB |
-| `circuit_impedance` | Total driving-point impedance of a nested series/parallel network at a frequency (network as JSON text of a tree of element leaves and groups) |
-| `coaxial_parameters` | Coaxial-line characterization from geometry (impedance, velocity factor, per-meter C and L) |
-| `difference_equation_response` | Difference-equation recursion output y[n] (Laurent a/b convention) |
-| `discrete_fourier_transform` | DFT of a complex sample sequence (optionally windowed) |
-| `equivalent_impedance` | Total impedance of a set of impedances combined in series or parallel |
-| `filter_design` | Butterworth low-pass ladder design with attenuation checks |
-| `fourier_series_coefficients` | Fourier series coefficients (a₀, aₙ, bₙ) of standard waveforms |
-| `impedance_to_reflection` | Reflection coefficient Γ = (Z − Z0)/(Z + Z0) |
-| `inverse_discrete_fourier_transform` | IDFT of a spectrum (round-trip of the DFT) |
-| `jitter_snr` | SNR ceiling set by sampling-clock jitter |
-| `led_resistor` | LED series resistor and its dissipation |
-| `matched_network` | Matching network between two real resistances (l/pi/t) |
-| `opamp_configurations` | Ideal op-amp gain and output for inverting/non-inverting/follower/difference/integrator/differentiator |
-| `partial_fraction` | Partial-fraction expansion of a ratio-form transfer function |
-| `poles_zeros` | Poles and zeros of a ratio-form transfer function |
-| `power_series_expansion` | Power-series expansion of a z-domain transfer function (impulse response) |
-| `quantization_noise` | Ideal SNR of a uniform quantizer in dB |
-| `quarter_wave_transformer` | Quarter-wave transformer characteristic impedance |
-| `rational_coefficients` | Expression → rational numerator/denominator coefficients |
-| `reflection_to_vswr` | VSWR from a reflection coefficient (|Γ| = 1 throws: no infinity in the value universe) |
-| `resonance` | Series/parallel LC resonance: frequency, Q, bandwidth |
-| `return_loss` | Return loss in dB from a reflection coefficient (|Γ| = 0 throws: no infinity) |
-| `rise_time_bandwidth` | tr ≈ 0.35/BW conversion |
-| `series_sum` | Arithmetic/geometric/power sums |
-| `signal_analysis` | Statistics (RMS/peak/DC) plus the windowed spectrum |
-| `step_response` | Step response of a continuous transfer function |
-| `thd` | Total harmonic distortion of a sampled signal |
-| `thermal_noise` | Thermal noise power k·T·B |
-| `time_constant` | τ = RC or τ = L/R and the cutoff frequency |
-| `transfer_function_response` | Transfer function at frequency points (s or z) |
-| `transient_response` | First-/second-order transients at a list of time points |
-| `voltage_divider` | Resistive divider with optional load (plus Thévenin output resistance) |
-| `wavelength_frequency` | Wavelength from frequency (velocity factor aware) |
+| constants (5) | `$pi` `$e` `$inf` `$i` `$j` |
+| functions (19) | `$abs` `$sqrt` `$exp` `$ln` `$log` `$sin` `$cos` `$tan` `$asin` `$acos` `$atan` `$floor` `$ceil` `$sign` `$re` `$im` `$arg` `$conj` `$transpose` |
+| functions (4) | `$atan2(x, y)` `$min(a, b)` `$max(a, b)` `$mod(a, b)` |
+| bounded (3, evaluable) | `$sum_{k=a}^{b}(body)` `$prod_{k=a}^{b}(body)` `$seq_{k=a}^{b}(body)` |
+| bounded (3, written but NOT evaluated) | `$integral_{a}^{b}(body, x)` `$diff(body, x)` `$limit_{x->a}(body)` |
+
+- The subscript of a bounded notation gives the bound variable and its lower bound (`_{k=0}`); the superscript gives the upper bound (`^{N-1}`). `$seq` builds an array, which `[i]` then walks.
+- `$integral`, `$diff` and `$limit` parse but are refused with `ENGINE_SYMBOL_NOT_EVALUABLE`: state the closed form instead, or say the quantity cannot be computed.
+- Operators: `+ - * / ^`. **Multiplication always needs `*`** - `2@R`, `2$pi` and `2(3)` are all refused. `^` is right-associative, and `-2^2` is `-4`.
+- Data access: `@x[k]` takes an element (the index is an expression), `@th.field` takes an object field (a literal name). Chain them: `@net.ports[0].z`.
+- **No comparison, no logic, no conditional, no assignment** - there is no `if`, no `==`, no `x = ...`, and no statement sequence. `boolean` does not exist; an indicator is `0`/`1` (`kind: none`).
+
+## Dimensions
+
+Every kind maps to a vector of the seven SI base dimensions (kg, m, s, A, K, mol, cd):
+
+| kind | vector | kind | vector |
+|---|---|---|---|
+| `none` `log` `angle` | dimensionless | `voltage` | (1, 2, -3, -1, 0, 0, 0) |
+| `time` | (0, 0, 1, 0, 0, 0, 0) | `resistance` | (1, 2, -3, -2, 0, 0, 0) |
+| `length` | (0, 1, 0, 0, 0, 0, 0) | `capacitance` | (-1, -2, 4, 2, 0, 0, 0) |
+| `mass` | (1, 0, 0, 0, 0, 0, 0) | `inductance` | (1, 2, -2, -2, 0, 0, 0) |
+| `current` | (0, 0, 0, 1, 0, 0, 0) | `power` | (1, 2, -3, 0, 0, 0, 0) |
+| `temperature` | (0, 0, 0, 0, 1, 0, 0) | `frequency` | (0, 0, -1, 0, 0, 0, 0) |
+| `energy` | (1, 2, -2, 0, 0, 0, 0) | `pressure` | (1, -1, -2, 0, 0, 0, 0) |
+
+The engine carries these vectors through the whole expression, so it checks the mathematics as it computes it - **you do not have to name a kind anywhere**:
+
+- `@V/@R` is a current, `@V*@A` is a power, `@R*@C` is a time, and writing one where the other belongs is refused with the dimensions spelled out.
+- An intermediate may have a dimension with **no name** - `(@V)^2/@R` squares a voltage on the way to a power, and that is fine. Only the RESULT must land on a named kind, because the target slot pins one. A result like `(4ohm)^2` is refused: split the formula so each step lands on a named quantity.
+- `none` is a plain count: multiplying by it keeps the kind (`2*@R` is a resistance) and adding it to a quantity is refused (`5 + @V_in`).
+- Additions and `$min`/`$max`/`$mod` require the same dimension; `$sin`/`$cos`/`$tan` take a plain count or an angle; `$ln`/`$log`/`$exp` take a plain count.
+- A result whose kind contradicts the slot it would be written into is refused **before** anything is written.
 
 ## Discipline
 
-- Numbers in an answer ⇔ slot values produced by `call` results (or conditions stored by `set`).
-- Transcription of user wording into typed values is yours; every numerical rule application (prefix, variant, complex conversion) happens inside the engine at the call boundary — never convert in prose or in arguments by hand.
-- `call` arguments are typed values exactly like `set` values — an enum string is `{ "type": "string", "value": "rc" }`, a number is `{ "type": "number", "value": 100, "kind": "resistance" }`, an array is `{ "type": "array", "value": [...] }` (or a slot reference to a slot holding it). Run `solver_info` first: its `signature` field lists every parameter with a ready-to-send example.
-- A failed receipt (`ok: false`) leaves no state behind: read the code, fix the call, retry.
+1. **Numbers come from slots, never from memory.** Every number in an answer is a condition stored by `set` or a value in a slot that an `eval` produced - read it with `get`.
+2. **Transcription is yours, numerical rules are the engine's.** Write the values the way the user wrote them (`4.7kohm`, `25degC`); the engine resolves the prefix, the variant and the complex form. Never convert to SI by hand, and never assume an input condition the user did not give.
+3. **A formula must use the conditions.** Reference the user's quantities with `@name`; a formula that ignores them and hard-codes a number is wrong even when it evaluates.
+4. **Prefer several `eval` calls over one deep expression.** Evaluate an intermediate with its own `target`, then read it back with `@` in the next call. Split when the same sub-expression appears twice, when parentheses nest more than about three deep, or when the line stops being readable. Each call leaves its own formula and result in the record, and the article can then show `Vth`, `Rth` and `Pmax` as named steps instead of one wall of symbols.
+5. **`eval` returns no value.** If a later step needs a number, either it is a slot you can reference with `@`, or you have not stored it yet.
+6. **Check every receipt.** On failure nothing changed: read `error` and fix that specific thing.
+7. **Say so when the conditions are insufficient.** If a quantity the relation needs is missing, do not call `eval` and do not use the markers: name the missing quantity and say which relation therefore cannot be evaluated, then stop.

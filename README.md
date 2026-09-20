@@ -1,8 +1,8 @@
 # DeepSeek Harness Reckoner
 
-An electrical & electronics calculation plugin for the DeepSeek Harness.
+A deterministic calculation engine for the DeepSeek Harness: the model writes the formulas, the engine owns the numerical rules.
 
-Based on [dsh-electro-lab](https://github.com/curtainsmall/dsh-electro-lab) v0.13.0 (MIT, © curtainsmall). This project continues that engine work under a new name and, next, a new tool surface; the version line restarts at 0.1.0 and the two are not API-continuous.
+Based on [dsh-electro-lab](https://github.com/curtainsmall/dsh-electro-lab) v0.13.0 (MIT, © curtainsmall). This project continues that engine work under a new name: the built-in solver catalog is gone and the mathematics now comes from the model, so the version line restarts at 0.1.0 and the two are not API-continuous.
 
 [简体中文](README.zh-CN.md)
 
@@ -10,9 +10,9 @@ Based on [dsh-electro-lab](https://github.com/curtainsmall/dsh-electro-lab) v0.1
 
 - [Install](#install)
 - [Reckoner Mode](#reckoner-mode)
+- [The engine](#the-engine)
 - [Records](#records)
 - [Article generation](#article-generation)
-- [External solvers](#external-solvers)
 - [Configuration](#configuration)
 - [Documentation](#documentation)
 - [License](#license)
@@ -23,54 +23,46 @@ Based on [dsh-electro-lab](https://github.com/curtainsmall/dsh-electro-lab) v0.1
 dsh plugin --profile web add dsh-reckoner
 ```
 
+The package ships its own bundle patch, so the command inserts the plugin row into the profile roster.
+
 ## Reckoner Mode
 
-The plugin works as an agent preset: pick **Reckoner Mode** when starting a session and ask any electrical or electronics question in plain language. The session is isolated to the plugin's tools, with no shell, file system or network, so every number in the answer comes from the engine, and the agent stops and asks when the conditions are insufficient.
+The plugin works as an agent preset: pick **Reckoner Mode** when starting a session and ask any calculation question in plain language. The session is isolated to the plugin's tools — no shell, file system or network — so every number in the answer comes from the engine, and when the conditions are insufficient the agent says which quantity is missing and stops.
 
-All calculation happens inside a deterministic **engine**. The agent writes typed values into slots, calls one of 38 built-in solvers, and reads the result back; the engine converts units at the calculation boundary and records every step into a readable record.
+## The engine
 
-| primitive | effect |
+All calculation happens inside a deterministic **engine**: it parses values, evaluates the formulas the agent writes, derives dimensions while it evaluates, and records every step. It ships no solvers and holds no domain knowledge — the mathematics comes from the model, the numerical rules (units, prefixes, complex arithmetic, dimensions) come from the engine.
+
+| tool | effect |
 |---|---|
-| `set` | writes one typed value into a slot |
-| `get` | reads one slot back |
-| `call` | runs a registered solver and stores its result |
-| `solver_info` | returns a solver's signature before it is called |
-| `record_question` / `record_analyse` / `record_answer` | bracket a solve into a record |
+| `set` | writes one value the user gave into a slot |
+| `get` | reads one slot back as printed text |
+| `eval` | evaluates ONE formula and stores the result in the slot named by `target` |
+| `record_question` / `record_analyse` / `record_answer` | bracket a calculation into a record |
 
-The catalog covers expression algebra, series, transfer functions, DSP and DFT, signal quality, circuits, electronics, RF and Smith chart, transmission lines, noise and filter design.
+- A value is ONE plain string, written the way it is said: `4.7kohm`, `12volt`, `25degC`, `2j`, `1e5`, `[100ohm, 220ohm]`, `{v: 12volt, r: 100ohm}` — never a JSON envelope. A prefix is one letter (`p n u m k M G T`), units and variants are whole words (`ohm`, never `Ω`; `second`, never `s`; `degC`, never `°C`), so values and formulas are ASCII.
+- What is stored is SI: `4.7kohm` and `4700ohm` are the same value, and `25degC` becomes 298.15 kelvin. `get`'s `format` prints a slot back with the unit, prefix or variant you ask for, and that string can be fed straight back in.
+- A formula is ONE expression. `@name` reads a slot, and the slot that receives the result is `eval`'s `target`; `eval` does not return its value, so the model reads it back with `get`.
+- The `$` notation supplies 5 constants, 23 functions and 6 bounded forms: `$sum`, `$prod` and `$seq` evaluate, while `$integral`, `$diff` and `$limit` can be written but not evaluated. Operators are `+ - * / ^`, and multiplication always needs `*`.
+- The engine carries the seven SI base dimensions through the whole expression: `@V/@R` is a current, and a result whose kind contradicts the slot it would be written into is refused before anything is written.
+- There is no comparison, no logic, no conditional and no assignment, and no `boolean`: an indicator is a `0`/`1`.
 
 ## Records
 
-Settled records are listed in the client panel's **Records** tab, refreshed every 5 s, and a record that was never sealed is marked incomplete. Opening one shows its timeline: a collapsible card per write, read, call and failure, values as JSON trees, the toolbar and title fixed while the timeline scrolls. The list supports multi-select and delete.
+Records are listed in the **Reckoner** panel (the sidebar entry of the same name), refreshed every 5 s, and a record that was never sealed is marked incomplete. Opening one shows its timeline: question, analysis and answer each as a marker card, one card per `eval` step with the formula and the slot values it substituted, writes and reads grouped into collapsible sections, and `@name` chips that jump to the `set` row defining the slot. Failed attempts stay out of the timeline until **Display all** is on. The panel text follows the DSH locale (English and Simplified Chinese dictionaries), and the list supports multi-select and delete.
 
-A record is the process of one solve: every step reads on its own, and a solve that was interrupted continues from its record after a host restart.
+A record is the process of one calculation: every step reads on its own, and a calculation interrupted by a host restart continues from its record.
 
 ## Article generation
 
-Each record can be written up as a standalone solution article. The host LLM writes it from the trace — question, conditions, analysis, solver steps with their arguments and results, and the final answer — in the model's own voice, never mentioning the plugin.
+Each record can be written up as a standalone solution article. The host LLM writes it from the trace — question, conditions, analysis, the `eval` steps with their formulas and results, and the final answer — in the model's own voice, with the product name appearing only in the document's fixed title and author line.
 
 | format | output |
 |---|---|
 | Markdown | a flat `.md` file, never compiled |
-| LaTeX | a XeLaTeX document, compiled to PDF by a LaTeX driver |
+| LaTeX | an XeLaTeX document written into a folder named after the file, compiled to PDF by a LaTeX driver when requested |
 
-The setup dialog remembers the article language, the output directory and the file name. Compilation needs latexmk or MiKTeX's texify together with the `xelatex` engine, and the dialog checks the toolchain once per host start: without a usable driver Generate is disabled with the reason shown. A run is cancellable, and its progress dialog minimizes to a corner pill that survives navigation. The article or its folder can be opened from that dialog.
-
-## External solvers
-
-Beyond the built-in catalog you can register solvers of your own, reached over http. A declaration lives in `~/.dsh-reckoner/external-solvers.jsonl` and is compiled into the solver registry at engine start, so `solver_info` and `call` treat it like a built-in.
-
-| way to declare | how |
-|---|---|
-| the panel | **External solvers** tab: list, add, edit, enable, disable, delete |
-| the agent | `external_solver_add`, `external_solver_update`, `external_solver_delete` |
-| the file | edit the archive directly |
-
-A declaration carries a name, a description, the parameters, an explicit `returns` shape and the endpoint, and it may be written in the panel's guided form. Changes apply after a host restart, and the panel shows a pending-restart notice until then.
-
-The peer answers a POST of `{ "requestId": …, "args": … }` with `{ "requestId": …, "result": … }`, or with `{ "requestId": …, "error": "…" }` to report a failure. Arguments and results are typed values, so units travel as SI numbers rather than as symbols or unit words.
-
-[Engine manual §6](docs/engine.md#6-external-solvers) holds the full contract, and [`external-solvers-example/`](external-solvers-example/README.md) is a runnable peer with a field-by-field register guide.
+The setup dialog remembers the article language and the output directory, and for LaTeX whether to compile a PDF; the file name is per run and pre-filled from the record id. Compilation needs latexmk or MiKTeX's texify together with the `xelatex` engine, and the dialog checks the toolchain once per plugin mount: with PDF compilation requested and no usable driver, Generate is disabled with the reason shown. A run is cancellable, and its progress dialog minimizes to a corner pill that survives navigation. The article or its folder can be opened from that dialog.
 
 ## Configuration
 
@@ -79,14 +71,14 @@ The peer answers a POST of `{ "requestId": …, "args": … }` with `{ "requestI
 | `DSH_RECKONER_HOME` | the plugin home, `~/.dsh-reckoner` by default |
 | `DSH_RECKONER_LOG_LEVEL` | `debug`, `info`, `warn`, `error` or `off`; default `info` |
 
-The home holds the records, the declaration archive, the plugin state and one log file per host run. Both are described in the engine manual: [storage](docs/engine.md#7-storage) and [logs](docs/engine.md#8-logs).
+The home holds the records (`record-index.jsonl` and one `records/<id>.jsonl` trace per record), the plugin state (`state.json`) and the logs (`logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, one file per host run). The engine manual describes the storage layout and the log lines.
 
 ## Documentation
 
 | document | content |
 |---|---|
-| [Engine manual](docs/engine.md) · [简体中文](docs/engine.zh-CN.md) | typed values, primitives, the solver catalog, external solvers, storage, logs |
-| [external-solvers-example](external-solvers-example/README.md) · [简体中文](external-solvers-example/README.zh-CN.md) | a runnable echo peer and the field-by-field register guide |
+| [Engine manual](docs/engine.md) · [简体中文](docs/engine.zh-CN.md) | values, the `set`/`get`/`eval` tools, the `$` notation, dimensions, records, storage, logs |
+| [reckoner-interface](skills/reckoner-interface.md) | the manual the agent reads in Reckoner Mode: value grammar, notation, dimension rules |
 | [Contributing](.github/CONTRIBUTING.md) · [简体中文](docs/CONTRIBUTING.zh-CN.md) | setup, commit conventions, release process |
 
 ## License
