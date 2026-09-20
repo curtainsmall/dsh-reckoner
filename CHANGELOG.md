@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The project is renamed to dsh-reckoner.** The package name, plugin id, cordis row, environment variable prefix, plugin home, agent preset, skills, locale namespace, route prefix and client bundle ids all move from electro-lab to reckoner, so this plugin and its predecessor can be installed side by side without sharing a row, a data directory or a skill name. No behaviour changes with the rename.
+- **The version line restarts at 0.1.0.** This project derives from `dsh-electro-lab` v0.13.0 (MIT, © curtainsmall) and is not API-continuous with it: the tool surface changes next. The entries below `[Unreleased]` are that project's history, kept under its own name.
+
 ## [0.13.0] - 2026-09-17
 
 ### Added
