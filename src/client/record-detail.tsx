@@ -49,22 +49,10 @@ interface RecordBody {
   rows: TraceRow[]
 }
 
-/** Collect the distinct slot names referenced anywhere inside an argument value. */
-function referencedSlots(value: unknown, into: string[]): void {
-  if (value === null || typeof value !== 'object') return
-  const v = value as Record<string, unknown>
-  if (v.type === 'slot' && typeof v.value === 'string') {
-    const name = v.value.split('.')[0] ?? v.value
-    if (!into.includes(name)) into.push(name)
-    return
-  }
-  if (v.type === 'array' && Array.isArray(v.value)) {
-    for (const item of v.value as unknown[]) referencedSlots(item, into)
-    return
-  }
-  if (v.type === 'object' && typeof v.value === 'object' && v.value !== null) {
-    for (const field of Object.values(v.value as Record<string, unknown>)) referencedSlots(field, into)
-  }
+/** The keys of an `eval` row's `vars`: exactly the slots the formula read, in first-use order. */
+function readSlotNames(vars: unknown): string[] {
+  if (vars === null || typeof vars !== 'object') return []
+  return Object.keys(vars as Record<string, unknown>)
 }
 
 /* ── JSON tree display ────────────────────────────────────────────────────── */
@@ -205,7 +193,7 @@ type Item =
   | { kind: 'writes'; rows: TraceRow[] }
   | { kind: 'reads'; rows: TraceRow[] }
   | { kind: 'failures'; rows: TraceRow[] }
-  | { kind: 'call'; row: TraceRow }
+  | { kind: 'eval'; row: TraceRow }
   | { kind: 'event'; row: TraceRow }
 
 /**
@@ -221,7 +209,7 @@ function groupRows(rows: TraceRow[]): Item[] {
     if (first.tool === 'set' && first.ok) items.push({ kind: 'writes', rows: run })
     else if (first.tool === 'get' && first.ok) items.push({ kind: 'reads', rows: run })
     else if (!first.ok) items.push({ kind: 'failures', rows: run })
-    else if (first.tool === 'call') items.push({ kind: 'call', row: first })
+    else if (first.tool === 'eval') items.push({ kind: 'eval', row: first })
     else items.push({ kind: 'event', row: first })
     run = []
   }
@@ -233,7 +221,7 @@ function groupRows(rows: TraceRow[]): Item[] {
       flush()
       if (runKey !== null) run.push(row)
       else if (row.tool === 'marker') items.push({ kind: 'marker', row })
-      else if (row.tool === 'call' && row.ok) items.push({ kind: 'call', row })
+      else if (row.tool === 'eval' && row.ok) items.push({ kind: 'eval', row })
       else items.push({ kind: 'event', row })
     }
   }
@@ -312,8 +300,10 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
   }
   if (record === null) return <div style={{ minHeight: 120 }} />
 
-  // "Display all" off hides introspection noise (solver_info rows) from the narrative timeline.
-  const visibleRows = showAll ? record.rows : record.rows.filter((row) => row.tool !== 'solver_info')
+  // The narrative is markers, writes, reads and one card per eval step. Failed
+  // attempts are kept in the trace but stay out of the timeline unless "Display
+  // all" is on: they are part of the engine's account, not of the solution.
+  const visibleRows = showAll ? record.rows : record.rows.filter((row) => row.ok)
   const failedCount = visibleRows.filter((row) => !row.ok).length
   const items = groupRows(visibleRows)
 
@@ -461,8 +451,8 @@ function TimelineItem({ item }: { item: Item }): React.JSX.Element {
       return <ReadsGroup rows={item.rows} />
     case 'failures':
       return <FailuresGroup rows={item.rows} />
-    case 'call':
-      return <CallRow row={item.row} />
+    case 'eval':
+      return <EvalRow row={item.row} />
     case 'event':
       return <EventRow row={item.row} />
   }
@@ -575,7 +565,10 @@ function FailuresGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
             <div key={row.seq} style={{ fontSize: 14, width: '100%', boxSizing: 'border-box', ...(isZebra(index) ? zebraRow : {}) }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <span style={{ ...codeFont, color: 'var(--dsw-alias-label-tertiary)' }}>#{row.seq}</span>
-                {typeof row.solver === 'string' && <span style={{ ...codeFont, fontSize: 13.5 }}>{row.solver}</span>}
+                {typeof row.tool === 'string' && <span style={{ ...codeFont, fontSize: 13.5 }}>{row.tool}</span>}
+                {typeof row.formula === 'string' && (
+                  <span style={{ ...codeFont, fontSize: 13.5, color: 'var(--dsw-alias-label-secondary)', wordBreak: 'break-all' }}>{row.formula}</span>
+                )}
                 <span style={{ padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-error-primary)', color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>
                   {String(row.code)}
                 </span>
@@ -591,20 +584,20 @@ function FailuresGroup({ rows }: { rows: TraceRow[] }): React.JSX.Element {
   )
 }
 
-/* ── Call card: title in the get/set style, solver/target meta on open ────── */
+/* ── Eval card: the formula the model wrote, its substituted values, result ── */
 
 /**
- * A successful call renders as its own card titled like the writes/reads
- * groups. Collapsed, the summary shows the localized "call" title followed by
- * the solver name; expanded, the body opens with two meta lines — the solver
- * and the target slot — and then the arguments and result.
+ * A successful `eval` renders as its own card titled like the writes/reads
+ * groups. Collapsed, the summary shows the localized "eval" title followed by
+ * the formula; expanded, the body opens with the formula and the target slot,
+ * then the slot values it substituted and the result.
  */
-function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
+function EvalRow({ row }: { row: TraceRow }): React.JSX.Element {
   const [open, setOpen] = useState(true)
-  const args = (row.args ?? {}) as Record<string, unknown>
-  const refs: string[] = []
-  referencedSlots(row.args, refs)
-  const solver = typeof row.solver === 'string' ? row.solver : row.tool
+  const formula = typeof row.formula === 'string' ? row.formula : ''
+  const vars = (row.vars ?? {}) as Record<string, unknown>
+  const refs = readSlotNames(row.vars)
+  const target = typeof row.target === 'string' ? row.target : null
   return (
     <div style={{ ...rowStyle, background: 'var(--dsw-alias-bg-layer-1, transparent)' }}>
       <details open={open} style={{ fontSize: 14.5 }}>
@@ -613,22 +606,24 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
           style={{ cursor: 'pointer', color: 'var(--dsw-alias-label-primary)', fontWeight: 600, marginBottom: 6 }}
         >
           <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-            <span>{t('callLabel')}</span>
+            <span>{t('evalLabel')}</span>
             {!open && (
-              <span style={{ fontWeight: 400, color: 'var(--dsw-alias-label-secondary)', ...codeFont, fontSize: 13.5 }}>{solver}</span>
+              <span style={{ fontWeight: 400, color: 'var(--dsw-alias-label-secondary)', ...codeFont, fontSize: 13.5, wordBreak: 'break-all' }}>{formula}</span>
             )}
           </span>
         </summary>
         {open && (
           <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <MetaLine label={t('callSolver')} value={solver} banded={false} />
-            {typeof row.target === 'string' && (
-              <MetaLine label={t('callTarget')} value={row.target} banded={false}>
-                {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12.5 }}>rev {row.rev}</span>}
-              </MetaLine>
-            )}
-            {Object.entries(args).map(([name, value], index) => (
-              <RowNode key={name} label={name} value={value} banded={isZebra(index)} />
+            <MetaLine label={t('evalFormula')} value={formula} banded={false} />
+            {target !== null
+              ? (
+                <MetaLine label={t('evalTarget')} value={target} banded={false}>
+                  {typeof row.rev === 'number' && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12.5 }}>rev {row.rev}</span>}
+                </MetaLine>
+              )
+              : <MetaLine label={t('evalTarget')} value={t('evalNoTarget')} banded={false} />}
+            {Object.entries(vars).map(([name, value], index) => (
+              <RowNode key={name} label={`@${name}`} value={value} banded={isZebra(index)} />
             ))}
             {refs.length > 0 && (
               <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -647,7 +642,7 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
             )}
             {row.result !== undefined && row.result !== null && (
               <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontSize: 12.5, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{t('callResult')}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{t('evalResult')}</span>
                 <RowNode value={row.result} />
               </div>
             )}
@@ -658,7 +653,7 @@ function CallRow({ row }: { row: TraceRow }): React.JSX.Element {
   )
 }
 
-/** One label/value line used for the solver and target rows of a call card; banded rows get the zebra stripe. */
+/** One label/value line used for the formula and target rows of an eval card; banded rows get the zebra stripe. */
 function MetaLine({ label, value, banded, children }: { label: string; value: string; banded: boolean; children?: React.ReactNode }): React.JSX.Element {
   return (
     <div style={{

@@ -13,7 +13,6 @@
 import { useState, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RecordsTab } from './records.tsx'
-import { ExternalSolversTab } from './external-solvers.tsx'
 import { GenerationOverlay } from './generation-ui.tsx'
 import { t, useAppLocale } from './locales.ts'
 import { IconChevronLeft } from './icons.tsx'
@@ -312,50 +311,11 @@ const tabBarStyle: React.CSSProperties = {
   borderBottom: '1px solid var(--dsw-alias-border-l1)',
 }
 
-/** Active tab button, styled exactly like the dsh-ssh panel tabs (panel.module.css .tab + .tab[data-active]);
- *  only the selected tab carries the accent underline. */
-function tabButtonStyle(hovered: boolean, active: boolean): React.CSSProperties {
-  return {
-    padding: '7px 14px',
-    fontSize: 13,
-    color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
-    fontWeight: active ? 600 : 400,
-    background: hovered ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
-    border: 'none',
-    borderBottom: '2px solid',
-    borderBottomColor: active ? 'var(--dsw-alias-state-business-primary)' : 'transparent',
-    borderRadius: '6px 6px 0 0',
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  }
-}
-
-/** One tab button: active styling plus a self-managed hover state. */
-function TabButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }): React.JSX.Element {
-  const [hovered, setHovered] = useState(false)
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      data-active={active ? '' : undefined}
-      data-dsh-part="tab"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={tabButtonStyle(hovered, active)}
-    >
-      {label}
-    </button>
-  )
-}
-
-/** The panel body: title bar with a back-to-session button, tabs, content. */
+/** The panel body: title bar with a back-to-session button, then the records list. */
 export function ReckonerPanel(): React.JSX.Element | null {
   useAppLocale() // Re-render when the active language changes.
   const open = useSyncExternalStore(panelStore.subscribe, () => panelStore.open)
   const [backHover, setBackHover] = useState(false)
-  const [tab, setTab] = useState<'records' | 'external'>('records')
 
   if (!open) return null
 
@@ -388,12 +348,8 @@ export function ReckonerPanel(): React.JSX.Element | null {
         </button>
         <h2 style={{ margin: 0, fontSize: 15 }}>Reckoner</h2>
       </div>
-      <div role="tablist" style={tabBarStyle} data-dsh-part="tab-bar">
-        <TabButton active={tab === 'records'} label={t('tabRecords')} onClick={() => setTab('records')} />
-        <TabButton active={tab === 'external'} label={t('tabExternal')} onClick={() => setTab('external')} />
-      </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 14 }}>
-        {tab === 'records' ? <RecordsTab /> : <ExternalSolversTab />}
+        <RecordsTab />
       </div>
     </div>
   )
