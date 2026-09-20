@@ -130,6 +130,22 @@ describe('measures', () => {
     expect(divideMeasure(measureOf('angle'), measureOf('angle')).kind).toBe('none')
   })
 
+  it('keeps a logarithm on its own scale: log × voltage is refused', () => {
+    // Settled by the language spec 12.12.1: a logarithm is a ratio, not a count.
+    expect(() => multiplyMeasure(measureOf('log'), measureOf('voltage'))).toThrow(/ratio on a log scale, not a count/)
+    expect(() => multiplyMeasure(measureOf('voltage'), measureOf('log'))).toThrow(/not a count/)
+    expect(() => divideMeasure(measureOf('voltage'), measureOf('log'))).toThrow(/not a count/)
+    expect(() => divideMeasure(measureOf('log'), measureOf('voltage'))).toThrow(/not a count/)
+    // A count and another logarithm are still multipliers on that scale.
+    expect(multiplyMeasure(measureOf('log'), measureOf('none')).kind).toBe('log')
+    expect(multiplyMeasure(measureOf('log'), measureOf('log')).kind).toBe('log')
+    expect(divideMeasure(measureOf('log'), measureOf('log')).kind).toBe('none')
+  })
+
+  it('still lets an angle scale a quantity: r·θ is a length', () => {
+    expect(multiplyMeasure(measureOf('angle'), measureOf('length')).kind).toBe('length')
+  })
+
   it('scales the dimension with the exponent: (4ohm)^2 is an unnamed dimension', () => {
     expect(powerMeasure(measureOf('resistance'), 1).kind).toBe('resistance')
     expect(powerMeasure(measureOf('resistance'), 0).kind).toBe('none')

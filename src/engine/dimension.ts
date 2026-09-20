@@ -164,6 +164,24 @@ export function scaleDimension(value: Dimension, exponent: number): Dimension {
 }
 
 /**
+ * Why a logarithm may not be paired with a quantity, or undefined when it may.
+ *
+ * A logarithm is a ratio on a log scale, not a count: `log × voltage` would
+ * silently invent a product out of a decibel reading, which is the same
+ * ambiguity that makes `log + voltage` a refusal. `log × log`, `log × count` and
+ * a logarithm on its own are all fine — they stay on the log scale.
+ */
+function logarithmProblem(a: Measure, b: Measure): string | undefined {
+  if (a.kind === QuantityKind.Log && !isDimensionless(b.dim)) {
+    return `cannot pair log with ${describeMeasure(b)} — a logarithm is a ratio on a log scale, not a count`
+  }
+  if (b.kind === QuantityKind.Log && !isDimensionless(a.dim)) {
+    return `cannot pair ${describeMeasure(a)} with log — a logarithm is a ratio on a log scale, not a count`
+  }
+  return undefined
+}
+
+/**
  * The measure of `a × b`.
  *
  * A plain count is the "how many" multiplier and leaves the other side's
@@ -172,6 +190,8 @@ export function scaleDimension(value: Dimension, exponent: number): Dimension {
  * `voltage × current` is a power, `voltage × voltage` is unnamed.
  */
 export function multiplyMeasure(a: Measure, b: Measure): Measure {
+  const problem = logarithmProblem(a, b)
+  if (problem !== undefined) throw new ToolError(problem, ToolErrorCode.DimMismatch)
   const dim = multiplyDimension(a.dim, b.dim)
   if (isDimensionless(dim)) {
     if (a.kind === QuantityKind.None) return { kind: b.kind, dim }
@@ -188,6 +208,8 @@ export function multiplyMeasure(a: Measure, b: Measure): Measure {
  * rather than quantities.
  */
 export function divideMeasure(a: Measure, b: Measure): Measure {
+  const problem = logarithmProblem(a, b)
+  if (problem !== undefined) throw new ToolError(problem, ToolErrorCode.DimMismatch)
   const dim = divideDimension(a.dim, b.dim)
   if (isDimensionless(dim)) return { kind: QuantityKind.None, dim }
   return measureFromDimension(dim)
