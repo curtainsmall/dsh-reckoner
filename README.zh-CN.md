@@ -2,6 +2,8 @@
 
 面向 DeepSeek Harness 的电气与电子计算插件。
 
+本项目基于 [dsh-electro-lab](https://github.com/curtainsmall/dsh-electro-lab) v0.13.0（MIT，© curtainsmall）改造：沿用其引擎工作，更名后继续推进，工具面将在下一步变动。版本线自 0.1.0 重新开始，两者不构成 API 连续。
+
 [English](README.md)
 
 ## 目录

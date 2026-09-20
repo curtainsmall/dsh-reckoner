@@ -2,6 +2,8 @@
 
 An electrical & electronics calculation plugin for the DeepSeek Harness.
 
+Based on [dsh-electro-lab](https://github.com/curtainsmall/dsh-electro-lab) v0.13.0 (MIT, © curtainsmall). This project continues that engine work under a new name and, next, a new tool surface; the version line restarts at 0.1.0 and the two are not API-continuous.
+
 [简体中文](README.zh-CN.md)
 
 ## Contents
