@@ -18,6 +18,7 @@
 import { ToolError, ToolErrorCode } from '../errors.ts'
 import { QuantityKind } from '../math/quantity-kind.ts'
 import { PREFIX_SCALES, UNITS, isPrefix, isUnit, splitUnitWord } from './units.ts'
+import { identifierProblem } from './values.ts'
 import type { TypedValue } from './values.ts'
 
 /* ── tokenizer ───────────────────────────────────────────────────────────── */
@@ -349,6 +350,10 @@ class Parser {
         const key = this.next()
         if (key === undefined || key.kind !== 'word') {
           throw new ToolError(`character ${(key?.at ?? this.source.length) + 1}: expected a field name`, ToolErrorCode.ParseSyntax)
+        }
+        const problem = identifierProblem(key.text)
+        if (problem !== undefined) {
+          throw new ToolError(`character ${key.at + 1}: field ${problem}`, ToolErrorCode.ParseIdent)
         }
         this.expectPunct(':')
         fields[key.text] = this.parseComplexOrStructure()

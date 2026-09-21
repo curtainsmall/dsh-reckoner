@@ -113,6 +113,21 @@ describe('engine (markers + trace + lifecycle)', () => {
     engine.markerAnswer('done again')
   })
 
+  it('refuses a slot name longer than the identifier limit, with no side effects', () => {
+    const engine = makeEngine()
+    engine.markerQuestion('q')
+    const forty = 'r'.repeat(40)
+    const fortyOne = 'r'.repeat(41)
+    expect(engine.opSet(forty, '1ohm')).toMatchObject({ ok: true, rev: 1 })
+    const refused = engine.opSet(fortyOne, '1ohm')
+    expect(refused).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(String((refused as { error: string }).error)).toMatch(/is 41 characters long — a name is at most 40/)
+    expect(engine.opGet(fortyOne)).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(engine.opEval('1+1', fortyOne)).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(engine.table.has(fortyOne)).toBe(false)
+    engine.markerAnswer('done')
+  })
+
   it('refuses a slot name that is not an identifier, with no side effects', () => {
     const engine = makeEngine()
     engine.markerQuestion('q')

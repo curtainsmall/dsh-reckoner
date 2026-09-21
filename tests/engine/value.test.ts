@@ -101,6 +101,7 @@ describe('value parser: refusals carry a fix', () => {
     ['100 mH', 'ENGINE_PARSE_UNIT', /is not a unit word/],
     ['1R', 'ENGINE_PARSE_IDENT', /to multiply, write "\*"/],
     ['2x', 'ENGINE_PARSE_IDENT', /to multiply, write "\*"/],
+    [`{${'a'.repeat(41)}: 1}`, 'ENGINE_PARSE_IDENT', /is 41 characters long — a name is at most 40/],
     ['2*3', 'ENGINE_PARSE_SYNTAX', /never an arithmetic expression|unexpected/],
     ['1+', 'ENGINE_PARSE_SYNTAX', /ends where a number was expected/],
     ['[1,2', 'ENGINE_PARSE_SYNTAX', /missing its closing/],

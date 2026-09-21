@@ -41,6 +41,8 @@ const NOTATION_GUIDE =
   '$integral_{a}^{b}(body, x), $diff(body, x) and $limit_{x->a}(body) can be written but NOT evaluated — use a closed form instead. ' +
   'Data access: @x[k] takes an element (the index is an expression), @th.field takes an object field (a literal name). ' +
   'Operators: + - * / ^ (multiplication always needs *, there is no implicit multiplication). ' +
+  'A position is the brace after `_{` or `^{`, so every other `^` is a power: `$e^(2)`, `$pi^2`. ' +
+  'An exponent must be dimensionless; a complex exponent needs a dimensionless base, as in the rotation `$e^(-$j*$pi/6)`. ' +
   'No comparison, no logic, no conditional, no assignment. ' +
   'A bare name is a bound variable only; to read a slot write @name.'
 

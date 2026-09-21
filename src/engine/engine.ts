@@ -16,7 +16,7 @@ import { parseValueString } from './parse-value.ts'
 import { printValue } from './print-value.ts'
 import { VariableTable } from './table.ts'
 import { RecordStore, type IndexRow, type TraceRow } from './storage.ts'
-import { kindOf, toCanonical, validateValue, type TypedValue } from './values.ts'
+import { identifierProblem, kindOf, toCanonical, validateValue, type TypedValue } from './values.ts'
 
 export type Receipt = { ok: true; [key: string]: unknown } | { ok: false; code: ToolErrorCode; error: string }
 
@@ -168,9 +168,7 @@ export class Engine {
   /** get: read one slot and print it in the requested format (default: SI). */
   opGet(name: string, format?: string): Receipt {
     try {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-        throw new ToolError(`slot name "${name}" must match ^[A-Za-z_][A-Za-z0-9_]*$`, ToolErrorCode.ArgsInvalid)
-      }
+      this.validateName(name)
       const slot = this.table.get(name)
       if (slot === undefined) {
         throw new ToolError(
@@ -235,8 +233,10 @@ export class Engine {
     return printValue(value, format)
   }
 
+  /** A tool argument is a slot name, never `@name`: the same identifier rule the formula lexer uses. */
   private validateName(name: string): void {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new ToolError(`slot name "${name}" must match ^[A-Za-z_][A-Za-z0-9_]*$`, ToolErrorCode.ArgsInvalid)
+    const problem = identifierProblem(name)
+    if (problem !== undefined) throw new ToolError(`slot name ${problem}`, ToolErrorCode.ArgsInvalid)
   }
 
   private failure(tool: string, error: unknown): Receipt {

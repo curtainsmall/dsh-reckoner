@@ -120,7 +120,7 @@ describe('formula: slots and dimensions', () => {
   })
 
   it('refuses an exponent that carries a unit', () => {
-    expect(refusal('2^3volt').message).toMatch(/exponent must be a plain count/)
+    expect(refusal('2^3volt').message).toMatch(/an exponent must be dimensionless/)
   })
 
   it('refuses a dimensionless quotient of two counts as a plain count, not a kind', () => {
@@ -215,6 +215,93 @@ describe('formula: notations', () => {
     expect(refusal('$abs()').message).toMatch(/takes 1 argument\(s\), got 0/)
     expect(refusal('$min(1)').message).toMatch(/takes 2 argument\(s\), got 1/)
     expect(refusal('$abs(1,2)').message).toMatch(/takes 1 argument\(s\), got 2/)
+  })
+
+  it('raises a constant to a power: a position needs its brace', () => {
+    // `^{...}` is a position; every other `^` is the power operator.
+    expect((run('$e^(2)') as { value: number }).value).toBeCloseTo(Math.E ** 2, 12)
+    expect((run('$pi^2') as { value: number }).value).toBeCloseTo(Math.PI ** 2, 12)
+    const squareOfJ = run('$j^(2)') as { value: { re: number; im: number } }
+    expect(squareOfJ.value.re).toBeCloseTo(-1, 12)
+    expect(squareOfJ.value.im).toBeCloseTo(0, 12)
+    const euler = run('$e^($j*$pi)') as { value: { re: number; im: number } }
+    expect(euler.value.re).toBeCloseTo(-1, 12)
+    expect(euler.value.im).toBeCloseTo(0, 12)
+    // A position on a constant is still refused, and a stray `_` is a stray token.
+    expect(refusal('$pi^{2}').message).toMatch(/constant and takes no subscript or superscript/)
+    expect(refusal('$e_').message).toMatch(/unexpected "_" after the expression/)
+    // The brace is what makes a bound a bound.
+    expect(refusal('$sum_{k=1}^3(k)').message).toMatch(/needs an upper bound/)
+  })
+
+  it('takes a complex exponent on a dimensionless base (Euler, principal branch)', () => {
+    // 2^(0+1j) = e^(j·ln 2): the phase is Im(exponent)·ln|base|.
+    const twoToJ = run('2^(0+1j)') as { value: { re: number; im: number } }
+    expect(twoToJ.value.re).toBeCloseTo(Math.cos(Math.log(2)), 12)
+    expect(twoToJ.value.im).toBeCloseTo(Math.sin(Math.log(2)), 12)
+    // ...so 2^(2j) rotates twice as far.
+    const twoToTwoJ = run('2^(2j)') as { value: { re: number; im: number } }
+    expect(twoToTwoJ.value.re).toBeCloseTo(Math.cos(2 * Math.log(2)), 12)
+    expect(twoToTwoJ.value.im).toBeCloseTo(Math.sin(2 * Math.log(2)), 12)
+    const rotation = run('$e^(-$j*$pi/6)') as { value: { re: number; im: number } }
+    expect(rotation.value.re).toBeCloseTo(Math.cos(-Math.PI / 6), 12)
+    expect(rotation.value.im).toBeCloseTo(-0.5, 12)
+    const phasor = run('220*$e^(-$j*$pi/6)') as { value: { re: number; im: number } }
+    expect(phasor.value.re).toBeCloseTo(190.52558883257652, 10)
+    expect(phasor.value.im).toBeCloseTo(-110, 10)
+    // i^i is real: exp(-pi/2), so the result is a plain number, not a complex.
+    expect(run('$j^$j')).toEqual({ type: 'number', value: Math.exp(-Math.PI / 2), kind: 'none' })
+    // A complex dimensionless base works too.
+    const complexBase = run('(3+4j)^(2j)') as { value: { re: number; im: number } }
+    const magnitude = Math.exp(-2 * Math.atan2(4, 3))
+    const phase = 2 * Math.log(5)
+    expect(complexBase.value.re).toBeCloseTo(magnitude * Math.cos(phase), 12)
+    expect(complexBase.value.im).toBeCloseTo(magnitude * Math.sin(phase), 12)
+  })
+
+  it('refuses a complex power of a quantity, and a dimensional exponent', () => {
+    expect(refusal('2^(3volt)').message).toMatch(/an exponent must be dimensionless, got voltage/)
+    const quantityBase = refusal('(4ohm)^(1+1j)')
+    expect(quantityBase.code).toBe('ENGINE_DIM_MISMATCH')
+    expect(quantityBase.message).toMatch(/would depend on the unit it is written in/)
+  })
+
+  it('keeps zero in its lane: 0^negative and 0^complex have no value', () => {
+    expect(run('0^(1+1j)')).toEqual({ type: 'number', value: 0, kind: 'none' })
+    expect(refusal('0^(-1)').code).toBe('ENGINE_RANGE_DOMAIN')
+    expect(refusal('0^(2j)').code).toBe('ENGINE_RANGE_DOMAIN')
+  })
+
+  it('refuses a name longer than the identifier limit at the token', () => {
+    const long = 'n'.repeat(41)
+    const error = refusal(`@${long}`)
+    expect(error.code).toBe('ENGINE_PARSE_IDENT')
+    expect(error.message).toMatch(/is 41 characters long — a name is at most 40/)
+    // A name of exactly the limit is fine, and so is reading it back.
+    const atLimit = 'm'.repeat(40)
+    expect(run(`@${atLimit}`, { [atLimit]: { type: 'number', value: 2, kind: QuantityKind.None } }))
+      .toEqual({ type: 'number', value: 2, kind: 'none' })
+  })
+
+  it('reads a bare name in a position as an expression, so it says to write @name', () => {
+    const slotsWithN: Record<string, TypedValue> = { N: { type: 'number', value: 4, kind: QuantityKind.None } }
+    const error = refusal('$sum_{k=0}^{N-1}(k)', slotsWithN)
+    expect(error.code).toBe('ENGINE_IDENT_UNBOUND')
+    expect(error.message).toMatch(/to read a slot write "@N"/)
+    // With the slot reference the same bound works, and so does the nested form.
+    expect(run('$sum_{k=0}^{@N-1}(k)', slotsWithN)).toEqual({ type: 'number', value: 6, kind: 'none' })
+    const nested: Record<string, TypedValue> = {
+      M: { type: 'number', value: 2, kind: QuantityKind.None },
+      N: { type: 'number', value: 2, kind: QuantityKind.None },
+      h: { type: 'array', value: [1, 2, 3].map((value) => ({ type: 'number' as const, value, kind: QuantityKind.None })) },
+    }
+    expect(run('$seq_{i=0}^{@M-1}($seq_{j=0}^{@N-1}(@h[$abs(i-j)]))', nested)).toEqual({
+      type: 'array',
+      value: [
+        { type: 'array', value: [{ type: 'number', value: 1, kind: 'none' }, { type: 'number', value: 2, kind: 'none' }] },
+        { type: 'array', value: [{ type: 'number', value: 2, kind: 'none' }, { type: 'number', value: 1, kind: 'none' }] },
+      ],
+    })
   })
 })
 

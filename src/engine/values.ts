@@ -40,6 +40,39 @@ export type Scalar = Extract<TypedValue, { type: 'number' | 'complex' }>
 
 const KIND_SET: ReadonlySet<string> = new Set(QUANTITY_KIND_NAMES)
 
+/**
+ * The length limit on an identifier (the language spec, §12.3).
+ *
+ * One rule governs every name — a slot written through `set`/`get`/`target`, a
+ * slot read with `@name` in a formula, and an object's field name — so it lives
+ * here and the tool boundary and both tokenizers ask the same function.
+ */
+export const IDENT_MAX_LENGTH = 40
+
+/** An identifier's shape, without the length rule: `[A-Za-z_][A-Za-z0-9_]*`. */
+const IDENT_SHAPE = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/** True when the text is an identifier of a legal length. */
+export function isIdentifier(text: string): boolean {
+  return IDENT_SHAPE.test(text) && text.length <= IDENT_MAX_LENGTH
+}
+
+/**
+ * Why the text is not a usable name, or undefined when it is. The message names
+ * the offending text (abbreviated when it is long) and the rule it broke.
+ */
+export function identifierProblem(text: string): string | undefined {
+  const shown = text.length > 24 ? `${text.slice(0, 24)}...` : text
+  if (text.length === 0) return 'a name cannot be empty'
+  if (text.length > IDENT_MAX_LENGTH) {
+    return `"${shown}" is ${text.length} characters long — a name is at most ${IDENT_MAX_LENGTH} characters (letters, digits and underscore, not starting with a digit)`
+  }
+  if (!IDENT_SHAPE.test(text)) {
+    return `"${shown}" is not a name — a name starts with a letter or underscore and holds letters, digits and underscores only`
+  }
+  return undefined
+}
+
 /** True when a value is a number or complex (the shapes that carry a kind). */
 export function isScalar(value: TypedValue): value is Scalar {
   return value.type === 'number' || value.type === 'complex'

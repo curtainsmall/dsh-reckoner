@@ -32,7 +32,7 @@ import {
 import { parseValueString } from './parse-value.ts'
 import { SYMBOLS, SymbolForm, symbolVocabulary } from './notation.ts'
 import { isPrefix, isUnit } from './units.ts'
-import type { TypedValue } from './values.ts'
+import { IDENT_MAX_LENGTH, type TypedValue } from './values.ts'
 
 /** What a formula needs from the engine: the slot table. */
 export interface EvalContext {
@@ -273,7 +273,16 @@ function tokenize(source: string): Token[] {
         if (!isNameChar(c)) break
         i += 1
       }
-      tokens.push({ kind: 'name', text: source.slice(at, i), at })
+      const text = source.slice(at, i)
+      // A name is an identifier wherever it appears — a slot, a field, a binding
+      // or a notation — so the length rule applies at the token, not at its use.
+      if (text.length > IDENT_MAX_LENGTH) {
+        throw new ToolError(
+          `character ${at + 1}: "${text.slice(0, 24)}..." is ${text.length} characters long — a name is at most ${IDENT_MAX_LENGTH} characters (letters, digits and underscore, not starting with a digit)`,
+          ToolErrorCode.ParseIdent,
+        )
+      }
+      tokens.push({ kind: 'name', text, at })
       continue
     }
     if (ch === '"') {
@@ -356,6 +365,22 @@ class Evaluator {
 
   private expect(text: string, what: string): void {
     if (!this.accept(text)) this.fail(`expected ${what} ('${text}')`)
+  }
+
+  /**
+   * A position is `_{...}` or `^{...}`: the marker counts only when a brace
+   * follows it. Every other `^` is the power operator, which is what makes a
+   * constant raised to a power writable — `$e^(2)`, `$pi^2`, `$j^(theta)`. A
+   * bare `_` is no operator at all, so leaving it to the expression grammar
+   * reports it as the stray token it is.
+   */
+  private acceptPosition(mark: '_' | '^'): boolean {
+    const token = this.peek()
+    if (token === undefined || token.kind !== 'punct' || token.text !== mark) return false
+    const next = this.tokens[this.index + 1]
+    if (next === undefined || next.kind !== 'punct' || next.text !== '{') return false
+    this.index += 1
+    return true
   }
 
   /* grammar — see the language spec: additive → multiplicative → unary → power → postfix → primary */
@@ -485,12 +510,12 @@ class Evaluator {
     // The subscript and superscript positions; what goes in them belongs to the notation.
     let subscript: Position | undefined
     let superscript: Position | undefined
-    if (this.accept('_')) {
+    if (this.acceptPosition('_')) {
       this.expect('{', 'the subscript position, written _{...}')
       subscript = this.positionExpression()
       this.expect('}', 'the end of the subscript')
     }
-    if (this.accept('^')) {
+    if (this.acceptPosition('^')) {
       this.expect('{', 'the superscript position, written ^{...}')
       superscript = this.positionExpression()
       this.expect('}', 'the end of the superscript')
@@ -547,10 +572,12 @@ class Evaluator {
   }
 
   /**
-   * The contents of a `_{...}` or `^{...}` position. A position holds whatever
-   * the notation defines — a binding variable with its lower bound (`k=a`), an
-   * approaching variable (`x->a`), or a bound on its own (`0`) — so this reads
-   * the shape rather than a single value.
+   * The contents of a `_{...}` or `^{...}` position. A position holds either the
+   * notation's own binding form — a variable and its lower bound (`k=a`), or an
+   * approaching variable (`x->a`) — or an expression (`0`, `@n-1`). A name that
+   * is not followed by `=` or `->` is therefore read as an expression, so a bare
+   * slot name in a bound reports `ENGINE_IDENT_UNBOUND` and says to write `@name`
+   * instead of failing on the brace.
    */
   private positionExpression(): Position {
     const token = this.peek()
@@ -563,8 +590,6 @@ class Evaluator {
         if (next.text === '->') return { kind: 'name', text: token.text }
         return { kind: 'bind', name: token.text, from: bound }
       }
-      this.index += 1
-      return { kind: 'name', text: token.text }
     }
     return { kind: 'value', value: this.expression() }
   }
@@ -692,23 +717,62 @@ class Evaluator {
     )
   }
 
+  /**
+   * `a ^ b`, where the exponent must be dimensionless.
+   *
+   * A real exponent scales the base's dimension vector, which is the dimensional
+   * homomorphism `[a^n] = [a]^n`. A complex exponent has no such homomorphism —
+   * its phase term is `Im(b)·ln|a|`, and `ln|a|` shifts with the unit the base is
+   * written in, so the same physical quantity would rotate by a different angle
+   * in volts than in millivolts. A dimensionless base has no unit to vary, so a
+   * complex exponent is allowed there and nowhere else; that is what makes
+   * `$e^(-$j*$pi/6)` and the DFT's rotation factor writable.
+   */
   private raiseScalar(a: Evaluated, b: Evaluated): Evaluated {
     if (!isMeasured(a) || !isMeasured(b)) {
       throw new ToolError(`cannot raise ${describe(a)} to ${describe(b)}`, ToolErrorCode.TypeNotArithmetic)
     }
     const exponent = parts(b)
-    if (b.measure.kind !== NONE || exponent.im !== 0) {
+    if (b.measure.kind !== NONE) {
       throw new ToolError(
-        `an exponent must be a plain count with no unit, got ${describe(b)} — the exponent is the number of times a value is multiplied by itself`,
+        `an exponent must be dimensionless, got ${describeMeasure(b.measure)} — the exponent is the number of times a value is multiplied by itself`,
         ToolErrorCode.DimMismatch,
       )
     }
     const pa = parts(a)
     const measure = powerMeasure(a.measure, exponent.re)
-    if (pa.im === 0 && pa.re >= 0) return measured(pa.re ** exponent.re, 0, measure)
-    const magnitude = Math.hypot(pa.re, pa.im) ** exponent.re
-    const angle = Math.atan2(pa.im, pa.re) * exponent.re
-    return measured(magnitude * Math.cos(angle), magnitude * Math.sin(angle), measure)
+
+    if (exponent.im === 0) {
+      // A real exponent. `0` to a negative power is a division by zero, and `0^0`
+      // is the conventional 1.
+      if (pa.re === 0 && pa.im === 0 && exponent.re < 0) {
+        throw new ToolError('zero cannot be raised to a negative power', ToolErrorCode.RangeDomain)
+      }
+      if (pa.im === 0 && pa.re >= 0) return measured(pa.re ** exponent.re, 0, measure)
+      const magnitude = Math.hypot(pa.re, pa.im) ** exponent.re
+      const angle = Math.atan2(pa.im, pa.re) * exponent.re
+      return measured(magnitude * Math.cos(angle), magnitude * Math.sin(angle), measure)
+    }
+
+    // A complex exponent. The base must be dimensionless, or the value would
+    // depend on the unit it is written in.
+    if (!isDimensionless(a.measure.dim)) {
+      throw new ToolError(
+        `a quantity cannot be raised to a complex power — the value would depend on the unit it is written in; only a dimensionless base has a complex power, as in $e^(-$j*$pi/6)`,
+        ToolErrorCode.DimMismatch,
+      )
+    }
+    const magnitudeBase = Math.hypot(pa.re, pa.im)
+    if (magnitudeBase === 0) {
+      if (exponent.re > 0) return measured(0, 0, measure)
+      throw new ToolError('zero cannot be raised to a complex power with a non-positive real part', ToolErrorCode.RangeDomain)
+    }
+    // a^z = exp(z·Log a), principal branch: Log a = ln|a| + j·arg(a).
+    const logMagnitude = Math.log(magnitudeBase)
+    const baseAngle = Math.atan2(pa.im, pa.re)
+    const magnitude = Math.exp(exponent.re * logMagnitude - exponent.im * baseAngle)
+    const phase = exponent.im * logMagnitude + exponent.re * baseAngle
+    return measured(magnitude * Math.cos(phase), magnitude * Math.sin(phase), measure)
   }
 
   /* data access */
