@@ -205,7 +205,7 @@ An index outside the array is refused with the index and the length, a non-array
 
 Every notation starts with `$`, which is the engine's namespace: a user name (`sum`, `abs`, `ohm`) never collides with a notation, and no name is reserved. A `$` name outside the table below is a parse error, not a function discovered at run time, and its message lists the whole vocabulary.
 
-A notation may carry a **subscript** `_{...}` and a **superscript** `^{...}`, written as brace-delimited positions. Each notation defines what its own positions hold, so they may differ: for the bounded forms the subscript gives the bound variable and its lower bound (`_{k=0}`) and the superscript gives the upper bound (`^{N-1}`). A constant takes no position at all.
+A notation may carry a **subscript** `_{...}` and a **superscript** `^{...}`, written as brace-delimited positions. Each notation defines what its own positions hold, so they may differ: for the bounded forms the subscript gives the bound variable and its lower bound (`_{k=0}`) and the superscript gives the upper bound (`^{@N-1}` — the bound is an expression, so a slot is written `@N`). A constant takes no position at all, and because a position is the brace that follows the marker, every other `^` is the power operator: `$e^(2)` and `$pi^2` are fine. A position holds either the notation's own binding form (`k=a`, `x->a`) or an expression; a bare name in one is a binding variable, so `^{N-1}` is refused with the reminder to write `@N`.
 
 ### 5.1 Constants (5)
 
@@ -286,7 +286,7 @@ Every kind maps to a vector of the seven SI base dimensions `(kg, m, s, A, K, mo
 ### 6.1 The rules
 
 - Addition and subtraction, and `$min`/`$max`/`$mod`, require the same dimension; the refusal spells both dimensions out. `none + voltage` is refused because the bare count does not say whether the 5 is volts: write `5volt`, or multiply if that is what you mean.
-- Multiplication adds the vectors, division subtracts them and `^` scales them by the exponent. An exponent must be a plain count with no unit; anything else is refused.
+- Multiplication adds the vectors, division subtracts them and `^` scales them by the exponent. An exponent must be dimensionless. A real exponent scales the base's vector (`(4volt)^2` measures `volt^2`); a complex exponent is allowed only on a dimensionless base, because its phase is `Im(exponent)×ln|base|` and `ln|base|` would otherwise shift with the unit the base is written in. So `$e^(-$j*$pi/6)` is a rotation, `2^(2j)` is one too, and `(4ohm)^(1+1j)` is refused. `0` to a negative or complex power has no value.
 - `none` is a plain count: multiplying by it keeps the other side's kind (`2*@R` is a resistance), and `none × voltage = voltage`.
 - `angle` and `log` are dimensionless, but each is its own kind: an angle can be added to an angle and to nothing else, and a logarithm is a plain ratio.
 - `$sin`/`$cos`/`$tan` take a plain count or an angle and return a plain count; `$asin`/`$acos`/`$atan` take a plain count between -1 and 1 and return an angle in radians; `$ln`/`$log`/`$exp`/`$floor`/`$ceil`/`$sign` take a plain count.
@@ -413,7 +413,7 @@ Representative codes, and what their `error` carries:
 | `ENGINE_SLOT_UNDECLARED` | `@name`, or `get`'s `name`, is not declared | the name, and that only the conditions the user gave or an earlier `eval` target exist |
 | `ENGINE_SLOT_KIND` | a write would change a slot's pinned kind or type | the pinned identity and the incoming one, plus the delete-first fix |
 | `ENGINE_IDENT_UNBOUND` | a bare identifier is not bound by any notation | the name, the notations that bind, and `to read a slot write "@name"` |
-| `ENGINE_DIM_MISMATCH` | the derived dimension does not match, an operation mixes dimensions, an exponent is not a plain count, or a result has no named kind | both dimensions (or the unnamed one) and the fix, e.g. `write the count with its unit (for example 5volt), or multiply if that is what you mean`, `split the formula so each step lands on a named quantity` |
+| `ENGINE_DIM_MISMATCH` | the derived dimension does not match, an operation mixes dimensions, an exponent carries a unit or a quantity is raised to a complex power, or a result has no named kind | both dimensions (or the unnamed one) and the fix, e.g. `write the count with its unit (for example 5volt), or multiply if that is what you mean`, `only a dimensionless base has a complex power`, `split the formula so each step lands on a named quantity` |
 | `ENGINE_TYPE_MIXED_KIND` | an array literal mixes kinds | the element that broke it, its measure, and the first element's |
 | `ENGINE_TYPE_NOT_ARITHMETIC` | a non-arithmetic value (an object, a string) took part in arithmetic | what was combined with what |
 | `ENGINE_RANGE_INDEX` | an index or a bound is out of range | the index and the length, or the two bounds |

@@ -205,7 +205,7 @@ symbol         := '$' IDENT
 
 每个记号都以 `$` 开头，`$` 是引擎的命名空间：用户名字（`sum`、`abs`、`ohm`）永不与记号冲突，也没有任何保留字。不在下表内的 `$` 名字是解析错误，而不是运行期才发现的「未知函数」，其信息会列出全部词表。
 
-记号可以带**下标位** `_{...}` 与**上标位** `^{...}`，以花括号界定。每个记号各自定义它的位置里放什么，因此可以不同：对绑定记号，下标位给出绑定变量及其下界（`_{k=0}`），上标位给出上界（`^{N-1}`）。常量不带任何位置。
+记号可以带**下标位** `_{...}` 与**上标位** `^{...}`，以花括号界定。每个记号各自定义它的位置里放什么，因此可以不同：对绑定记号，下标位给出绑定变量及其下界（`_{k=0}`），上标位给出上界（`^{@N-1}`——位置里是表达式，所以槽位要写 `@N`）。常量不带任何位置；由于"位置"就是紧跟在标记后的花括号，其他 `^` 都是幂运算符：`$e^(2)`、`$pi^2` 都合法。位置里要么是该记号自己的绑定形态（`k=a`、`x->a`），要么是一个表达式；位置里的裸名仍是绑定变量，因此 `^{N-1}` 会被拒绝并提示改写成 `@N`。
 
 ### 5.1 常量（5 个）
 
@@ -286,7 +286,7 @@ symbol         := '$' IDENT
 ### 6.1 规则
 
 - 加法、减法以及 `$min`/`$max`/`$mod` 要求同量纲；被拒时信息会把两个量纲都写出来。`none + voltage` 被拒，因为裸计数并没有说清那个 5 是不是伏特：写 `5volt`，或者如果本意是相乘就写成乘法。
-- 乘法把向量相加，除法把向量相减，`^` 按指数缩放向量。指数必须是无单位的纯计数；其他任何东西都会被拒。
+- 乘法把向量相加，除法把向量相减，`^` 按指数缩放向量。指数必须无量纲。实指数按指数缩放底的向量（`(4volt)^2` 量纲为 `volt^2`）；复指数只允许用在无量纲的底上，因为它的相位是 `Im(指数)×ln|底|`，而 `ln|底|` 会随"底用哪个单位书写"整体平移。于是 `$e^(-$j*$pi/6)` 是一个旋转，`2^(2j)` 也是，而 `(4ohm)^(1+1j)` 被拒。`0` 的负数次幂与复数次幂没有值。
 - `none` 是纯计数：乘上它保留另一侧的 kind（`2*@R` 是电阻），且 `none × voltage = voltage`。
 - `angle` 与 `log` 都是无量纲的，但各自是独立的 kind：角度只能与角度相加，别的都不行；对数是纯比值。
 - `$sin`/`$cos`/`$tan` 接收纯计数或角度，返回纯计数；`$asin`/`$acos`/`$atan` 接收 -1 到 1 之间的纯计数，返回以弧度计的角度；`$ln`/`$log`/`$exp`/`$floor`/`$ceil`/`$sign` 接收纯计数。
@@ -413,7 +413,7 @@ symbol         := '$' IDENT
 | `ENGINE_SLOT_UNDECLARED` | `@name` 或 `get` 的 `name` 未声明 | 名字，以及「只可用用户给出的条件或前序 `eval` 的 target」 |
 | `ENGINE_SLOT_KIND` | 写入会改变槽位已钉死的 kind 或类型 | 已钉死的标识与传入的标识，以及先删除的修正方式 |
 | `ENGINE_IDENT_UNBOUND` | 裸标识符没有任何记号绑定 | 名字、会引入绑定的记号，以及 `to read a slot write "@name"` |
-| `ENGINE_DIM_MISMATCH` | 推导出的量纲不符、运算混合了量纲、指数不是纯计数，或结果没有具名 kind | 两个量纲（或那个无名量纲）以及修正方式，例如 `write the count with its unit (for example 5volt), or multiply if that is what you mean`、`split the formula so each step lands on a named quantity` |
+| `ENGINE_DIM_MISMATCH` | 推导出的量纲不符、运算混合了量纲、指数带单位、对带量纲的量取复指数次幂，或结果没有具名 kind | 两个量纲（或那个无名量纲）以及修正方式，例如 `write the count with its unit (for example 5volt), or multiply if that is what you mean`、`only a dimensionless base has a complex power`、`split the formula so each step lands on a named quantity` |
 | `ENGINE_TYPE_MIXED_KIND` | 数组字面量混了 kind | 破坏它的那个元素、它的度量，以及第一个元素的度量 |
 | `ENGINE_TYPE_NOT_ARITHMETIC` | 非算术值（对象、字符串）参与了算术 | 什么与什么做了运算 |
 | `ENGINE_RANGE_INDEX` | 下标或界越界 | 下标与长度，或两个界 |

@@ -71,9 +71,10 @@ A formula is **one expression**. `@name` READS a slot (it is read-only and never
 | bounded (3, evaluable) | `$sum_{k=a}^{b}(body)` `$prod_{k=a}^{b}(body)` `$seq_{k=a}^{b}(body)` |
 | bounded (3, written but NOT evaluated) | `$integral_{a}^{b}(body, x)` `$diff(body, x)` `$limit_{x->a}(body)` |
 
-- The subscript of a bounded notation gives the bound variable and its lower bound (`_{k=0}`); the superscript gives the upper bound (`^{N-1}`). `$seq` builds an array, which `[i]` then walks.
+- The subscript of a bounded notation gives the bound variable and its lower bound (`_{k=0}`); the superscript gives the upper bound (`^{@N-1}` - a bound is an expression, so a slot is written `@N`). `$seq` builds an array, which `[i]` then walks.
 - `$integral`, `$diff` and `$limit` parse but are refused with `ENGINE_SYMBOL_NOT_EVALUABLE`: state the closed form instead, or say the quantity cannot be computed.
-- Operators: `+ - * / ^`. **Multiplication always needs `*`** - `2@R`, `2$pi` and `2(3)` are all refused. `^` is right-associative, and `-2^2` is `-4`.
+- Operators: `+ - * / ^`. **Multiplication always needs `*`** - `2@R`, `2$pi` and `2(3)` are all refused. `^` is right-associative, and `-2^2` is `-4`. A position is the brace that follows `_{` or `^{`, so every other `^` is the power operator: `$e^(2)` and `$pi^2` work.
+- An exponent must be dimensionless. A real exponent scales the dimension (`(4volt)^2` measures `volt^2`); a **complex exponent needs a dimensionless base** - `$e^(-$j*$pi/6)` is a rotation, `2^(2j)` is one too, and `(4ohm)^(1+1j)` is refused. `0` to a negative or complex power has no value.
 - Data access: `@x[k]` takes an element (the index is an expression), `@th.field` takes an object field (a literal name). Chain them: `@net.ports[0].z`.
 - **No comparison, no logic, no conditional, no assignment** - there is no `if`, no `==`, no `x = ...`, and no statement sequence. `boolean` does not exist; an indicator is `0`/`1` (`kind: none`).
 
