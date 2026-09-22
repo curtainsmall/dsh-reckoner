@@ -1,252 +1,327 @@
 /**
- * Engine.
- * Global singleton: variable table + record storage + a single open lifecycle.
- * Primitives (set/get/eval) and markers execute through it; every step appends
- * one trace row (with inputs and outputs).
- *
- * The engine does no domain calculation: it parses values, evaluates formulas,
- * checks dimensions and records. It holds no catalog of named formulas — the
- * model supplies the mathematics as a formula, one expression per `eval`.
+ * The engine shell: the slot table, the open record and the six operations
+ * the tools call. Every operation returns a receipt - success carries the
+ * stored fact, failure carries `{ ok: false, code, error }` - and nothing is
+ * written to a slot when an operation fails. The engine holds no domain
+ * knowledge: the formula comes from the caller.
  */
-import { ToolError, ToolErrorCode } from '../errors.ts'
-import { log } from '../log.ts'
-import { checkDimension } from './dimension.ts'
-import { evaluateFormula } from './formula.ts'
-import { parseValueString } from './parse-value.ts'
-import { printValue } from './print-value.ts'
-import { VariableTable } from './table.ts'
-import { RecordStore, type IndexRow, type TraceRow } from './storage.ts'
-import { identifierProblem, kindOf, toCanonical, validateValue, type TypedValue } from './values.ts'
+import { fail, isEngineError } from '../errors.ts'
+import { describe } from './describe.ts'
+import { evaluateFormula, type SlotAccess } from './formula-eval.ts'
+import { parseFormula } from './formula-parser.ts'
+import { requireIdentifier } from './identifier.ts'
+import { RecordStore, type RecordIndexRow, type TraceRow, type TraceTool } from './record.ts'
+import { type DimSpec, parseDim } from './si-vector.ts'
+import {
+  assertIntegralValue,
+  assertValueDim,
+  mentionDim,
+  parseSetValue,
+  renderValue,
+  storedDimSpelling,
+  type Value,
+} from './value.ts'
 
-export type Receipt = { ok: true; [key: string]: unknown } | { ok: false; code: ToolErrorCode; error: string }
+/** The JSON shape every operation answers with. */
+export type Receipt = Record<string, unknown>
 
-interface OpenState {
-  id: string
+export interface EngineOptions {
+  /** The clock; injected so a record's timestamps and id are reproducible in tests. */
+  readonly now?: () => number
+}
+
+interface SlotEntry {
+  readonly value: Value
+  readonly rev: number
+}
+
+interface OpenRecord {
+  readonly id: string
+  readonly question: string
+  readonly openedAt: number
   seq: number
-  question: string
-  openedAt: number
+}
+
+export interface GetOptions {
+  readonly form?: unknown
+  readonly digits?: unknown
+  readonly dim?: unknown
 }
 
 export class Engine {
-  readonly table = new VariableTable()
-  readonly store: RecordStore
-  private open: OpenState | null = null
+  private readonly store: RecordStore
+  private readonly now: () => number
+  private readonly slots = new Map<string, SlotEntry>()
+  private open: OpenRecord | null = null
 
-  constructor(home: string) {
+  constructor(readonly home: string, options: EngineOptions = {}) {
     this.store = new RecordStore(home)
+    this.now = options.now ?? (() => Date.now())
   }
 
-  /** Start: clear orphans; if a record with sealedAt null and a body exists, recover it (continue the same file, rebuild the table). */
+  /**
+   * Recover the open record: replay its `set` and `eval` rows in order so the
+   * slot table matches the trace that is already on disk.
+   */
   start(): void {
-    this.store.clearOrphans()
-    const row = this.store.readIndex().find((item) => item.sealedAt === null && this.store.hasRecord(item.id))
-    if (row === undefined) return
-    const rows = this.store.readRows(row.id)
-    this.replayInto(rows)
-    const lastSeq = rows.reduce((max, item) => Math.max(max, typeof item.seq === 'number' ? item.seq : 0), 0)
-    this.open = { id: row.id, seq: lastSeq, question: row.question, openedAt: row.openedAt }
+    const openRow = this.store.readIndex().filter((row) => row.answeredAt === null).pop()
+    if (openRow === undefined) {
+      this.slots.clear()
+      this.open = null
+      return
+    }
+    const rows = this.store.readRows(openRow.id)
+    this.slots.clear()
+    this.open = {
+      id: openRow.id,
+      question: openRow.question,
+      openedAt: openRow.openedAt,
+      seq: rows.length === 0 ? 0 : rows[rows.length - 1]!.seq,
+    }
+    for (const row of rows) {
+      if (!row.ok) continue
+      try {
+        if (row.tool === 'set') this.replaySet(row)
+        if (row.tool === 'eval') this.replayEval(row)
+      } catch {
+        // A row that no longer parses is skipped: recovery must never keep the plugin from mounting.
+      }
+    }
   }
 
-  indexRows(): IndexRow[] {
+  private replaySet(row: TraceRow): void {
+    const name = row.content['name']
+    if (typeof name !== 'string') return
+    const value = row.content['value']
+    if (value === null) {
+      this.slots.delete(name)
+      return
+    }
+    this.write(name, parseSetValue(value, `the stored value of "${name}"`))
+  }
+
+  private replayEval(row: TraceRow): void {
+    const target = row.content['target']
+    const result = row.content['result']
+    if (typeof target !== 'string' || result === null || result === undefined) return
+    this.write(target, parseSetValue(result, `the stored result of "${target}"`))
+  }
+
+  indexRows(): RecordIndexRow[] {
     return this.store.readIndex()
   }
 
-  isOpen(): boolean {
-    return this.open !== null
+  readRows(id: string): TraceRow[] {
+    return this.store.readRows(id)
   }
 
-  openId(): string | null {
+  openRecordId(): string | null {
     return this.open?.id ?? null
   }
 
-  /**
-   * Rebuild engine state from a stored trace: `set` rows are re-applied,
-   * everything else is skipped. `eval` rows carry their target, so the table
-   * comes back without recomputing anything.
-   */
-  private replayInto(rows: TraceRow[]): void {
-    for (const row of rows) {
-      if (row.ok !== true) continue
-      if (row.tool === 'set') {
-        if (row.deleted === true) this.table.delete(String(row.name))
-        else this.table.set(String(row.name), row.value as TypedValue)
-        continue
-      }
-      if (row.tool === 'eval' && typeof row.target === 'string' && row.result !== null && row.result !== undefined) {
-        this.table.set(row.target, row.result as TypedValue)
-      }
-    }
-  }
-
-  private nextSeq(): number {
-    if (this.open === null) return 1
-    this.open.seq += 1
-    return this.open.seq
-  }
-
-  private requireOpen(): OpenState {
-    if (this.open === null) throw new ToolError('no open record — call record_question first', ToolErrorCode.SlotUndeclared)
-    return this.open
-  }
-
-  private trace(row: Omit<TraceRow, 'seq' | 'at'>): void {
-    const open = this.requireOpen()
-    const line = { seq: this.nextSeq(), at: Date.now() } as TraceRow
-    Object.assign(line, row)
-    this.store.appendRow(open.id, line)
-  }
-
-  /* ── markers (lifecycle) ─────────────────────────────────────────────── */
-
-  /** record_question: if open exists, seal it (duplicate-start) then open a new one; the variable table is cleared. */
-  markerQuestion(text: string): Receipt {
-    if (this.open !== null) this.sealDuplicateStart()
-    this.table.clear()
-    const created = this.store.createRecord(text)
-    this.open = { id: created.id, seq: 0, question: text, openedAt: created.openedAt }
-    this.trace({ tool: 'marker', kind: 'question', ok: true, text })
-    return { ok: true, record: this.open.id }
-  }
-
-  markerAnalyse(text: string): Receipt {
-    this.requireOpen()
-    this.trace({ tool: 'marker', kind: 'analyse', ok: true, text })
-    return { ok: true }
-  }
-
-  /** record_answer: submit the text and settle; no open record → duplicate-end error record. */
-  markerAnswer(text: string): Receipt {
-    if (this.open === null) {
-      const created = this.store.createRecord('')
-      this.open = { id: created.id, seq: 0, question: '', openedAt: created.openedAt }
-      this.trace({ tool: 'seal', kind: 'duplicate-end', ok: true })
-      this.store.updateIndex(created.id, { sealedAt: Date.now() })
-      const id = this.open.id
-      this.open = null
-      return { ok: true, record: id, error: 'duplicate-end' }
-    }
-    this.trace({ tool: 'marker', kind: 'answer', ok: true, text })
-    const id = this.open.id
-    this.store.updateIndex(id, { sealedAt: Date.now() })
-    this.open = null
-    return { ok: true, record: id }
-  }
-
-  private sealDuplicateStart(): void {
-    if (this.open === null) return
-    this.trace({ tool: 'seal', kind: 'duplicate-start', ok: true })
-    this.store.updateIndex(this.open.id, { sealedAt: Date.now() })
-    this.open = null
-  }
-
-  /* ── set / get / eval ────────────────────────────────────────────────── */
-
-  /**
-   * set: parse one value string and write the slot.
-   * The parse happens before anything is written — a value that does not parse
-   * leaves no trace row and no slot behind.
-   */
-  opSet(name: string, value: string | null): Receipt {
-    try {
-      this.validateName(name)
+  opSet(name: unknown, value: unknown): Receipt {
+    return this.run('set', () => {
+      this.requireOpenRecord()
+      const slotName = requireIdentifier(name, 'the set name')
       if (value === null) {
-        const deleted = this.table.delete(name)
-        this.trace({ tool: 'set', ok: true, name, value: null, deleted })
-        return { ok: true, name, deleted }
+        this.slots.delete(slotName)
+        this.appendRow('set', true, { name: slotName, value: null })
+        return { ok: true, name: slotName, rev: null, value: null }
       }
-      const parsed = toCanonical(this.parseValue(value))
-      const problem = validateValue(parsed)
-      if (problem !== undefined) throw new ToolError(`${problem} — this is an engine bug, the parser produced a malformed value`, ToolErrorCode.Tool)
-      const slot = this.table.set(name, parsed)
-      this.trace({ tool: 'set', ok: true, name, value: parsed, rev: slot.rev })
-      return { ok: true, name, rev: slot.rev, value: this.printValue(parsed) }
-    } catch (error) {
-      return this.failure('set', error)
-    }
+      const parsed = parseSetValue(value)
+      const rev = this.write(slotName, parsed)
+      const stored = renderValue(parsed, { spellDim: storedDimSpelling })
+      this.appendRow('set', true, { name: slotName, value: stored })
+      return { ok: true, name: slotName, rev, value: stored }
+    })
   }
 
-  /** get: read one slot and print it in the requested format (default: SI). */
-  opGet(name: string, format?: string): Receipt {
-    try {
-      this.validateName(name)
-      const slot = this.table.get(name)
-      if (slot === undefined) {
-        throw new ToolError(
-          `slot "${name}" is not declared — only conditions given by the user, or the target of an earlier eval, exist`,
-          ToolErrorCode.SlotUndeclared,
+  opGet(name: unknown, options: GetOptions = {}): Receipt {
+    return this.run('get', () => {
+      this.requireOpenRecord()
+      const slotName = requireIdentifier(name, 'the get name')
+      const entry = this.slots.get(slotName)
+      if (entry === undefined) {
+        fail(
+          'ENGINE_SLOT_UNDECLARED',
+          `the slot "${slotName}" does not exist yet; declare it with set {name:"${slotName}", value:{num:..., dim:...}} before reading it.`,
         )
       }
-      const printed = this.printValue(slot.value, format)
-      this.trace({ tool: 'get', ok: true, name, format: format ?? null, value: slot.value })
-      return { ok: true, name, format: format ?? 'si', value: printed }
-    } catch (error) {
-      return this.failure('get', error)
-    }
+      const form = readForm(options.form)
+      const digits = readDigits(options.digits)
+      const spec: DimSpec | undefined =
+        options.dim === undefined || options.dim === null ? undefined : parseDim(options.dim, 'dim')
+      if (spec !== undefined) assertValueDim(entry.value, spec, `the slot "${slotName}"`)
+      const rendered = renderValue(entry.value, {
+        ...(form === undefined ? {} : { form }),
+        ...(digits === undefined ? {} : { digits }),
+        ...(spec === undefined || spec.name === undefined ? {} : { scale: spec }),
+        spellDim: (dim) => (spec === undefined ? mentionDim(dim) : (spec.name ?? spec.vector)),
+      })
+      this.appendRow('get', true, { name: slotName, value: rendered })
+      return { ok: true, name: slotName, value: rendered }
+    })
   }
 
-  /**
-   * eval: evaluate one formula and, when target is given, write the result there.
-   *
-   * The formula is a single expression: there is no assignment inside it. `@name`
-   * reads a slot, the target parameter writes one. The value is not returned —
-   * the model reads it with `get`, and the trace carries the result for the
-   * record.
-   *
-   * The write goes through the same path as `set`: the result's kind must match
-   * the kind the slot already pins, and a refusal leaves the slot untouched and
-   * records one failed row.
-   */
-  opEval(formula: string, target: string | null): Receipt {
+  opEval(formula: unknown, target: unknown): Receipt {
+    return this.run('eval', () => {
+      this.requireOpenRecord()
+      if (typeof formula !== 'string') {
+        fail('ENGINE_ARGS_INVALID', `eval takes the formula as a string; got ${describe(formula)}.`)
+      }
+      if (target === undefined || target === null) {
+        fail(
+          'ENGINE_ARGS_INVALID',
+          'eval needs target: the slot name the result is written into. Read the value back with get - eval does not return it.',
+        )
+      }
+      const targetName = requireIdentifier(target, 'the eval target')
+      const vars: Record<string, unknown> = {}
+      const slots: SlotAccess = {
+        read: (slotName) => this.slots.get(slotName)?.value,
+        note: (slotName) => {
+          if (vars[slotName] !== undefined) return
+          const entry = this.slots.get(slotName)
+          if (entry !== undefined) vars[slotName] = renderValue(entry.value, { spellDim: storedDimSpelling })
+        },
+      }
+      const value = evaluateFormula(parseFormula(formula), slots)
+      assertIntegralValue(value, `the slot "${targetName}"`)
+      const rev = this.write(targetName, value)
+      this.appendRow('eval', true, {
+        formula,
+        target: targetName,
+        rev,
+        vars,
+        result: renderValue(value, { spellDim: storedDimSpelling }),
+      })
+      return { ok: true, target: targetName, rev }
+    })
+  }
+
+  markerQuestion(text: unknown): Receipt {
+    return this.run('record_question', () => {
+      if (typeof text !== 'string') {
+        fail('ENGINE_ARGS_INVALID', `record_question takes the question text as a string; got ${describe(text)}.`)
+      }
+      if (this.open !== null) {
+        fail(
+          'ENGINE_RECORD_DUPLICATE',
+          `the record "${this.open.id}" is still open; submit record_answer for it first - a record carries exactly one question.`,
+        )
+      }
+      const id = this.allocateRecordId()
+      const openedAt = this.now()
+      this.slots.clear()
+      this.open = { id, question: text, openedAt, seq: 0 }
+      this.store.writeIndex([...this.store.readIndex(), { id, question: text, openedAt, answeredAt: null }])
+      this.appendRow('record_question', true, { text, record: id })
+      return { ok: true }
+    })
+  }
+
+  markerAnalyse(text: unknown): Receipt {
+    return this.run('record_analyse', () => {
+      if (typeof text !== 'string') {
+        fail('ENGINE_ARGS_INVALID', `record_analyse takes the analysis text as a string; got ${describe(text)}.`)
+      }
+      this.requireOpenRecord()
+      this.appendRow('record_analyse', true, { text })
+      return { ok: true }
+    })
+  }
+
+  markerAnswer(text: unknown): Receipt {
+    return this.run('record_answer', () => {
+      if (typeof text !== 'string') {
+        fail('ENGINE_ARGS_INVALID', `record_answer takes the answer text as a string; got ${describe(text)}.`)
+      }
+      if (this.open === null) {
+        fail(
+          'ENGINE_RECORD_DUPLICATE',
+          'no record is open, so there is no question to answer; call record_question first.',
+        )
+      }
+      const current = this.open
+      this.appendRow('record_answer', true, { text, record: current.id })
+      this.sealRecord(current)
+      this.open = null
+      return { ok: true }
+    })
+  }
+
+  /** The index row carries the span: the question it opened with and the answer that closed it. */
+  private sealRecord(record: OpenRecord): void {
+    const rows = this.store.readIndex()
+    this.store.writeIndex(
+      rows.map((row) =>
+        row.id === record.id ? { id: row.id, question: row.question, openedAt: row.openedAt, answeredAt: this.now() } : row,
+      ),
+    )
+  }
+
+  private allocateRecordId(): string {
+    const taken = new Set(this.store.readIndex().map((row) => row.id))
+    const base = String(this.now())
+    let id = base
+    let suffix = 2
+    while (taken.has(id)) {
+      id = `${base}-${suffix}`
+      suffix += 1
+    }
+    return id
+  }
+
+  private write(name: string, value: Value): number {
+    const rev = (this.slots.get(name)?.rev ?? 0) + 1
+    this.slots.set(name, { value, rev })
+    return rev
+  }
+
+  private requireOpenRecord(): void {
+    if (this.open !== null) return
+    fail(
+      'ENGINE_NO_RECORD',
+      'no record is open: call record_question first. It opens a record and clears the slot table, and set / get / eval are refused until it is open.',
+    )
+  }
+
+  private run(tool: TraceTool, body: () => Receipt): Receipt {
     try {
-      const used = new Map<string, TypedValue>()
-      const result = evaluateFormula(formula, { readSlot: (name) => this.table.get(name)?.value, used })
-      if (target === null) {
-        this.trace({ tool: 'eval', ok: true, formula, target: null, rev: null, vars: Object.fromEntries(used), result })
-        return { ok: true, target: null, rev: null }
-      }
-      this.validateName(target)
-      const existing = this.table.get(target)
-      if (existing !== undefined) {
-        // The dimensions say why: "expected voltage (kg·m²·s⁻³·A⁻¹), got current".
-        const derived = kindOf(result)
-        const pinned = kindOf(existing.value)
-        if (derived !== undefined && pinned !== undefined) {
-          const problem = checkDimension(derived, pinned)
-          if (problem !== undefined) throw new ToolError(problem, ToolErrorCode.DimMismatch)
-        }
-      }
-      const slot = this.table.set(target, result)
-      this.trace({ tool: 'eval', ok: true, formula, target, rev: slot.rev, vars: Object.fromEntries(used), result })
-      return { ok: true, target, rev: slot.rev }
+      return body()
     } catch (error) {
-      return this.failure('eval', error)
+      const code = isEngineError(error) ? error.code : 'ENGINE_TOOL'
+      const message = isEngineError(error)
+        ? error.message
+        : `internal error: ${error instanceof Error ? error.message : String(error)}`
+      this.appendRow(tool, false, { code, error: message })
+      return { ok: false, code, error: message }
     }
   }
 
-  /** Parse a value string into a canonical typed value (SI, rect complex). */
-  private parseValue(source: string): TypedValue {
-    return parseValueString(source)
-  }
-
-  /** Print a canonical value; `format` names a unit, prefix+unit, variant or `json`. */
-  private printValue(value: TypedValue, format?: string): string {
-    return printValue(value, format)
-  }
-
-  /** A tool argument is a slot name, never `@name`: the same identifier rule the formula lexer uses. */
-  private validateName(name: string): void {
-    const problem = identifierProblem(name)
-    if (problem !== undefined) throw new ToolError(`slot name ${problem}`, ToolErrorCode.ArgsInvalid)
-  }
-
-  private failure(tool: string, error: unknown): Receipt {
-    const code = error instanceof ToolError ? error.code : ToolErrorCode.Tool
-    const message = error instanceof Error ? error.message : String(error)
-    // Run-time diagnostics only: the trace row below stays the authoritative account of the failure.
-    log.warn('engine op failed', { tool, code, error: message })
-    if (this.open !== null) {
-      this.trace({ tool, ok: false, code, error: message })
+  private appendRow(tool: TraceTool, ok: boolean, content: Record<string, unknown>): void {
+    const record = this.open
+    if (record === null) return
+    record.seq += 1
+    const row: TraceRow = { seq: record.seq, at: this.now(), tool, ok, content }
+    try {
+      this.store.appendRow(record.id, row)
+    } catch {
+      // A trace that cannot be written must not turn a successful call into a failure.
     }
-    return { ok: false, code, error: message }
   }
+}
+
+function readForm(input: unknown): 'rect' | 'polar' | undefined {
+  if (input === undefined || input === null) return undefined
+  if (input === 'rect' || input === 'polar') return input
+  fail('ENGINE_ARGS_INVALID', `form must be "rect" or "polar"; got ${describe(input)}.`)
+}
+
+function readDigits(input: unknown): number | undefined {
+  if (input === undefined || input === null) return undefined
+  if (typeof input !== 'number' || !Number.isInteger(input) || input < 1) {
+    fail('ENGINE_ARGS_INVALID', `digits must be a positive integer (the number of significant digits to keep); got ${describe(input)}.`)
+  }
+  return input
 }

@@ -1,111 +1,79 @@
 ---
 name: reckoner-interface
-description: "Reckoner engine manual: values, the set/get/eval tools, receipts and error codes, the $ notation, dimension rules and the discipline that keeps every number inside the engine"
-whenToUse: "Any session that operates the Reckoner engine (set/get/eval, record markers)"
+description: The Reckoner engine manual - values, tools, receipts, notation and the dimension rules. Read before writing any formula.
+whenToUse: Load before the first Reckoner tool call of a calculation, and again whenever a formula or a receipt is unclear.
 ---
 
-# DeepSeek Harness Reckoner — Engine Manual
+# Reckoner engine manual
 
-The engine is a deterministic calculator. It parses values, evaluates the formulas **you** write, derives dimensions, and records every step. It knows no physics, no electronics and no named formulas: the mathematics comes from you, the numerical rules (units, prefixes, complex arithmetic, dimensions) come from the engine. You never parse text into numbers, never convert a prefix or a unit variant, and never do arithmetic yourself.
+The engine is a calculator with no domain knowledge: you write the formula, it parses, substitutes, checks the dimensions, evaluates and records. Everything below is engine behaviour, not advice.
 
 ## Values
 
-A value is ONE string, written the way it is said:
+A slot holds one of four value types: `number` (a JSON number), `complex` (stored rectangular as `re`/`im`), `array` (elements sharing one SI vector) and `object` (one vector per field). A quantity is a number plus a 7-integer SI vector; the vector is the whole identity, the name is only how it is written.
 
-```
-4.7kohm        4700ohm       100uohm       12volt       1.5second     50hertz
-25degC         14.7psi       2hp           5            (a bare count)
-2j             3+4i          1e5                          (complex, scientific notation)
-[100ohm, 220ohm]             {v: 12volt, r: 100ohm}       (array, object)
-"a string"
-```
+`set` takes a tagged object with exactly one tag:
 
-- **Prefix is one letter, the unit is a whole word**: `p n u m k M G T` (10^-12 through 10^12) + `second metre gram amp kelvin radian decibel hertz ohm farad henry volt watt pascal joule`, plus the variants `degC degF deg bar psi atm cal Wh hp inch foot yard mile lb oz`. A prefix must be followed by a unit - `5k` is refused, `5kohm` is fine.
-- **Whole words only**: `ohm` never `Ω`, `second` never `s`, `degC` never `°C`, `metre` never `m` as a unit. Symbols are refused at the character level; everything is ASCII.
-- **Scientific notation is lowercase `e`**: `1e5`. Uppercase `E` is refused, and `2e` is refused with the fix.
-- **A bare number is a plain count** (`kind: none`). It never inherits a neighbour's unit, which is why `5 + @V_in` is refused: write `5volt`.
-- **What is stored is SI**: `4.7kohm` and `4700ohm` are the same stored value; `25degC` becomes 298.15 kelvin. Prefix and variant exist only while parsing and printing.
-- **`get`'s `format` uses the same words**: `get { name: "R1", format: "kohm" }` prints a string you can feed straight back into `set` or into a formula.
+- `{"num": 4.7e3, "dim": "ohm"}` - a real
+- `{"re": 3, "im": 4, "dim": "ohm"}` - a complex in rectangular form
+- `{"mag": 5, "ang": 0.927295218, "dim": "ohm"}` - a complex in polar form (radians); it is converted to rectangular on the way in
+- `{"array": [1, 2, 3], "dim": "volt"}` - an array; its elements are bare numbers, `{re,im}` or nested arrays, and they share the array's `dim`
+- `{"object": {"v": {"num": 12, "dim": "volt"}}}` - named fields, each a full value with its own `dim`; an object takes no `dim` of its own
+
+`dim` is a name from the SI table or 7 integers in the order `m,kg,s,A,K,mol,cd`; omitted it is the zero vector. `value: null` deletes the slot, idempotently. Only whole SI vectors can be stored: a fractional vector (from `$sqrt` or a fractional power) is refused when it lands in a slot.
 
 ## Tools
 
-| tool | parameters | receipt |
-|---|---|---|
-| `set` | `name`, `value` (one value string, or `null` to delete the slot) | `{ ok, name, rev, value }` |
-| `get` | `name`, `format` (optional) | `{ ok, name, format, value }` — the printed text |
-| `eval` | `formula` (one expression), `target` (slot name, or `null`) | `{ ok, target, rev }` |
-| `record_question` | `text` | `{ ok, record }` — clears the table, opens a record |
-| `record_analyse` | `text` | `{ ok }` |
-| `record_answer` | `text` | `{ ok, record }` — seals the record |
-
-- `set` writes **the conditions the user gave** (transcription). A slot pins its kind on first write; overwriting with a different kind is refused — delete it first (`value: null`).
-- `eval` writes **a computed quantity**. `target` is the slot the result is stored in; `target: null` evaluates without storing anything.
-- **`eval` does not return its value.** To see a number, call `get` on the slot you wrote it into.
-- `get`'s `format`: a unit (`ohm`), a prefix+unit (`kohm`), a variant (`degC`), or `deg` / `rad` / `polar` / `json`. Omit it for the SI form. Printing never changes what is stored.
+- `set {name, value}` - write one slot. The receipt echoes what was stored: `dim` always as 7 integers, a complex always as `re`/`im`, an array with one `dim`, an object field by field.
+- `get {name, form?, digits?, dim?}` - read one slot.
+  - `form`: `"rect"` for `{re,im}`, `"polar"` for `{mag,ang}` in radians. A real is widened to a complex (`rect`: `{re:x, im:0}`; `polar`: `{mag:|x|, ang:0}`, and `pi` for a negative real). Omitted keeps the stored form.
+  - `digits`: round to at most that many significant digits (4700 has 4), never padding.
+  - `dim`: convert into that spelling, or - given 7 integers - check the vector without converting. A mismatch is refused.
+  - The `value` of a `get` receipt can be fed straight back into `set`.
+- `eval {formula, target}` - evaluate ONE expression and write the result into `target` (a required slot name). The receipt is `{ok, target, rev}`; `eval` does not return the value, so read it with `get`.
 
 ## Receipts and errors
 
-Every call returns `{ ok: true, … }` or `{ ok: false, code, error }`.
+Every call answers `{ok: true, ...}` or `{ok: false, code, error}`. A failure writes nothing: no slot changes, and the trace records the failure row. `error` is written for you - it carries the concrete value, the boundary or the expectation, and the fix. `code` is a stable identifier, useful in logs and tests.
 
-- **A failed call has no side effects**: no slot is written, no value is changed. Read the receipt, fix what `error` names, call again.
-- `error` is the one sentence written for you — it names the position, the reason and the fix. Read it and follow it; do not retry the same call unchanged.
-- `code` is for machines: `ENGINE_<position>_<reason>`, e.g. `ENGINE_PARSE_UNIT`, `ENGINE_SLOT_UNDECLARED`, `ENGINE_DIM_MISMATCH`, `ENGINE_PARSE_ARITY`.
+The codes: `ENGINE_PARSE_SYNTAX`, `ENGINE_PARSE_NUMBER`, `ENGINE_PARSE_IDENT`, `ENGINE_PARSE_UNIT`, `ENGINE_PARSE_SYMBOL`, `ENGINE_PARSE_ARITY`, `ENGINE_SLOT_UNDECLARED`, `ENGINE_IDENT_UNBOUND`, `ENGINE_DIM_MISMATCH`, `ENGINE_TYPE_NOT_ARITHMETIC`, `ENGINE_RANGE_INDEX`, `ENGINE_RANGE_DOMAIN`, `ENGINE_NOT_INDEXABLE`, `ENGINE_NO_FIELD`, `ENGINE_SYMBOL_NOT_EVALUABLE`, `ENGINE_ARGS_INVALID`, `ENGINE_NO_RECORD`, `ENGINE_RECORD_DUPLICATE`, `ENGINE_TOOL`.
 
 ## Record markers
 
-- `record_question { text }` — open a record; the variable table is cleared. Re-opening seals the previous record as duplicate-start.
-- `record_analyse { text }` — the approach: the knowns, the relations you will use, the plan. **No computed numbers here.**
-- `record_answer { text }` — the final answer; seals the record.
-
-Conditions are stored with `set` before anything else. Computed numbers exist only after the `eval` that produced them; an answer quotes slot values or `get` results, never a number from your own head.
+`record_question` opens a record and clears the slot table; it fails while a record is open. `record_analyse` submits the analysis. `record_answer` submits the answer and seals the record; it fails when no record is open. `set`, `get` and `eval` are refused while no record is open. Each marker answers `{ok}`.
 
 ## Notation
 
-A formula is **one expression**. `@name` READS a slot (it is read-only and never appears on the left of anything); the slot that receives the result is `eval`'s `target` parameter. Bare names are binding variables only, introduced by the bounded notations below.
+Constants: `$pi` `$e` `$inf` `$i` `$j`.
 
-| family | forms |
-|---|---|
-| constants (5) | `$pi` `$e` `$inf` `$i` `$j` |
-| functions (19) | `$abs` `$sqrt` `$exp` `$ln` `$log` `$sin` `$cos` `$tan` `$asin` `$acos` `$atan` `$floor` `$ceil` `$sign` `$re` `$im` `$arg` `$conj` `$transpose` |
-| functions (4) | `$atan2(x, y)` `$min(a, b)` `$max(a, b)` `$mod(a, b)` |
-| bounded (3, evaluable) | `$sum_{k=a}^{b}(body)` `$prod_{k=a}^{b}(body)` `$seq_{k=a}^{b}(body)` |
-| bounded (3, written but NOT evaluated) | `$integral_{a}^{b}(body, x)` `$diff(body, x)` `$limit_{x->a}(body)` |
+Unary functions: `$abs` `$sqrt` `$exp` `$ln` `$log` `$sin` `$cos` `$tan` `$asin` `$acos` `$atan` `$floor` `$ceil` `$sign` `$re` `$im` `$arg` `$conj` `$transpose` `$len`.
 
-- The subscript of a bounded notation gives the bound variable and its lower bound (`_{k=0}`); the superscript gives the upper bound (`^{@N-1}` - a bound is an expression, so a slot is written `@N`). `$seq` builds an array, which `[i]` then walks.
-- `$integral`, `$diff` and `$limit` parse but are refused with `ENGINE_SYMBOL_NOT_EVALUABLE`: state the closed form instead, or say the quantity cannot be computed.
-- Operators: `+ - * / ^`. **Multiplication always needs `*`** - `2@R`, `2$pi` and `2(3)` are all refused. `^` is right-associative, and `-2^2` is `-4`. A position is the brace that follows `_{` or `^{`, so every other `^` is the power operator: `$e^(2)` and `$pi^2` work.
-- An exponent must be dimensionless. A real exponent scales the dimension (`(4volt)^2` measures `volt^2`); a **complex exponent needs a dimensionless base** - `$e^(-$j*$pi/6)` is a rotation, `2^(2j)` is one too, and `(4ohm)^(1+1j)` is refused. `0` to a negative or complex power has no value.
-- Data access: `@x[k]` takes an element (the index is an expression), `@th.field` takes an object field (a literal name). Chain them: `@net.ports[0].z`.
-- **No comparison, no logic, no conditional, no assignment** - there is no `if`, no `==`, no `x = ...`, and no statement sequence. `boolean` does not exist; an indicator is `0`/`1` (`kind: none`).
+Two-argument functions: `$atan2` `$min` `$max` `$mod`.
+
+Bounded forms: `$sum_{k=a}^{b}(body)`, `$prod_{k=a}^{b}(body)`, `$seq_{k=a}^{b}(body)`. Both bounds are required, they are integers with the zero vector, they are inclusive, and they are evaluated once before the body. `$seq` builds an array; nested `$seq` builds a row-major two-dimensional array. `$transpose(M)` takes a two-dimensional array and leaves the vector unchanged; `$len(array)` counts elements and is itself a usable bound.
+
+Writable but not evaluable: `$integral_{a}^{b}(body, x)` or `$integral(body, x)`, `$limit_{x->a}(body)`, `$diff(body, x)` or `$diff(body, x, n)`. Evaluating one is refused.
+
+A position is the brace directly after the notation name: `_{k=a}`, `^{N}`. Every other `^` is a power, so `$e^(2)` and `$pi^2` are powers while `$pi^{2}` is not accepted. A bound expression holds no loop variable: `^{N-1}` is an unbound name, write `^{@N-1}`.
+
+Slots are read as `@name`, an array element as `@name[index]` (the index is an expression, an integer with the zero vector), an object field as `@name.field`, and these chain: `@net.ports[0].z`. A bare name is a bound variable only.
+
+Operators: `+ - * / ^` with brackets. Precedence: additive, multiplicative, unary, power, postfix, primary; `^` is right-associative and `-2^2` is `-4`. Multiplication must be written: `2*@R`, never `2@R`. A formula is one expression - no assignment, no comparison, no logic, no statement sequence.
 
 ## Dimensions
 
-Every kind maps to a vector of the seven SI base dimensions (kg, m, s, A, K, mol, cd):
+A real exponent scales the SI vector (`@V^2`); a complex exponent needs a dimensionless base (`$e^(-$j*$pi/6)`, `2^(2j)`, `$j^$j`). `0^0` is 1; zero raised to a negative or complex power is refused. An exponent always has the zero vector.
 
-| kind | vector | kind | vector |
-|---|---|---|---|
-| `none` `log` `angle` | dimensionless | `voltage` | (1, 2, -3, -1, 0, 0, 0) |
-| `time` | (0, 0, 1, 0, 0, 0, 0) | `resistance` | (1, 2, -3, -2, 0, 0, 0) |
-| `length` | (0, 1, 0, 0, 0, 0, 0) | `capacitance` | (-1, -2, 4, 2, 0, 0, 0) |
-| `mass` | (1, 0, 0, 0, 0, 0, 0) | `inductance` | (1, 2, -2, -2, 0, 0, 0) |
-| `current` | (0, 0, 0, 1, 0, 0, 0) | `power` | (1, 2, -3, 0, 0, 0, 0) |
-| `temperature` | (0, 0, 0, 0, 1, 0, 0) | `frequency` | (0, 0, -1, 0, 0, 0, 0) |
-| `energy` | (1, 2, -2, 0, 0, 0, 0) | `pressure` | (1, -1, -2, 0, 0, 0, 0) |
+Two sides of `+` and `-` must carry the same SI vector, so a dimensionless `5` added to a voltage is refused - write the quantity. A dimensionless factor multiplies without changing the vector (`2*@R`, `@theta*@R`); a pure ratio of two equal vectors is dimensionless.
 
-The engine carries these vectors through the whole expression, so it checks the mathematics as it computes it - **you do not have to name a kind anywhere**:
+`$min`, `$max`, `$mod` and `$atan2` need both arguments on the same vector. `$sin` `$cos` `$tan` `$asin` `$acos` `$atan` `$ln` `$log` `$exp` `$floor` `$ceil` `$sign` take a dimensionless argument; `$asin` `$acos` `$atan` `$arg` return radians, and `$arg` accepts any vector (`$arg(0)` is 0, `$atan2(0,0)` is 0). `$abs` `$re` `$im` `$conj` keep the vector, `$sqrt` halves it. `$ln(-1)`, a division by zero, `$mod` by zero and `$asin(2)` are refused.
 
-- `@V/@R` is a current, `@V*@A` is a power, `@R*@C` is a time, and writing one where the other belongs is refused with the dimensions spelled out.
-- An intermediate may have a dimension with **no name** - `(@V)^2/@R` squares a voltage on the way to a power, and that is fine. Only the RESULT must land on a named kind, because the target slot pins one. A result like `(4ohm)^2` is refused: split the formula so each step lands on a named quantity.
-- `none` is a plain count: multiplying by it keeps the kind (`2*@R` is a resistance) and adding it to a quantity is refused (`5 + @V_in`).
-- Additions and `$min`/`$max`/`$mod` require the same dimension; `$sin`/`$cos`/`$tan` take a plain count or an angle; `$ln`/`$log`/`$exp` take a plain count.
-- A result whose kind contradicts the slot it would be written into is refused **before** anything is written.
+A decibel value and an angle are both dimensionless numbers: `{"num": 3}` is `3`. Turning one into a ratio is a formula you write - whether the factor is 10 or 20 follows the power or amplitude convention of the case.
 
 ## Discipline
 
-1. **Numbers come from slots, never from memory.** Every number in an answer is a condition stored by `set` or a value in a slot that an `eval` produced - read it with `get`.
-2. **Transcription is yours, numerical rules are the engine's.** Write the values the way the user wrote them (`4.7kohm`, `25degC`); the engine resolves the prefix, the variant and the complex form. Never convert to SI by hand, and never assume an input condition the user did not give.
-3. **A formula must use the conditions.** Reference the user's quantities with `@name`; a formula that ignores them and hard-codes a number is wrong even when it evaluates.
-4. **Prefer several `eval` calls over one deep expression.** Evaluate an intermediate with its own `target`, then read it back with `@` in the next call. Split when the same sub-expression appears twice, when parentheses nest more than about three deep, or when the line stops being readable. Each call leaves its own formula and result in the record, and the article can then show `Vth`, `Rth` and `Pmax` as named steps instead of one wall of symbols.
-5. **`eval` returns no value.** If a later step needs a number, either it is a slot you can reference with `@`, or you have not stored it yet.
-6. **Check every receipt.** On failure nothing changed: read `error` and fix that specific thing.
-7. **Say so when the conditions are insufficient.** If a quantity the relation needs is missing, do not call `eval` and do not use the markers: name the missing quantity and say which relation therefore cannot be evaluated, then stop.
+- The gate comes first: store each quantity the user gave, one `set` per quantity, and stop if one is missing.
+- Never hard-code a measurement in a formula; reference the slot as `@name`. Constants you derive yourself (unit conversions, 273.15, 10 or 20) are written into the formula.
+- `set` is transcription into SI: convert the user's unit yourself and let `dim` name the result.
+- Check every receipt; read values only through `get`.
+- Split a long derivation: one intermediate per `eval`, read back with `@name`.

@@ -1,158 +1,119 @@
 /**
- * The notation table: every `$` name the engine understands, its arity, and
- * whether it can be evaluated.
- *
- * `$` is the engine's namespace, so a user name (`sum`, `abs`) never collides
- * with a notation. A name that is not in this table is a parse error, not an
- * "unknown function" discovered at run time — the model gets told immediately,
- * with the vocabulary.
- *
- * `$integral`, `$diff` and `$limit` are in the table and parse, but this engine
- * cannot evaluate them: they report ENGINE_SYMBOL_NOT_EVALUABLE. They exist so a
- * formula can still *say* what it means.
+ * The `$` notation table: which symbols exist, what shape each one is
+ * written in, whether it can be evaluated, and how many arguments it takes.
+ * Nothing else in the engine may spell a notation name.
  */
+export type NotationClass = 'constant' | 'function' | 'binding'
 
-/** How a notation is written. */
-export enum SymbolForm {
-  /** `$name` — a constant. */
-  Constant = 'constant',
-  /** `$name(args)` — a function. */
-  Function = 'function',
-  /** `$name_{...}^{...}(body)` — a binder with subscript and superscript positions. */
-  Binder = 'binder',
+export interface NotationEntry {
+  readonly symbol: string
+  readonly notationClass: NotationClass
+  /** The argument counts the symbol accepts. */
+  readonly arities: readonly number[]
+  /** `$integral`, `$limit` and `$diff` are writable but not evaluable. */
+  readonly evaluable: boolean
+  /** How the symbol is written; the message for a non-evaluable symbol repeats it. */
+  readonly form: string
 }
 
-export interface SymbolInfo {
-  form: SymbolForm
-  /**
-   * Positional arity for a function, or the arity of the parenthesised body for
-   * a binder. `[min, max]`; max null means "unbounded".
-   */
-  arity?: readonly [number, number | null]
-  /** False when the notation parses but this engine cannot evaluate it. */
-  evaluable: boolean
-  /** What the notation means, in one line, for the error that lists the vocabulary. */
-  summary: string
-  /**
-   * How the notation is written, shown verbatim in an error when it is misused.
-   * The shape matters more than the name here: `$limit_{x->a}(body)` is not
-   * something a model guesses.
-   */
-  writeAs?: string
+function constant(symbol: string): NotationEntry {
+  return { symbol, notationClass: 'constant', arities: [0], evaluable: true, form: `${symbol} (a bare name, no arguments)` }
 }
 
-/** The constants. */
-export const CONSTANTS: Readonly<Record<string, string>> = {
-  pi: 'the ratio of a circle to its diameter',
-  e: 'the base of the natural logarithm',
-  inf: 'infinity',
-  i: 'the imaginary unit',
-  j: 'the imaginary unit (engineering spelling)',
+function unary(symbol: string): NotationEntry {
+  return { symbol, notationClass: 'function', arities: [1], evaluable: true, form: `${symbol}(x)` }
 }
 
-/** One-argument functions. */
-const UNARY: Readonly<Record<string, string>> = {
-  abs: 'absolute value',
-  sqrt: 'square root',
-  exp: 'e raised to the argument',
-  ln: 'natural logarithm',
-  log: 'logarithm base 10',
-  sin: 'sine of a dimensionless value or an angle',
-  cos: 'cosine of a dimensionless value or an angle',
-  tan: 'tangent of a dimensionless value or an angle',
-  asin: 'inverse sine, result in radians',
-  acos: 'inverse cosine, result in radians',
-  atan: 'inverse tangent, result in radians',
-  floor: 'largest integer not greater than the argument',
-  ceil: 'smallest integer not less than the argument',
-  sign: 'sign of the argument: -1, 0 or 1',
-  re: 'real part',
-  im: 'imaginary part',
-  arg: 'argument (phase) in radians',
-  conj: 'complex conjugate',
-  transpose: 'transpose of a matrix given as arrays of arrays',
+function binary(symbol: string): NotationEntry {
+  return { symbol, notationClass: 'function', arities: [2], evaluable: true, form: `${symbol}(x, y)` }
 }
 
-/** Two-argument functions. */
-const BINARY: Readonly<Record<string, string>> = {
-  atan2: 'angle of the point (x, y), in radians',
-  min: 'smaller of two values of the same kind',
-  max: 'larger of two values of the same kind',
-  mod: 'remainder of a divided by b',
-}
+export const NOTATION: readonly NotationEntry[] = [
+  constant('$pi'),
+  constant('$e'),
+  constant('$inf'),
+  constant('$i'),
+  constant('$j'),
 
-/** The binding notations, with the positions each one defines. */
-const BINDERS: Readonly<Record<string, { summary: string; writeAs: string }>> = {
-  sum: {
-    summary: 'Σ: sum the body as the subscript variable runs from the lower to the upper bound',
-    writeAs: '$sum_{k=a}^{b}(body)',
+  unary('$abs'),
+  unary('$sqrt'),
+  unary('$exp'),
+  unary('$ln'),
+  unary('$log'),
+  unary('$sin'),
+  unary('$cos'),
+  unary('$tan'),
+  unary('$asin'),
+  unary('$acos'),
+  unary('$atan'),
+  unary('$floor'),
+  unary('$ceil'),
+  unary('$sign'),
+  unary('$re'),
+  unary('$im'),
+  unary('$arg'),
+  unary('$conj'),
+  unary('$transpose'),
+  unary('$len'),
+
+  binary('$atan2'),
+  binary('$min'),
+  binary('$max'),
+  binary('$mod'),
+
+  {
+    symbol: '$sum',
+    notationClass: 'binding',
+    arities: [1],
+    evaluable: true,
+    form: '$sum_{k=a}^{b}(body) - both bounds are required',
   },
-  prod: {
-    summary: 'Π: multiply the body over the same range',
-    writeAs: '$prod_{k=a}^{b}(body)',
+  {
+    symbol: '$prod',
+    notationClass: 'binding',
+    arities: [1],
+    evaluable: true,
+    form: '$prod_{k=a}^{b}(body) - both bounds are required',
   },
-  seq: {
-    summary: 'build an array from the body over the same range',
-    writeAs: '$seq_{k=a}^{b}(body)',
+  {
+    symbol: '$seq',
+    notationClass: 'binding',
+    arities: [1],
+    evaluable: true,
+    form: '$seq_{k=a}^{b}(body) - both bounds are required',
   },
-  integral: {
-    summary: '∫: parsed, not evaluated by this engine',
-    writeAs: '$integral_{a}^{b}(body, x)',
-  },
-  limit: {
-    summary: 'lim: parsed, not evaluated by this engine',
-    writeAs: '$limit_{x->a}(body)',
-  },
-}
-
-const EVALUABLE_BINDERS = new Set(['sum', 'prod', 'seq'])
-
-export const SYMBOLS: Readonly<Record<string, SymbolInfo>> = {
-  ...Object.fromEntries(
-    Object.entries(CONSTANTS).map(([name, summary]) => [name, { form: SymbolForm.Constant, evaluable: true, summary, writeAs: `$${name}` }]),
-  ),
-  ...Object.fromEntries(
-    Object.entries(UNARY).map(([name, summary]) => [name, {
-      form: SymbolForm.Function, arity: [1, 1] as const, evaluable: true, summary, writeAs: `$${name}(x)`,
-    }]),
-  ),
-  ...Object.fromEntries(
-    Object.entries(BINARY).map(([name, summary]) => [name, {
-      form: SymbolForm.Function, arity: [2, 2] as const, evaluable: true, summary, writeAs: `$${name}(x, y)`,
-    }]),
-  ),
-  // `diff` is written `$diff(body, x[, n])`: a body plus the variable, optionally the order.
-  diff: {
-    form: SymbolForm.Function,
-    arity: [2, 3],
+  {
+    symbol: '$integral',
+    notationClass: 'binding',
+    arities: [2],
     evaluable: false,
-    summary: BINDERS.diff?.summary ?? 'd/dx: parsed, not evaluated by this engine',
-    writeAs: '$diff(body, x)',
+    form: '$integral_{a}^{b}(body, x) or $integral(body, x)',
   },
-  ...Object.fromEntries(
-    Object.entries(BINDERS)
-      .filter(([name]) => name !== 'diff')
-      .map(([name, info]) => [name, {
-        form: SymbolForm.Binder,
-        arity: [1, 1] as const,
-        evaluable: EVALUABLE_BINDERS.has(name),
-        summary: info.summary,
-        writeAs: info.writeAs,
-      }]),
-  ),
+  {
+    symbol: '$limit',
+    notationClass: 'binding',
+    arities: [1],
+    evaluable: false,
+    form: '$limit_{x->a}(body)',
+  },
+  {
+    symbol: '$diff',
+    notationClass: 'binding',
+    arities: [2, 3],
+    evaluable: false,
+    form: '$diff(body, x) or $diff(body, x, n)',
+  },
+]
+
+const NOTATION_INDEX = new Map<string, NotationEntry>()
+for (const entry of NOTATION) NOTATION_INDEX.set(entry.symbol, entry)
+
+/** The entry of a notation name, or undefined for a name outside the table. */
+export function notationLookup(symbol: string): NotationEntry | undefined {
+  return NOTATION_INDEX.get(symbol)
 }
 
-/** The `$` names, for an error message that has to list them. */
-export function symbolVocabulary(): string {
-  const named = (names: string[], write = false): string => names
-    .map((name) => {
-      const info = SYMBOLS[name]
-      return write && info?.writeAs !== undefined ? info.writeAs : `$${name}`
-    })
-    .join(' ')
-  return [
-    `constants: ${named(Object.keys(CONSTANTS))}`,
-    `functions: ${named(Object.keys(UNARY))} ${named(Object.keys(BINARY))} ${SYMBOLS.diff?.writeAs ?? '$diff'}`,
-    `binders: ${named(Object.keys(BINDERS), true)}`,
-  ].join('; ')
+/** Every notation name, in table order: the vocabulary a symbol error lists. */
+export function notationVocabulary(): string {
+  return NOTATION.map((entry) => entry.symbol).join(' ')
 }

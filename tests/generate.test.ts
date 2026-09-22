@@ -1,198 +1,67 @@
 import { describe, expect, it } from 'vitest'
-import {
-  ArticleFormat,
-  ArticleLanguage,
-  TemplateLanguage,
-  buildArticlePrompt,
-  buildLatexDocument,
-  latexDocumentShell,
-  normalizeFileName,
-  resolveTemplateLanguage,
-  sanitizeLatexBody,
-} from '../src/generate.ts'
-import type { Record } from '../src/generate.ts'
+import { recordFacts } from '../src/generate.ts'
+import type { RecordIndexRow, TraceRow } from '../src/engine/record.ts'
 
-const sample: Record = {
-  id: 'rec-12345678',
-  startedAt: 1700000000000,
-  settledAt: 1700000001000,
-  question: '给定 R = 100 Ω 与 C = 100 mF，初始电压 100 V，求 1 秒后电压。',
-  analyse: 'RC 放电：τ = R·C，v(t) = V₀·e^(−t/τ)。',
-  answer: 'v(1 s) ≈ 90.48 V。',
-  steps: [
-    {
-      seq: '5',
-      formula: '@R*@C',
-      vars: '{"R":{"type":"number","value":100,"kind":"resistance"},"C":{"type":"number","value":0.1,"kind":"capacitance"}}',
-      result: '{"type":"number","value":10,"kind":"time"}',
-    },
-    {
-      seq: '7',
-      formula: '@V0*$e^(-1/@tau)',
-      vars: '{"V0":{"type":"number","value":100,"kind":"voltage"},"tau":{"type":"number","value":10,"kind":"time"}}',
-      result: '{"type":"number","value":90.48374180359595,"kind":"voltage"}',
-    },
-  ],
+const META: RecordIndexRow = { id: '1', question: 'What is P?', openedAt: 10, answeredAt: 20 }
+
+function row(seq: number, tool: TraceRow['tool'], content: Record<string, unknown>, ok = true): TraceRow {
+  return { seq, at: 1000 + seq, tool, ok, content }
 }
 
-describe('buildArticlePrompt', () => {
-  it('embeds the record content verbatim in the user prompt', () => {
-    const { user } = buildArticlePrompt(sample)
-    expect(user).toContain(sample.question)
-    expect(user).toContain(sample.analyse)
-    expect(user).toContain(sample.answer)
-    expect(user).toContain('@R*@C')
-    expect(user).toContain('90.48374180359595')
+const ROWS: TraceRow[] = [
+  row(1, 'record_question', { text: 'What is P?', record: '1' }),
+  row(2, 'set', { name: 'V', value: { num: 12, dim: [2, 1, -3, -1, 0, 0, 0] } }),
+  row(3, 'set', { name: 'R', value: { num: 100, dim: [2, 1, -3, -2, 0, 0, 0] } }),
+  row(4, 'record_analyse', { text: 'Ohm law and P = V*I' }),
+  row(5, 'eval', { formula: '@V/@R', target: 'I', rev: 1, vars: { V: 12, R: 100 }, result: { num: 0.12, dim: [0, 0, 0, 1, 0, 0, 0] } }),
+  row(6, 'eval', { formula: '@V/@R', target: 'I2', rev: 1, vars: {}, result: null }, false),
+  row(7, 'get', { name: 'I', value: { num: 0.12 } }),
+  row(8, 'set', { name: 'R', value: null }),
+  row(9, 'record_answer', { text: 'P = 1.44 W', record: '1' }),
+]
+
+describe('article facts', () => {
+  it('takes the question from the index row', () => {
+    expect(recordFacts(META, ROWS).question).toBe('What is P?')
   })
 
-  it('requires the fixed title and author, and forbids ids and timestamps', () => {
-    const { system } = buildArticlePrompt(sample)
-    expect(system).toContain('DeepSeek Harness Reckoner Solution')
-    expect(system).toContain('DeepSeek Harness Reckoner')
-    expect(system).toMatch(/Never include record ids or timestamps/)
-    expect(system).toMatch(/language of the question/)
+  it('keeps the conditions that still stand, dropping a deleted one', () => {
+    const facts = recordFacts(META, ROWS)
+    expect(facts.conditions).toEqual([{ name: 'V', value: { num: 12, dim: [2, 1, -3, -1, 0, 0, 0] } }])
   })
 
-  it('demands an article structure: section headings and formatted formula lines', () => {
-    const { system } = buildArticlePrompt(sample)
-    expect(system).toMatch(/read like a proper technical article/)
-    expect(system).toMatch(/H2 section headings/)
-    expect(system).toMatch(/not a thinking transcript/)
-    expect(system).toMatch(/Put formulas and calculations on their OWN lines/)
-    expect(system).toMatch(/Markdown formatting/)
+  it('collects every analysis text', () => {
+    expect(recordFacts(META, ROWS).analysis).toEqual(['Ohm law and P = V*I'])
   })
 
-  it('presents the record as neutral facts without the five-step section labels', () => {
-    const { user } = buildArticlePrompt(sample)
-    expect(user).toContain('Record information to base the article on')
-    expect(user).not.toMatch(/^Question:/m)
-    expect(user).not.toMatch(/^Analysis:/m)
-    expect(user).not.toMatch(/^Final answer:/m)
+  it('keeps only the successful eval rows as steps', () => {
+    const facts = recordFacts(META, ROWS)
+    expect(facts.steps).toHaveLength(1)
+    expect(facts.steps[0]).toEqual({
+      seq: 5,
+      formula: '@V/@R',
+      vars: { V: 12, R: 100 },
+      result: { num: 0.12, dim: [0, 0, 0, 1, 0, 0, 0] },
+    })
   })
 
-  it('defaults to the language of the question when auto is chosen', () => {
-    const { system } = buildArticlePrompt(sample, ArticleLanguage.Auto)
-    expect(system).toMatch(/language of the question/)
+  it('takes the answer from the answering row', () => {
+    expect(recordFacts(META, ROWS).answer).toBe('P = 1.44 W')
+    expect(recordFacts(META, []).answer).toBeNull()
+    expect(recordFacts(META, []).steps).toEqual([])
+    expect(recordFacts(META, []).conditions).toEqual([])
   })
 
-  it('forces Simplified Chinese when ZhCN is chosen', () => {
-    const { system, user } = buildArticlePrompt(sample, ArticleLanguage.ZhCN)
-    expect(system).toMatch(/Simplified Chinese/)
-    expect(user).toMatch(/Simplified Chinese/)
-    expect(system).not.toMatch(/language of the question/)
+  it('keeps the last write of a rewritten condition', () => {
+    const rows = [
+      row(1, 'set', { name: 'R', value: { num: 100, dim: [2, 1, -3, -2, 0, 0, 0] } }),
+      row(2, 'set', { name: 'R', value: { num: 220, dim: [2, 1, -3, -2, 0, 0, 0] } }),
+    ]
+    expect(recordFacts(META, rows).conditions).toEqual([{ name: 'R', value: { num: 220, dim: [2, 1, -3, -2, 0, 0, 0] } }])
   })
 
-  it('forces English when En is chosen, in both the system and user prompt', () => {
-    const { system, user } = buildArticlePrompt(sample, ArticleLanguage.En)
-    expect(system).toMatch(/must be written in English/)
-    expect(user).toMatch(/must be written in English/)
-    expect(system).not.toMatch(/language of the question/)
-  })
-})
-
-describe('latex prompts', () => {
-  it('asks for a body only: section headings, no preamble or environment commands', () => {
-    const { system, user } = buildArticlePrompt(sample, ArticleLanguage.ZhCN, ArticleFormat.Latex)
-    expect(system).toMatch(/\\section headings/)
-    expect(system).toMatch(/Output ONLY the body/)
-    expect(system).toMatch(/ALREADY in place/)
-    expect(system).not.toMatch(/Markdown article/)
-    expect(system).toMatch(/Simplified Chinese/)
-    expect(user).toContain(sample.question)
-  })
-
-  it('keeps the language instruction for an english latex body', () => {
-    const { system } = buildArticlePrompt(sample, ArticleLanguage.En, ArticleFormat.Latex)
-    expect(system).toMatch(/must be written in English/)
-    expect(system).toMatch(/siunitx/)
-  })
-})
-
-describe('resolveTemplateLanguage', () => {
-  it('auto + a Chinese question resolves to zh-CN', () => {
-    expect(resolveTemplateLanguage(ArticleLanguage.Auto, '给定 R = 100 Ω，求电流')).toBe(TemplateLanguage.ZhCN)
-  })
-
-  it('auto + a non-CJK question resolves to en', () => {
-    expect(resolveTemplateLanguage(ArticleLanguage.Auto, 'Given R = 100 ohm, find the current.')).toBe(TemplateLanguage.En)
-  })
-
-  it('an explicit choice wins over the question text', () => {
-    expect(resolveTemplateLanguage(ArticleLanguage.En, '给定 R = 100 Ω，求电流')).toBe(TemplateLanguage.En)
-    expect(resolveTemplateLanguage(ArticleLanguage.ZhCN, 'Find the current.')).toBe(TemplateLanguage.ZhCN)
-  })
-})
-
-describe('normalizeFileName', () => {
-  it('appends the format extension and swaps a stale one', () => {
-    expect(normalizeFileName('report', ArticleFormat.Latex)).toBe('report.tex')
-    expect(normalizeFileName('report.md', ArticleFormat.Latex)).toBe('report.tex')
-    expect(normalizeFileName('report.tex', ArticleFormat.Markdown)).toBe('report.md')
-    expect(normalizeFileName('report.TEX', ArticleFormat.Markdown)).toBe('report.md')
-  })
-
-  it('keeps the default base name when empty', () => {
-    expect(normalizeFileName('', ArticleFormat.Latex)).toBe('reckoner-article.tex')
-    expect(normalizeFileName('  ', ArticleFormat.Markdown)).toBe('reckoner-article.md')
-  })
-})
-
-describe('sanitizeLatexBody', () => {
-  it('rejects preamble and restructuring commands', () => {
-    expect(sanitizeLatexBody('\\documentclass{article}')).toMatchObject({ ok: false })
-    expect(sanitizeLatexBody('\\usepackage{amsmath}')).toMatchObject({ ok: false })
-    expect(sanitizeLatexBody('x \\input{secret} y')).toMatchObject({ ok: false })
-    expect(sanitizeLatexBody('\\begin{document}')).toMatchObject({ ok: false })
-    expect(sanitizeLatexBody('\\end{document}')).toMatchObject({ ok: false })
-    expect(sanitizeLatexBody('\\write18{rm -rf /}')).toMatchObject({ ok: false })
-  })
-
-  it('allows math environments like align', () => {
-    const result = sanitizeLatexBody('\\begin{align}\na &= b\n\\end{align}')
-    expect(result.ok).toBe(true)
-  })
-
-  it('escapes bare percent signs but keeps existing ones', () => {
-    const result = sanitizeLatexBody('Efficiency is 50 % of the ideal \\%\\ 100 %.')
-    expect(result.ok).toBe(true)
-    if (result.ok) {
-      expect(result.body).toBe('Efficiency is 50 \\% of the ideal \\%\\ 100 \\%.')
-    }
-  })
-
-  it('flags unbalanced braces and odd dollar counts', () => {
-    expect(sanitizeLatexBody('a { b } c {')).toMatchObject({ ok: false })
-    expect(sanitizeLatexBody('price $5 only')).toMatchObject({ ok: false })
-    expect(sanitizeLatexBody('price $5 and $6')).toMatchObject({ ok: true })
-    expect(sanitizeLatexBody('\\$5 and \\$6')).toMatchObject({ ok: true })
-  })
-})
-
-describe('latex document shell', () => {
-  it('builds a full xelatex document around the sanitized body', () => {
-    const document = buildLatexDocument('\\section{Question}\nGiven $R$, find $v$.', TemplateLanguage.En)
-    expect(document.ok).toBe(true)
-    if (document.ok) {
-      expect(document.text).toContain('% !TeX program = xelatex')
-      expect(document.text).toContain('\\documentclass{article}')
-      expect(document.text).toContain('\\title{DeepSeek Harness Reckoner Solution}')
-      expect(document.text).toContain('\\author{DeepSeek Harness Reckoner}')
-      expect(document.text).toContain('\\section{Question}')
-      expect(document.text).toContain('\\end{document}')
-    }
-  })
-
-  it('uses ctexart for zh-CN and article for en, both with scalable math', () => {
-    expect(latexDocumentShell(TemplateLanguage.ZhCN)).toContain('\\documentclass{ctexart}')
-    expect(latexDocumentShell(TemplateLanguage.ZhCN)).toContain('\\usepackage{siunitx}')
-    expect(latexDocumentShell(TemplateLanguage.ZhCN)).toContain('\\usepackage{unicode-math}')
-    expect(latexDocumentShell(TemplateLanguage.En)).toContain('\\documentclass{article}')
-    expect(latexDocumentShell(TemplateLanguage.En)).toContain('\\usepackage{fontspec}')
-    expect(latexDocumentShell(TemplateLanguage.En)).toContain('\\usepackage{unicode-math}')
-  })
-
-  it('fails when the body is rejected by the sanitizer', () => {
-    const document = buildLatexDocument('\\documentclass{book}\nHijacked', TemplateLanguage.En)
-    expect(document.ok).toBe(false)
+  it('skips a failed set row', () => {
+    const rows = [row(1, 'set', { name: 'R', value: { num: 1 } }, false)]
+    expect(recordFacts(META, rows).conditions).toEqual([])
   })
 })

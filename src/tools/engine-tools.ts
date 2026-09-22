@@ -1,15 +1,13 @@
 /**
- * Engine tool surface: the set / get / eval primitives and the record markers.
- * Thin wrapper: arguments pass schema validation then go to the engine shell; a uniform receipt (ok) is returned.
- *
- * Every input is a plain string. The model writes `4.7kohm` or a formula — not
- * a JSON envelope — and the engine parses it; nothing here asks the model to
- * build an object per value.
+ * The model-facing tool surface: the three engine primitives and the three
+ * record markers. Each one is a thin call into the engine, which answers with
+ * the receipt the model reads.
  */
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { defineJsonTool } from '../tool.ts'
+import { notationVocabulary } from '../engine/notation.ts'
+import { allSiNames, SI_COMPONENT_ORDER } from '../engine/si-vector.ts'
 import type { Engine } from '../engine/engine.ts'
-import { prefixVocabulary, unitVocabulary } from '../engine/units.ts'
 
 declare module 'cordis' {
   interface Context {
@@ -17,91 +15,100 @@ declare module 'cordis' {
   }
 }
 
-/** Value grammar: the string forms a slot accepts. The vocabularies come from the engine's tables. */
-const VALUE_GUIDE =
-  'A value is ONE string, written the way it is said: "4.7kohm", "100uohm", "12volt", "1.5second", "50hertz", ' +
-  '"25degC", "14.7psi", "2hp", "5" (a bare count). ' +
-  `Prefixes are one letter and must be followed by a unit: ${prefixVocabulary()} (10^-12 … 10^12). ` +
-  `Units and variants are full words: ${unitVocabulary()}. ` +
-  'Complex: "2j", "3+4i"; scientific notation "1e5" (lowercase e only). ' +
-  'Structures: "[100ohm, 220ohm]", "{v: 12volt, r: 100ohm}". ' +
-  'The engine parses the string into SI and keeps the kind; the prefix and the variant word are never stored.'
+const NAME_DESCRIPTION = 'slot name: letters, digits and underscore, starting with a letter or underscore'
 
-const NAME_DESC = 'slot name: letters, digits, underscore; start with a letter or underscore'
-const FORMAT_DESC =
-  'how to print the value: a unit ("ohm"), a prefix+unit ("kohm"), a variant ("degC"), or "deg" / "rad" / "polar" / "json". Omit for the SI form ("4700ohm"). Printing never changes the stored value.'
+const VALUE_DESCRIPTION =
+  'the value: a tagged object carrying exactly one of {"num": x} (a real), {"re": x, "im": y} or ' +
+  '{"mag": r, "ang": theta} (a complex; theta is radians), {"array": [...]} (an array) or {"object": {...}} ' +
+  '(named fields). "dim" travels with the value: one of the SI names, or 7 integers in the order ' +
+  `${SI_COMPONENT_ORDER}; omitted means the zero SI vector. Array elements are bare numbers, {re,im} or nested ` +
+  "arrays, all sharing the array's dim; an object carries one dim per field and no dim of its own. A complex " +
+  'is stored rectangular, so a polar input is converted on the way in. Pass null to delete the slot.'
 
-/** The `$` vocabulary, one line per family, phrased the way the engine reports it. */
-const NOTATION_GUIDE =
-  'Constants: $pi $e $inf $i $j. ' +
-  'Functions: $abs $sqrt $exp $ln $log $sin $cos $tan $asin $acos $atan $floor $ceil $sign $re $im $arg $conj $transpose; ' +
-  'two-argument: $atan2 $min $max $mod. ' +
-  'Bounded forms (subscript is the variable and its lower bound): $sum_{k=a}^{b}(body), $prod_{k=a}^{b}(body), $seq_{k=a}^{b}(body); ' +
-  '$seq builds an array, which [$index] then walks. ' +
-  '$integral_{a}^{b}(body, x), $diff(body, x) and $limit_{x->a}(body) can be written but NOT evaluated — use a closed form instead. ' +
-  'Data access: @x[k] takes an element (the index is an expression), @th.field takes an object field (a literal name). ' +
-  'Operators: + - * / ^ (multiplication always needs *, there is no implicit multiplication). ' +
-  'A position is the brace after `_{` or `^{`, so every other `^` is a power: `$e^(2)`, `$pi^2`. ' +
-  'An exponent must be dimensionless; a complex exponent needs a dimensionless base, as in the rotation `$e^(-$j*$pi/6)`. ' +
-  'No comparison, no logic, no conditional, no assignment. ' +
-  'A bare name is a bound variable only; to read a slot write @name.'
+const DIM_DESCRIPTION =
+  `how to read the value: one of the SI names, or 7 integers in the order ${SI_COMPONENT_ORDER} to check the ` +
+  'vector without converting. Omit it to read the stored SI value.'
 
-/** Factory: binds the global single-engine instance and produces LLM-visible tool definitions. */
+const DIGITS_DESCRIPTION = 'significant digits to keep (a positive integer); omitted means the raw float'
+
+const FORM_DESCRIPTION =
+  'the form to read: "rect" for {re,im} or "polar" for {mag,ang} in radians; a real is widened to a complex. Omitted keeps the stored form.'
+
+const NOTATION_DESCRIPTION =
+  `The notation is: ${notationVocabulary()}. Constants are written bare ($pi, $e^(2) for a power); functions take ` +
+  'parentheses ($abs(x), $atan2(y, x)); the bounded forms take their bounds as positions ' +
+  '($sum_{k=a}^{b}(body), $prod_{k=a}^{b}(body), $seq_{k=a}^{b}(body) building an array, ' +
+  '$integral_{a}^{b}(body, x) or $integral(body, x), $limit_{x->a}(body), $diff(body, x) or $diff(body, x, n)); ' +
+  '$integral, $limit and $diff can be written but not evaluated. Slots are read with @name, an array element with ' +
+  '@name[index] and an object field with @name.field. Multiplication always needs "*". An exponent must be a pure ' +
+  'number, and only a dimensionless base takes a complex exponent.'
+
+const RECORD_DESCRIPTION = 'set, get and eval are refused while no record is open.'
+
+/** Factory: binds the process-wide engine and produces the LLM-visible tool definitions. */
 export function createEngineTools(engine: Engine): Array<ReturnType<typeof defineJsonTool>> {
   return [
     defineJsonTool({
       name: 'set',
-      description: `Write one slot in the engine — the conditions the user gave, transcribed. ${VALUE_GUIDE} Pass value: null to delete the slot. Writing a different kind than the slot's pinned kind fails; delete the slot first (value: null) to replace it with a different kind.`,
+      description:
+        'Write one slot: each quantity the user gave, transcribed. The engine converts nothing by itself - write ' +
+        `the value in SI and let dim name the quantity. The accepted names are ${allSiNames().join(', ')}. ` +
+        `${VALUE_DESCRIPTION} The receipt echoes what was stored: dim as 7 integers, a complex as re/im.`,
       parameters: {
-        name: { type: 'string', description: NAME_DESC, required: true },
-        value: { type: 'json', description: 'one value string as above, or null to delete the slot', required: true },
+        name: { type: 'string', description: NAME_DESCRIPTION, required: true },
+        value: { type: 'json', description: VALUE_DESCRIPTION, required: true },
       },
-      execute: (args) => engine.opSet(args.name as string, args.value as string | null) as never,
+      execute: (args) => engine.opSet(args.name as string, args.value) as never,
     }),
     defineJsonTool({
       name: 'get',
-      description: `Read one slot. Returns the value printed as text — this is the only way to read a slot, because eval does not return its value. ${FORMAT_DESC}`,
+      description:
+        `Read one slot: the only way to read a value, because eval does not return one. ${DIM_DESCRIPTION} ` +
+        `${FORM_DESCRIPTION} ${DIGITS_DESCRIPTION}. The receipt is the value in the tagged shape, so it can be fed straight back to set.`,
       parameters: {
-        name: { type: 'string', description: NAME_DESC, required: true },
-        format: { type: 'string', description: FORMAT_DESC },
+        name: { type: 'string', description: NAME_DESCRIPTION, required: true },
+        form: { type: 'string', description: FORM_DESCRIPTION },
+        digits: { type: 'number', description: DIGITS_DESCRIPTION },
+        dim: { type: 'json', description: DIM_DESCRIPTION },
       },
-      execute: (args) => engine.opGet(args.name as string, args.format as string | undefined) as never,
+      execute: (args) => engine.opGet(args.name as string, { form: args.form, digits: args.digits, dim: args.dim }) as never,
     }),
     defineJsonTool({
       name: 'eval',
       description:
-        'Evaluate ONE formula and, when target is given, store the result in that slot. ' +
-        'The formula is a single expression — there is no assignment inside it: `@name` READS a slot, and `target` is the slot this call WRITES. ' +
-        'Example: formula "@Vin*@R2/(@R1+@R2)" with target "Vout". ' +
-        NOTATION_GUIDE +
-        ' The engine derives dimensions as it evaluates: a result whose kind does not match the target slot\'s kind is refused, and so is a formula that adds a bare count to a quantity (5+@Vin) — write 5volt. ' +
-        'It does not return the value — read it with `get`. ' +
-        'Prefer SEVERAL eval calls over one deeply nested expression: whenever the same sub-expression appears twice, the parentheses nest more than about three deep, or the line stops being readable, evaluate the intermediate first with its own target and read it back with `@` in the next call. Each call then leaves its own formula and result in the record.',
+        'Evaluate ONE formula and write the result into the target slot. The formula is a single expression: there ' +
+        'is no assignment inside it, no statement sequence and no comparison - @name READS a slot, and target is ' +
+        `the slot this call WRITES. ${NOTATION_DESCRIPTION} The engine derives dimensions while it evaluates: ` +
+        'adding two different vectors, a fractional vector landing in a slot, or a dimensionless base under a ' +
+        'complex exponent are all refused with the vectors spelled out. The receipt is {ok, target, rev} - read the ' +
+        'value back with get. Prefer several eval calls over one deep expression: give each intermediate its own ' +
+        'target, then read it with @name in the next call.',
       parameters: {
-        formula: { type: 'string', description: 'the formula: one expression, referencing slots with @name', required: true },
-        target: {
-          type: 'json',
-          description: 'the slot to write the result into (a name string), or null to evaluate without storing anything',
-          required: true,
-        },
+        formula: { type: 'string', description: 'the formula: one expression, reading slots with @name', required: true },
+        target: { type: 'string', description: 'the slot the result is written into', required: true },
       },
-      execute: (args) => engine.opEval(args.formula as string, args.target as string | null) as never,
+      execute: (args) => engine.opEval(args.formula as string, args.target as string) as never,
     }),
     defineJsonTool({
       name: 'record_question',
-      description: 'Open a new record: clears the variable table and starts a fresh trace. Pass the consolidated question text (verbatim). If a record is already open it is sealed first (duplicate-start).',
+      description:
+        `Open a record with the consolidated question text and clear the slot table. ${RECORD_DESCRIPTION} ` +
+        'It fails when a record is already open - submit record_answer for that one first.',
       parameters: { text: { type: 'string', description: 'the question text', required: true } },
       execute: (args) => engine.markerQuestion(args.text as string) as never,
     }),
     defineJsonTool({
       name: 'record_analyse',
-      description: 'Submit the analysis text into the open record (approach with formulas; the knowns are already stored in slots).',
+      description:
+        `Submit the analysis text into the open record: the knowns as stored, the target and the relations to be used. ${RECORD_DESCRIPTION}`,
       parameters: { text: { type: 'string', description: 'the analysis text', required: true } },
       execute: (args) => engine.markerAnalyse(args.text as string) as never,
     }),
     defineJsonTool({
       name: 'record_answer',
-      description: 'Submit the final answer text and seal the record. With no open record it keeps a duplicate-end error record.',
+      description:
+        'Submit the final answer text and seal the record. It fails when no record is open - the receipt is the ' +
+        'only thing written, nothing reaches the disk.',
       parameters: { text: { type: 'string', description: 'the answer text', required: true } },
       execute: (args) => engine.markerAnswer(args.text as string) as never,
     }),
