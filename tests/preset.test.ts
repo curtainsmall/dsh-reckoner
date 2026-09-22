@@ -24,6 +24,27 @@ describe('the packaged preset', () => {
     expect(persona).toContain("6. eval's target is the slot the result is written into")
   })
 
+  /**
+   * The persona plugin's config schema is `prefix` (required), `suffix`,
+   * `complete` and `includeRuntimeContext`; a row passing any other key makes
+   * the whole preset fail to mount, and the picker still lists it (discovery
+   * health only resolves plugin names). So the keys are pinned here.
+   */
+  it('configures the persona only with keys the persona plugin accepts', () => {
+    const lines = read('presets/reckoner/agent.cordis.yml').split(/\r?\n/)
+    const configAt = lines.findIndex((line) => line.trim() === 'config:')
+    expect(configAt).toBeGreaterThan(-1)
+    const keys = lines
+      .slice(configAt + 1)
+      .filter((line) => /^ {4}\S/.test(line))
+      .map((line) => line.trim().split(':')[0] ?? '')
+    expect(keys).toContain('prefix')
+    for (const key of keys) {
+      expect(['prefix', 'suffix', 'complete', 'includeRuntimeContext']).toContain(key)
+    }
+    expect(keys).not.toContain('text')
+  })
+
   it('points at the two skills', () => {
     const persona = read('presets/reckoner/agent.cordis.yml')
     expect(persona).toContain('reckoner-interface')
