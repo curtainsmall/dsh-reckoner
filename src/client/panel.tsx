@@ -187,10 +187,10 @@ const SIDEBAR_COLUMN_SELECTOR = '[data-pane="sidebar"], [class*="sidebarCol"]'
 const ENTRY_ATTR = 'data-dsh-reckoner-entry'
 /** The rail family this entry joins, in shell order — placed after the last one. */
 const ENTRY_FAMILY = ['[data-dsh-taskboard-entry]', '[data-dsh-ssh-entry]', '[data-dsh-skill-explorer-entry]']
-/** Wave-square glyph (Font Awesome, CC BY 4.0) — the Reckoner identity, rendered like the shell's line icons. */
+/** Square-root-variable glyph (Font Awesome, CC BY 4.0) — the Reckoner identity, rendered like the shell's line icons. */
 const ENTRY_ICON =
-  '<svg viewBox="0 0 512 512" fill="currentColor" aria-hidden="true">' +
-  '<path d="M64 96c0-17.7 14.3-32 32-32l160 0c17.7 0 32 14.3 32 32l0 288 96 0 0-128c0-17.7 14.3-32 32-32l64 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-32 0 0 128c0 17.7-14.3 32-32 32l-160 0c-17.7 0-32-14.3-32-32l0-288-96 0 0 128c0 17.7-14.3 32-32 32l-64 0c-17.7 0-32-14.3-32-32s14.3-32 32-32l32 0 0-128z"/></svg>'
+  '<svg viewBox="0 0 576 512" fill="currentColor" aria-hidden="true">' +
+  '<path d="M282.6 78.1c8-27.3 33-46.1 61.4-46.1l200 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L344 96 238.7 457c-3.6 12.3-14.1 21.2-26.8 22.8s-25.1-4.6-31.5-15.6L77.6 288 32 288c-17.7 0-32-14.3-32-32s14.3-32 32-32l45.6 0c22.8 0 43.8 12.1 55.3 31.8l65.2 111.8 84.4-289.5zM393.4 233.4c12.5-12.5 32.8-12.5 45.3 0l41.4 41.4 41.4-41.4c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3l-41.4 41.4 41.4 41.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0l-41.4-41.4-41.4 41.4c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l41.4-41.4-41.4-41.4c-12.5-12.5-12.5-32.8 0-45.3z"/></svg>'
 /** Entry styles: the exact rules the SSH/task-board/skills entries use, self-contained.
  *  The collapsed variant keys off ANY ancestor whose class contains "collapsed"
  *  (the shell's rail carries e.g. "hHd-Xa_collapsed"); there is no stable
