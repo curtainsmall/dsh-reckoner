@@ -49,7 +49,7 @@ export interface GetOptions {
 }
 
 export class Engine {
-  private readonly store: RecordStore
+  readonly store: RecordStore
   private readonly now: () => number
   private readonly slots = new Map<string, SlotEntry>()
   private open: OpenRecord | null = null

@@ -3,7 +3,7 @@
  * appears in. Only numbers and SI vectors are stored - a trace row never
  * carries a unit name, because the name is IO and the vector is the fact.
  */
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** One tool's row in a record. */
@@ -85,5 +85,11 @@ export class RecordStore {
 
   hasRecord(id: string): boolean {
     return readText(this.recordPath(id)).length > 0
+  }
+
+  /** Remove one record: its trace file and its index row. */
+  deleteRecord(id: string): void {
+    rmSync(this.recordPath(id), { force: true })
+    this.writeIndex(this.readIndex().filter((row) => row.id !== id))
   }
 }

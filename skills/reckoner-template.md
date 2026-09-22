@@ -1,10 +1,12 @@
 ---
 name: reckoner-template
-description: The Reckoner record protocol - which marker to call when, and what each submitted text carries.
-whenToUse: Load before starting a calculation, so the record is opened, analysed and answered in the right order.
+description: The Reckoner record protocol - which marker to call when (record_question first, record_answer last), and what each submitted text carries.
+whenToUse: Load before starting a reckoner workflow, so the record is opened, analysed and answered in the right order.
 ---
 
 # Reckoner record protocol
+
+## Record protocol
 
 A record is one question, the conditions it was solved from, the analysis, the evaluation steps and the answer. It is written by three markers in a fixed order; `set`, `get` and `eval` are refused until `record_question` has opened one.
 

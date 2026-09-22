@@ -1,7 +1,7 @@
 ---
 name: reckoner-interface
 description: The Reckoner engine manual - values, tools, receipts, notation and the dimension rules. Read before writing any formula.
-whenToUse: Load before the first Reckoner tool call of a calculation, and again whenever a formula or a receipt is unclear.
+whenToUse: Load before the first Reckoner tool call of a calculation, and again whenever a formula, a receipt or the engine's dimension rules are unclear.
 ---
 
 # Reckoner engine manual
