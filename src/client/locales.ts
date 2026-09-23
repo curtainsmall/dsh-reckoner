@@ -26,6 +26,7 @@ const zh = {
   deleteRecordsConfirm: '确定删除选中的 {n} 条记录？',
   deleteFailed: '{n} 条删除失败：{message}',
   incomplete: '未完成',
+  unknownRecords: '{n} 条未知记录',
   backToRecords: '返回记录',
   displayAll: '显示全部',
   rowsCount: '{n} 行',
@@ -73,11 +74,11 @@ const zh = {
   browse: '浏览',
   browseDirectory: '选择输出目录',
   upLevel: '上一级',
-  markerQuestion: '问题',
-  markerAnalyse: '分析',
-  markerAnswer: '答案',
-  markerDuplicateStart: '重复开启（已按错误记录结算）',
-  markerDuplicateEnd: '无记录时结算（错误记录）',
+  markerStart: '开启记录',
+  markerMessage: '说明',
+  markerEnd: '封闭记录',
+  markerDuplicateStart: '重复开启（已被拒绝）',
+  markerDuplicateEnd: '无记录时封闭（已被拒绝）',
 } as const
 
 const en: Record<keyof typeof zh, string> = {
@@ -97,6 +98,7 @@ const en: Record<keyof typeof zh, string> = {
   deleteRecordsConfirm: 'Delete the {n} selected record(s)?',
   deleteFailed: '{n} deletion(s) failed: {message}',
   incomplete: 'incomplete',
+  unknownRecords: '{n} unknown records',
   backToRecords: 'Back to records',
   displayAll: 'Display all',
   rowsCount: '{n} row(s)',
@@ -144,11 +146,11 @@ const en: Record<keyof typeof zh, string> = {
   browse: 'Browse',
   browseDirectory: 'Select output directory',
   upLevel: 'Up one level',
-  markerQuestion: 'Question',
-  markerAnalyse: 'Analysis',
-  markerAnswer: 'Answer',
-  markerDuplicateStart: 'Duplicate open (settled as an error record)',
-  markerDuplicateEnd: 'Settled with no open record (error record)',
+  markerStart: 'Record start',
+  markerMessage: 'Message',
+  markerEnd: 'Record end',
+  markerDuplicateStart: 'Duplicate open (refused)',
+  markerDuplicateEnd: 'Close with no open record (refused)',
 }
 
 export type LocaleKey = keyof typeof zh

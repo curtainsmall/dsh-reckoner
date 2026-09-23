@@ -72,7 +72,7 @@ interface RequestLike {
   url?: string
 }
 
-/** The records home: records/ and record-index.jsonl live here. */
+/** The records home: records/ (closed records) and open-record.jsonl live here. */
 const recordsHome = process.env.DSH_RECKONER_HOME ?? join(homedir(), '.dsh-reckoner')
 
 /** Global single engine: one engine per process; any session's markers act on it. */
@@ -82,11 +82,11 @@ const RECORDS_INDEX_PATH = '/api/dsh-reckoner/records-index'
 // WebRoute paths carry no trailing slash; requests are /records/<id>.
 const RECORDS_BODY_PREFIX = '/api/dsh-reckoner/records'
 
-/** The article facts of one stored record, or undefined when it does not exist. */
+/** The article facts of one closed record, or undefined when it does not exist or is still open. */
 function loadGenerationRecord(id: string): GenerationFacts | undefined {
-  const meta = engine.indexRows().find((row) => row.id === id)
-  if (meta === undefined) return undefined
-  return recordFacts(meta, engine.readRows(id))
+  if (engine.openRecordId() === id) return undefined
+  const record = engine.readRecordRows(id)
+  return record === null ? undefined : recordFacts(record.rows)
 }
 
 export function apply(ctx: Context): void {
@@ -129,7 +129,8 @@ export function apply(ctx: Context): void {
   ctx.effect(() => {
     const disposers: Array<() => void> = []
 
-    // Record list: read record-index.jsonl (the list page's only data source).
+    // Record list: the closed records scanned from records/, the unclosed record
+    // from engine state, and how many files carry no header or an older version.
     disposers.push(ctx.webServer.register({
       kind: 'exact',
       path: RECORDS_INDEX_PATH,
@@ -141,13 +142,13 @@ export function apply(ctx: Context): void {
           return
         }
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ rows: engine.indexRows() }))
+        res.end(JSON.stringify(engine.listRecords()))
       }),
     }))
 
-    // Record body: GET /api/dsh-reckoner/records/<id> - one record's trace rows
-    // plus its index row (question, openedAt, answeredAt); DELETE removes a
-    // record (trace file + index row). The currently open record cannot be deleted.
+    // Record body: GET /api/dsh-reckoner/records/<id> - one record's identity and
+    // trace rows (the unclosed record included, with endedAt null); DELETE removes
+    // a closed record. The unclosed record cannot be deleted.
     disposers.push(ctx.webServer.register({
       kind: 'prefix',
       path: RECORDS_BODY_PREFIX,
@@ -165,16 +166,15 @@ export function apply(ctx: Context): void {
         if (method === 'DELETE') {
           if (engine.openRecordId() === id) {
             res.statusCode = 409
-            res.end(JSON.stringify({ error: `record "${id}" is open - finish or settle it first` }))
+            res.end(JSON.stringify({ error: `record "${id}" is not closed - call record_end for it first` }))
             return
           }
-          const meta = engine.indexRows().find((row) => row.id === id)
-          if (meta === undefined) {
+          if (!engine.store.hasRecord(id)) {
             res.statusCode = 404
             res.end(JSON.stringify({ error: `no record "${id}"` }))
             return
           }
-          engine.store.deleteRecord(id)
+          engine.deleteRecord(id)
           res.end(JSON.stringify({ deleted: true }))
           return
         }
@@ -183,18 +183,20 @@ export function apply(ctx: Context): void {
           res.end('method not allowed')
           return
         }
-        const meta = engine.indexRows().find((row) => row.id === id)
-        if (meta === undefined || !engine.store.hasRecord(id)) {
+        const record = engine.readRecordRows(id)
+        const summary = record === null ? null : engine.summarize(id)
+        if (record === null || summary === null) {
           res.statusCode = 404
           res.end(JSON.stringify({ error: `no record "${id}"` }))
           return
         }
         res.end(JSON.stringify({
           id,
-          openedAt: meta.openedAt,
-          answeredAt: meta.answeredAt,
-          question: meta.question,
-          rows: engine.readRows(id),
+          version: record.version,
+          title: summary.title,
+          openedAt: summary.openedAt,
+          endedAt: engine.openRecordId() === id ? null : summary.endedAt,
+          rows: record.rows,
         }))
       }),
     }))

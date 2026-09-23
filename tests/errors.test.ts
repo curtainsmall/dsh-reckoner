@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ENGINE_ERROR_CODES, EngineError, fail, isEngineError } from '../src/errors.ts'
 
-const DEAD_CODES = ['ENGINE_SLOT_KIND', 'ENGINE_TYPE_MIXED_KIND', 'ENGINE_UNSUPPORTED_VARIANT']
+const DEAD_CODES = ['ENGINE_SLOT_KIND', 'ENGINE_TYPE_MIXED_KIND', 'ENGINE_UNSUPPORTED_VARIANT', 'ENGINE_NO_RECORD']
 
 describe('the error code table', () => {
   it('holds exactly the 19 documented codes', () => {
@@ -24,7 +24,7 @@ describe('the error code table', () => {
       'ENGINE_NO_FIELD',
       'ENGINE_SYMBOL_NOT_EVALUABLE',
       'ENGINE_ARGS_INVALID',
-      'ENGINE_NO_RECORD',
+      'ENGINE_NO_OPEN_RECORD',
       'ENGINE_RECORD_DUPLICATE',
       'ENGINE_TOOL',
     ])
@@ -46,8 +46,8 @@ describe('the error code table', () => {
 
 describe('EngineError', () => {
   it('carries the code and the message', () => {
-    const error = new EngineError('ENGINE_NO_RECORD', 'no record is open')
-    expect(error.code).toBe('ENGINE_NO_RECORD')
+    const error = new EngineError('ENGINE_NO_OPEN_RECORD', 'no record is open')
+    expect(error.code).toBe('ENGINE_NO_OPEN_RECORD')
     expect(error.message).toBe('no record is open')
     expect(error).toBeInstanceOf(Error)
     expect(isEngineError(error)).toBe(true)

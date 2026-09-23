@@ -1,16 +1,19 @@
 /**
- * The engine shell: the slot table, the open record and the six operations
- * the tools call. Every operation returns a receipt - success carries the
- * stored fact, failure carries `{ ok: false, code, error }` - and nothing is
- * written to a slot when an operation fails. The engine holds no domain
- * knowledge: the formula comes from the caller.
+ * The engine shell: the slot table, the unclosed record and the six
+ * operations the tools call. Every operation returns a receipt - success
+ * carries the stored fact, failure carries `{ ok: false, code, error }` - and
+ * nothing is written to a slot when an operation fails. The engine holds no
+ * domain knowledge: the formula comes from the caller.
+ *
+ * The slot table lives exactly as long as the record is open: `record_end`
+ * clears it, so a non-empty table means an unclosed record exists.
  */
 import { fail, isEngineError } from '../errors.ts'
 import { describe } from './describe.ts'
 import { evaluateFormula, type SlotAccess } from './formula-eval.ts'
 import { parseFormula } from './formula-parser.ts'
 import { requireIdentifier } from './identifier.ts'
-import { RecordStore, type RecordIndexRow, type TraceRow, type TraceTool } from './record.ts'
+import { RECORD_VERSION, RecordStore, type RecordSummary, type TraceRow, type TraceTool } from './record.ts'
 import { type DimSpec, parseDim } from './si-vector.ts'
 import {
   assertIntegralValue,
@@ -35,11 +38,19 @@ interface SlotEntry {
   readonly rev: number
 }
 
+/** The one unclosed record: its identity in memory, its rows in the unclosed file. */
 interface OpenRecord {
   readonly id: string
-  readonly question: string
+  readonly title: string
   readonly openedAt: number
   seq: number
+}
+
+/** What the list endpoint reports: the closed records, the unclosed one, and how many are unreadable. */
+export interface RecordListing {
+  readonly rows: RecordSummary[]
+  readonly open: { id: string; title: string; openedAt: number } | null
+  readonly unknown: number
 }
 
 export interface GetOptions {
@@ -48,11 +59,22 @@ export interface GetOptions {
   readonly dim?: unknown
 }
 
+/** The title, start and end a record's rows carry. */
+function summarizeRows(rows: readonly TraceRow[]): { title: string; openedAt: number; endedAt: number } | null {
+  const start = rows.find((row) => row.ok && row.tool === 'record_start')
+  const title = start?.content['title']
+  if (start === undefined || typeof title !== 'string') return null
+  const end = [...rows].reverse().find((row) => row.ok && row.tool === 'record_end')
+  const last = rows[rows.length - 1]
+  return { title, openedAt: start.at, endedAt: end?.at ?? last?.at ?? start.at }
+}
+
 export class Engine {
   readonly store: RecordStore
   private readonly now: () => number
   private readonly slots = new Map<string, SlotEntry>()
   private open: OpenRecord | null = null
+  private roster: { mtime: number; rows: RecordSummary[]; unknown: number } | null = null
 
   constructor(readonly home: string, options: EngineOptions = {}) {
     this.store = new RecordStore(home)
@@ -60,25 +82,28 @@ export class Engine {
   }
 
   /**
-   * Recover the open record: replay its `set` and `eval` rows in order so the
-   * slot table matches the trace that is already on disk.
+   * Resume the unclosed record, if one was left behind: an unreadable or older
+   * one is discarded, otherwise its `set` and `eval` rows are replayed in order
+   * so the slot table matches the trace already on disk.
    */
   start(): void {
-    const openRow = this.store.readIndex().filter((row) => row.answeredAt === null).pop()
-    if (openRow === undefined) {
-      this.slots.clear()
-      this.open = null
+    this.slots.clear()
+    this.open = null
+    const file = this.store.readOpen()
+    if (file === null) return
+    if (file.header === null || file.header.version < RECORD_VERSION) {
+      this.store.discardOpen()
       return
     }
-    const rows = this.store.readRows(openRow.id)
-    this.slots.clear()
-    this.open = {
-      id: openRow.id,
-      question: openRow.question,
-      openedAt: openRow.openedAt,
-      seq: rows.length === 0 ? 0 : rows[rows.length - 1]!.seq,
+    const start = file.rows.find((row) => row.ok && row.tool === 'record_start')
+    const title = start?.content['title']
+    const id = start?.content['record']
+    if (start === undefined || typeof title !== 'string' || typeof id !== 'string') {
+      this.store.discardOpen()
+      return
     }
-    for (const row of rows) {
+    this.open = { id, title, openedAt: start.at, seq: file.rows[file.rows.length - 1]?.seq ?? start.seq }
+    for (const row of file.rows) {
       if (!row.ok) continue
       try {
         if (row.tool === 'set') this.replaySet(row)
@@ -107,16 +132,51 @@ export class Engine {
     this.write(target, parseSetValue(result, `the stored result of "${target}"`))
   }
 
-  indexRows(): RecordIndexRow[] {
-    return this.store.readIndex()
+  /** The list: closed records newest first, the unclosed record, and the unreadable count. */
+  listRecords(): RecordListing {
+    const mtime = this.store.recordsDirMtime()
+    if (this.roster === null || this.roster.mtime !== mtime) {
+      const rows: RecordSummary[] = []
+      let unknown = 0
+      for (const id of this.store.listRecordIds()) {
+        const file = this.store.readRecord(id)
+        if (file === null) continue
+        const summary = file.header === null || file.header.version < RECORD_VERSION ? null : summarizeRows(file.rows)
+        if (summary === null) {
+          unknown += 1
+          continue
+        }
+        rows.push({ id, version: file.header!.version, ...summary })
+      }
+      this.roster = { mtime, rows, unknown }
+    }
+    return {
+      rows: this.roster.rows,
+      open: this.open === null ? null : { id: this.open.id, title: this.open.title, openedAt: this.open.openedAt },
+      unknown: this.roster.unknown,
+    }
   }
 
-  readRows(id: string): TraceRow[] {
-    return this.store.readRows(id)
+  /** One record's rows, the unclosed one included; null when it does not exist or is unreadable. */
+  readRecordRows(id: string): { version: number; rows: TraceRow[] } | null {
+    const file = this.open?.id === id ? this.store.readOpen() : this.store.readRecord(id)
+    if (file === null || file.header === null || file.header.version < RECORD_VERSION) return null
+    return { version: file.header.version, rows: file.rows }
+  }
+
+  /** The title, start and end of one record, for the detail endpoint. */
+  summarize(id: string): { title: string; openedAt: number; endedAt: number } | null {
+    const rows = this.readRecordRows(id)
+    return rows === null ? null : summarizeRows(rows.rows)
   }
 
   openRecordId(): string | null {
     return this.open?.id ?? null
+  }
+
+  deleteRecord(id: string): void {
+    this.store.deleteRecord(id)
+    this.roster = null
   }
 
   opSet(name: unknown, value: unknown): Receipt {
@@ -199,69 +259,62 @@ export class Engine {
     })
   }
 
-  markerQuestion(text: unknown): Receipt {
-    return this.run('record_question', () => {
-      if (typeof text !== 'string') {
-        fail('ENGINE_ARGS_INVALID', `record_question takes the question text as a string; got ${describe(text)}.`)
-      }
+  markerStart(title: unknown): Receipt {
+    return this.run('record_start', () => {
+      const recordTitle = readText(title, 'record_start', 'title')
       if (this.open !== null) {
         fail(
           'ENGINE_RECORD_DUPLICATE',
-          `the record "${this.open.id}" is still open; submit record_answer for it first - a record carries exactly one question.`,
+          `the record "${this.open.id}" is not closed yet; call record_end for it first - a record carries exactly one title.`,
         )
       }
       const id = this.allocateRecordId()
-      const openedAt = this.now()
-      this.slots.clear()
-      this.open = { id, question: text, openedAt, seq: 0 }
-      this.store.writeIndex([...this.store.readIndex(), { id, question: text, openedAt, answeredAt: null }])
-      this.appendRow('record_question', true, { text, record: id })
+      this.store.beginOpen()
+      this.open = { id, title: recordTitle, openedAt: this.now(), seq: 0 }
+      const row = this.appendRow('record_start', true, { title: recordTitle, record: id })
+      // The written row is the record's authoritative start, so the in-memory span matches it.
+      if (row !== null) this.open = { id, title: recordTitle, openedAt: row.at, seq: row.seq }
       return { ok: true }
     })
   }
 
-  markerAnalyse(text: unknown): Receipt {
-    return this.run('record_analyse', () => {
-      if (typeof text !== 'string') {
-        fail('ENGINE_ARGS_INVALID', `record_analyse takes the analysis text as a string; got ${describe(text)}.`)
-      }
+  markerMessage(text: unknown, hide?: unknown): Receipt {
+    return this.run('record_message', () => {
       this.requireOpenRecord()
-      this.appendRow('record_analyse', true, { text })
+      const message = readText(text, 'record_message', 'text')
+      if (hide !== undefined && hide !== null && typeof hide !== 'boolean') {
+        fail('ENGINE_ARGS_INVALID', `record_message takes hide as a boolean; got ${describe(hide)}.`)
+      }
+      this.appendRow('record_message', true, hide === true ? { text: message, hide: true } : { text: message })
       return { ok: true }
     })
   }
 
-  markerAnswer(text: unknown): Receipt {
-    return this.run('record_answer', () => {
-      if (typeof text !== 'string') {
-        fail('ENGINE_ARGS_INVALID', `record_answer takes the answer text as a string; got ${describe(text)}.`)
-      }
+  markerEnd(text?: unknown): Receipt {
+    return this.run('record_end', () => {
       if (this.open === null) {
         fail(
-          'ENGINE_RECORD_DUPLICATE',
-          'no record is open, so there is no question to answer; call record_question first.',
+          'ENGINE_NO_OPEN_RECORD',
+          'no record is open, so there is nothing to close; call record_start first.',
         )
       }
+      if (text !== undefined && text !== null && typeof text !== 'string') {
+        fail('ENGINE_ARGS_INVALID', `record_end takes the closing text as a string; got ${describe(text)}.`)
+      }
       const current = this.open
-      this.appendRow('record_answer', true, { text, record: current.id })
-      this.sealRecord(current)
+      const closing = typeof text === 'string' && text.trim().length > 0 ? text : undefined
+      this.appendRow('record_end', true, closing === undefined ? { record: current.id } : { text: closing, record: current.id })
+      this.store.closeOpen(current.id)
+      this.slots.clear()
       this.open = null
+      this.roster = null
       return { ok: true }
     })
-  }
-
-  /** The index row carries the span: the question it opened with and the answer that closed it. */
-  private sealRecord(record: OpenRecord): void {
-    const rows = this.store.readIndex()
-    this.store.writeIndex(
-      rows.map((row) =>
-        row.id === record.id ? { id: row.id, question: row.question, openedAt: row.openedAt, answeredAt: this.now() } : row,
-      ),
-    )
   }
 
   private allocateRecordId(): string {
-    const taken = new Set(this.store.readIndex().map((row) => row.id))
+    const taken = new Set(this.store.listRecordIds())
+    if (this.open !== null) taken.add(this.open.id)
     const base = String(this.now())
     let id = base
     let suffix = 2
@@ -281,8 +334,8 @@ export class Engine {
   private requireOpenRecord(): void {
     if (this.open !== null) return
     fail(
-      'ENGINE_NO_RECORD',
-      'no record is open: call record_question first. It opens a record and clears the slot table, and set / get / eval are refused until it is open.',
+      'ENGINE_NO_OPEN_RECORD',
+      'no record is open: call record_start first. It opens a record, and set / get / eval are refused until a record is open.',
     )
   }
 
@@ -299,17 +352,27 @@ export class Engine {
     }
   }
 
-  private appendRow(tool: TraceTool, ok: boolean, content: Record<string, unknown>): void {
+  /** Append one row to the unclosed record; returns it, or null when no record is open. */
+  private appendRow(tool: TraceTool, ok: boolean, content: Record<string, unknown>): TraceRow | null {
     const record = this.open
-    if (record === null) return
+    if (record === null) return null
     record.seq += 1
     const row: TraceRow = { seq: record.seq, at: this.now(), tool, ok, content }
     try {
-      this.store.appendRow(record.id, row)
+      this.store.appendOpenRow(row)
     } catch {
       // A trace that cannot be written must not turn a successful call into a failure.
     }
+    return row
   }
+}
+
+/** A non-empty text argument; `record_start`'s title and `record_message`'s text share the rule. */
+function readText(input: unknown, tool: string, field: string): string {
+  if (typeof input !== 'string' || input.trim().length === 0) {
+    fail('ENGINE_ARGS_INVALID', `${tool} takes a non-empty ${field} string; got ${describe(input)}.`)
+  }
+  return input
 }
 
 function readForm(input: unknown): 'rect' | 'polar' | undefined {

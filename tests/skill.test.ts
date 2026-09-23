@@ -33,9 +33,13 @@ describe('parseSkillFile', () => {
     const text = readFileSync(new URL('../skills/reckoner-template.md', import.meta.url), 'utf8')
     const skill = parseSkillFile(text)
     expect(skill.name).toBe('reckoner-template')
-    expect(skill.description).toContain('record_question')
+    expect(skill.description).toContain('record_start')
     expect(skill.whenToUse).toContain('reckoner workflow')
     expect(skill.content).toContain('## Record protocol')
+    for (const marker of ['record_start', 'record_message', 'record_end']) {
+      expect(skill.content).toContain(marker)
+    }
+    expect(skill.content).toContain('are refused until')
   })
 
   it('parses the shipped interface skill (format guard)', () => {

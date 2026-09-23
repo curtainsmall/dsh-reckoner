@@ -90,27 +90,39 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
       execute: (args) => engine.opEval(args.formula as string, args.target as string) as never,
     }),
     defineJsonTool({
-      name: 'record_question',
+      name: 'record_start',
       description:
-        `Open a record with the consolidated question text and clear the slot table. ${RECORD_DESCRIPTION} ` +
-        'It fails when a record is already open - submit record_answer for that one first.',
-      parameters: { text: { type: 'string', description: 'the question text', required: true } },
-      execute: (args) => engine.markerQuestion(args.text as string) as never,
+        'Open a record: it carries this calculation from here on and is written to disk when it closes. Pass a short ' +
+        'title - about the length of an article title, not a paragraph; the record is listed and the article is ' +
+        `titled by it. ${RECORD_DESCRIPTION} It fails when a record is already open - close that one with record_end first.`,
+      parameters: {
+        title: { type: 'string', description: 'a short title for the calculation', required: true },
+      },
+      execute: (args) => engine.markerStart(args.title as string) as never,
     }),
     defineJsonTool({
-      name: 'record_analyse',
+      name: 'record_message',
       description:
-        `Submit the analysis text into the open record: the knowns as stored, the target and the relations to be used. ${RECORD_DESCRIPTION}`,
-      parameters: { text: { type: 'string', description: 'the analysis text', required: true } },
-      execute: (args) => engine.markerAnalyse(args.text as string) as never,
+        'Write one piece of explanation into the open record: what happens, what was found, why a step is taken. ' +
+        'Call it as often as the work needs - one message per thought, several in a row when the record is long. ' +
+        'Set hide:true only for notes the user need not read (conventions, writing guidance, what to emphasise ' +
+        `later); hidden messages are only shown on request, while results and reasoning stay visible. ${RECORD_DESCRIPTION}`,
+      parameters: {
+        text: { type: 'string', description: 'the explanation text', required: true },
+        hide: { type: 'boolean', description: 'hide this message from the record view (default false)' },
+      },
+      execute: (args) => engine.markerMessage(args.text as string, args.hide) as never,
     }),
     defineJsonTool({
-      name: 'record_answer',
+      name: 'record_end',
       description:
-        'Submit the final answer text and seal the record. It fails when no record is open - the receipt is the ' +
+        'Close the open record, optionally with a closing text (the conclusion the user should read). The record ' +
+        'becomes readable and can be written up as an article. It fails when no record is open - the receipt is the ' +
         'only thing written, nothing reaches the disk.',
-      parameters: { text: { type: 'string', description: 'the answer text', required: true } },
-      execute: (args) => engine.markerAnswer(args.text as string) as never,
+      parameters: {
+        text: { type: 'string', description: 'the closing text, if any' },
+      },
+      execute: (args) => engine.markerEnd(args.text) as never,
     }),
   ]
 }

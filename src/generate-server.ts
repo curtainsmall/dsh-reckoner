@@ -58,6 +58,11 @@ export interface GenerateDeps {
   loadRecord(id: string): GenerationFacts | undefined
 }
 
+/** The record's own prose, used as the language probe when the article language is automatic. */
+function recordProse(facts: GenerationFacts): string {
+  return [facts.title, ...facts.messages.map((message) => message.text), facts.closing ?? ''].join('\n')
+}
+
 /** Optional host LLM runtime shape (dsh-llm; absent → generation refuses with a clear error). */
 interface LlmLike {
   stream(options: {
@@ -265,11 +270,11 @@ async function generateArticle(
     throw new Error('no default model is configured — pick one in Settings first')
   }
   // LaTeX needs the document class fixed BEFORE generation: resolve the
-  // template language (auto → probe the question text) and pin the prompt to it.
+  // template language (auto → probe the record's own prose) and pin the prompt to it.
   let templateLanguage: TemplateLanguage | undefined
   switch (format) {
     case ArticleFormat.Latex:
-      templateLanguage = resolveTemplateLanguage(language, facts.question)
+      templateLanguage = resolveTemplateLanguage(language, recordProse(facts))
       break
     case ArticleFormat.Markdown:
       break

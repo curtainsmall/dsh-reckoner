@@ -11,7 +11,7 @@
  * would steer the model toward a sectioned output.
  */
 
-import type { RecordIndexRow, TraceRow } from './engine/record.ts'
+import type { TraceRow } from './engine/record.ts'
 
 /** One stored condition: the slot name and the value `set` stored (SI numbers with a 7-integer dim). */
 export interface GenerationCondition {
@@ -27,40 +27,58 @@ export interface GenerationStep {
   readonly result: unknown
 }
 
+/** One `record_message` row: what the model wrote, and whether it is meant for the reader. */
+export interface GenerationMessage {
+  readonly seq: number
+  readonly text: string
+  readonly hide: boolean
+}
+
 /**
- * The article facts of one record: the question it opened with, the conditions
- * still standing, the analysis, the successful evaluation steps and the answer.
+ * The article facts of one record: its title, the conditions still standing,
+ * the model's messages, the successful evaluation steps and the closing text.
  * Failed rows and `get` rows carry nothing to write, so they are skipped; a
  * `set` row that deletes a quantity removes it from the conditions.
  */
 export interface GenerationFacts {
-  readonly question: string
+  readonly title: string
   readonly conditions: readonly GenerationCondition[]
-  readonly analysis: readonly string[]
+  readonly messages: readonly GenerationMessage[]
   readonly steps: readonly GenerationStep[]
-  readonly answer: string | null
+  readonly closing: string | null
 }
 
-/** Reduce one record's trace to its facts. */
-export function recordFacts(meta: RecordIndexRow, rows: readonly TraceRow[]): GenerationFacts {
+/** Reduce one record's rows to its facts. */
+export function recordFacts(rows: readonly TraceRow[]): GenerationFacts {
   const conditions = new Map<string, unknown>()
-  const analysis: string[] = []
+  const messages: GenerationMessage[] = []
   const steps: GenerationStep[] = []
-  let answer: string | null = null
+  let title = ''
+  let closing: string | null = null
 
   for (const row of rows) {
     if (!row.ok) continue
+    if (row.tool === 'record_start') {
+      const text = row.content['title']
+      if (typeof text === 'string' && title.length === 0) title = text
+      continue
+    }
+    if (row.tool === 'record_end') {
+      const text = row.content['text']
+      closing = typeof text === 'string' ? text : null
+      continue
+    }
+    if (row.tool === 'record_message') {
+      const text = row.content['text']
+      if (typeof text === 'string') messages.push({ seq: row.seq, text, hide: row.content['hide'] === true })
+      continue
+    }
     if (row.tool === 'set') {
       const name = row.content['name']
       if (typeof name !== 'string') continue
       const value = row.content['value'] ?? null
       if (value === null) conditions.delete(name)
       else conditions.set(name, value)
-      continue
-    }
-    if (row.tool === 'record_analyse') {
-      const text = row.content['text']
-      if (typeof text === 'string') analysis.push(text)
       continue
     }
     if (row.tool === 'eval') {
@@ -75,18 +93,14 @@ export function recordFacts(meta: RecordIndexRow, rows: readonly TraceRow[]): Ge
       })
       continue
     }
-    if (row.tool === 'record_answer') {
-      const text = row.content['text']
-      if (typeof text === 'string') answer = text
-    }
   }
 
   return {
-    question: meta.question,
+    title,
     conditions: [...conditions].map(([name, value]) => ({ name, value })),
-    analysis,
+    messages,
     steps,
-    answer,
+    closing,
   }
 }
 
@@ -184,12 +198,14 @@ function renderStepVars(vars: Record<string, unknown>): string {
 /** The record rendered as neutral facts for the model (values verbatim, in SI base units). */
 export function renderRecordFacts(facts: GenerationFacts): string {
   const lines: string[] = ['Record information to base the article on:', '']
-  lines.push(`- The question to solve: ${facts.question}`)
+  if (facts.title.trim().length > 0) lines.push(`- The title the record was opened with: ${facts.title.trim()}`)
   for (const condition of facts.conditions) {
-    lines.push(`- A condition the question gave, recorded under the name ${condition.name}: ${JSON.stringify(condition.value)}`)
+    lines.push(`- A condition recorded under the name ${condition.name}: ${JSON.stringify(condition.value)}`)
   }
-  for (const text of facts.analysis) {
-    if (text.trim().length > 0) lines.push(`- Approach notes: ${text.trim()}`)
+  const writer = facts.messages.filter((message) => message.hide)
+  const reader = facts.messages.filter((message) => !message.hide)
+  for (const message of reader) {
+    if (message.text.trim().length > 0) lines.push(`- The record's own explanation: ${message.text.trim()}`)
   }
   for (const step of facts.steps) {
     const formula = step.formula.trim()
@@ -199,16 +215,23 @@ export function renderRecordFacts(facts: GenerationFacts): string {
     const result = step.result === null || step.result === undefined ? '' : JSON.stringify(step.result)
     if (result.length > 0) lines.push(`  result: ${result}`)
   }
-  if (facts.answer !== null && facts.answer.trim().length > 0) lines.push(`- Final answer: ${facts.answer.trim()}`)
+  if (facts.closing !== null && facts.closing.trim().length > 0) lines.push(`- The record's closing text: ${facts.closing.trim()}`)
   lines.push('')
   lines.push('A recorded value is a number plus a "dim": 7 integer exponents in the order m, kg, s, A, K, mol, cd. Write it in the unit the question used (the exponents name the quantity), and keep every number exactly as recorded.')
+  if (writer.length > 0) {
+    lines.push('')
+    lines.push('The author\'s notes below are guidance for you as the writer. Do NOT copy them into the article, do NOT quote them, and do not let them change any recorded number:')
+    for (const message of writer) {
+      if (message.text.trim().length > 0) lines.push(`- ${message.text.trim()}`)
+    }
+  }
   return lines.join('\n')
 }
 
 const MARKDOWN_SHARED_RULES = [
-  "Restate the question clearly at the start, in the user's own words. Remove any meta or filler text that was added while merging multiple inputs into one question.",
-  'Every number must come from the provided derivation steps and the final answer — never invent or recompute values.',
-  'Never include record ids or timestamps anywhere in the article.',
+  'Use the recorded title as the article title, restated as a proper heading, and reconstruct the problem statement from the recorded explanations and notes. Never invent a detail the record does not carry.',
+  'Every number must come from the provided derivation steps and the closing text — never invent or recompute values.',
+  'Never include record ids, timestamps or the author\'s notes in the article.',
   "Never mention Reckoner, DeepSeek Harness, the harness, formulae, derivation steps, records or the generation process in the article — present the work as if you carried out the calculation yourself, from the problem statement to the final result. The only allowed occurrences of the name are the document's fixed title 'DeepSeek Harness Reckoner Solution' and the author line 'DeepSeek Harness Reckoner'.",
 ]
 

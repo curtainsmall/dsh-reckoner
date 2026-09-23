@@ -71,7 +71,7 @@ describe('the packaged skills', () => {
   it('parses the record protocol', () => {
     const skill = parseSkillFile(read('skills/reckoner-template.md'))
     expect(skill.name).toBe('reckoner-template')
-    for (const marker of ['record_question', 'record_analyse', 'record_answer']) {
+    for (const marker of ['record_start', 'record_message', 'record_end']) {
       expect(skill.content).toContain(marker)
     }
     expect(skill.content).toContain('are refused until')
@@ -96,7 +96,7 @@ describe('the packaged skills', () => {
       'ENGINE_NO_FIELD',
       'ENGINE_SYMBOL_NOT_EVALUABLE',
       'ENGINE_ARGS_INVALID',
-      'ENGINE_NO_RECORD',
+      'ENGINE_NO_OPEN_RECORD',
       'ENGINE_RECORD_DUPLICATE',
       'ENGINE_TOOL',
     ]) {

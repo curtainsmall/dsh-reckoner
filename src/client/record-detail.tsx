@@ -53,18 +53,20 @@ interface WireRow {
 
 interface RecordBody {
   id: string
+  version: number
+  title: string
   openedAt: number
-  answeredAt: number | null
-  question: string
+  endedAt: number | null
   rows: TraceRow[]
 }
 
 /** The record body as the endpoint serves it, before its rows are normalised. */
 interface WireRecordBody {
   id: string
+  version: number
+  title: string
   openedAt: number
-  answeredAt: number | null
-  question: string
+  endedAt: number | null
   rows: WireRow[]
 }
 
@@ -78,13 +80,21 @@ function readSlotNames(vars: unknown): string[] {
 
 /**
  * The marker kind of a row, '' for a non-marker: the tool names the kind, and
- * a failed marker (ENGINE_RECORD_DUPLICATE) is the duplicate/failure flavour.
+ * a failed marker is the duplicate/failure flavour of the same marker.
  */
 function markerKind(tool: string, ok: boolean): string {
-  if (tool === 'record_question') return ok ? 'question' : 'duplicate-start'
-  if (tool === 'record_analyse') return 'analyse'
-  if (tool === 'record_answer') return ok ? 'answer' : 'duplicate-end'
+  if (tool === 'record_start') return ok ? 'start' : 'duplicate-start'
+  if (tool === 'record_message') return 'message'
+  if (tool === 'record_end') return ok ? 'end' : 'duplicate-end'
   return ''
+}
+
+/**
+ * A message row whose content is meta information for the writer: the panel
+ * hides it by default and "Display all" reveals it.
+ */
+function isHiddenMessage(row: TraceRow): boolean {
+  return row.tool === 'record_message' && row.hide === true
 }
 
 /**
@@ -252,7 +262,7 @@ type Item =
  * The three marker tools: their rows are the record's own narrative, so each
  * one stands alone instead of joining a writes/reads/failures run.
  */
-const MARKER_TOOLS = ['record_question', 'record_analyse', 'record_answer']
+const MARKER_TOOLS = ['record_start', 'record_message', 'record_end']
 
 /**
  * Fold consecutive ok set rows into a "writes" card, consecutive ok get rows
@@ -344,7 +354,7 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
       }
     }
     void load()
-    // While the record is open (answeredAt null) keep polling so a running solve appears live.
+    // While the record is open (endedAt null) keep polling so a running solve appears live.
     const timer = setInterval(() => {
       void load()
     }, POLL_MS)
@@ -364,9 +374,10 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
   if (record === null) return <div style={{ minHeight: 120 }} />
 
   // The narrative is markers, writes, reads and one card per eval step. Failed
-  // attempts are kept in the trace but stay out of the timeline unless "Display
-  // all" is on: they are part of the engine's account, not of the solution.
-  const visibleRows = showAll ? record.rows : record.rows.filter((row) => row.ok)
+  // attempts and messages the writer marked as meta stay in the trace but out of
+  // the timeline unless "Display all" is on: they are part of the engine's
+  // account, not of the solution.
+  const visibleRows = showAll ? record.rows : record.rows.filter((row) => row.ok && !isHiddenMessage(row))
   const failedCount = visibleRows.filter((row) => !row.ok).length
   const items = groupRows(visibleRows)
 
@@ -409,15 +420,15 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
           below the card scrolls. */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flex: '1 1 auto', minHeight: 0, marginTop: 10 }}>
         <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* Header: record id — the question already lives in the timeline's question card. */}
+          {/* Header: record id — the title lives in the timeline's start card. */}
           <div style={rowStyle}>
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-all', ...codeFont }}>{record.id}</div>
             <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
               <span>{t('rowsCount', { n: visibleRows.length })}</span>
               {failedCount > 0 && <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{t('failedCount', { n: failedCount })}</span>}
-              {record.answeredAt === null
+              {record.endedAt === null
                 ? <span style={{ padding: '1px 7px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' }}>{t('incomplete')}</span>
-                : <span>{formatTime(record.answeredAt)}</span>}
+                : <span>{formatTime(record.endedAt)}</span>}
             </div>
           </div>
 
@@ -521,14 +532,14 @@ function TimelineItem({ item }: { item: Item }): React.JSX.Element {
   }
 }
 
-/* ── Marker rows: question / analyse / answer ─────────────────────────────── */
+/* ── Marker rows: start / message / end ───────────────────────────────────── */
 
-/** Marker label for a row's derived `kind` (see markerKind): question/analyse/answer, or a duplicate flavour. */
+/** Marker label for a row's derived `kind` (see markerKind): start/message/end, or a duplicate flavour. */
 function markerLabel(kind: string): string {
   switch (kind) {
-    case 'question': return t('markerQuestion')
-    case 'analyse': return t('markerAnalyse')
-    case 'answer': return t('markerAnswer')
+    case 'start': return t('markerStart')
+    case 'message': return t('markerMessage')
+    case 'end': return t('markerEnd')
     case 'duplicate-start': return t('markerDuplicateStart')
     case 'duplicate-end': return t('markerDuplicateEnd')
     default: return kind
@@ -539,18 +550,22 @@ function MarkerRow({ row }: { row: TraceRow }): React.JSX.Element {
   const kind = String(row.kind ?? '')
   const accent = !row.ok
     ? 'var(--dsw-alias-state-error-primary)'
-    : kind === 'answer'
+    : kind === 'end'
       ? 'var(--dsw-alias-state-success-primary)'
-      : kind === 'question'
+      : kind === 'start'
         ? 'var(--dsw-alias-state-business-primary)'
         : 'var(--dsw-alias-label-tertiary)'
+  // The marker's own text: a message / closing carries `text`, the start row carries the title.
+  const body = typeof row.text === 'string' && row.text.length > 0
+    ? row.text
+    : typeof row.title === 'string' ? row.title : ''
   return (
     <div style={{ ...rowStyle, borderLeft: `3px solid ${accent}`, paddingLeft: 10 }}>
       <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
         {markerLabel(kind)}
       </div>
-      {typeof row.text === 'string' && row.text.length > 0 && (
-        <div style={{ marginTop: 6, fontSize: 14.5, color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{row.text}</div>
+      {body.length > 0 && (
+        <div style={{ marginTop: 6, fontSize: 14.5, color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{body}</div>
       )}
       {typeof row.error === 'string' && (
         <div style={{ marginTop: 6, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5, wordBreak: 'break-word' }}>{row.error}</div>
