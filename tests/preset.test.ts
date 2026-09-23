@@ -14,7 +14,7 @@ describe('the packaged preset', () => {
     expect(cordis).toContain('includeRuntimeContext: false')
   })
 
-  it('carries the six standing rules', () => {
+  it('carries the standing rules', () => {
     const persona = read('presets/reckoner/agent.cordis.yml')
     expect(persona).toContain('1. Use only the tools listed for this session')
     expect(persona).toContain('2. Every input quantity comes from the user')
@@ -22,6 +22,7 @@ describe('the packaged preset', () => {
     expect(persona).toContain('4. Check every receipt')
     expect(persona).toContain('5. Store every quantity with set')
     expect(persona).toContain("6. eval's target is the slot the result is written into")
+    expect(persona).toContain('7. When the question holds several sub-questions')
   })
 
   /**
