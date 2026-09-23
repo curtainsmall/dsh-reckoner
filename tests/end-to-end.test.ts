@@ -84,7 +84,7 @@ describe('a whole record', () => {
     expect(existsSync(join(home, 'open-record.jsonl'))).toBe(false)
   })
 
-  it("carries a hidden message into the article prompt's author's notes", () => {
+  it("carries a hidden message into the article prompt as an author's note, in its place", () => {
     engine.markerStart('A simple divider')
     engine.opSet('V_in', { num: 12, dim: 'volt' })
     engine.markerMessage('The current is what the reader wants.', true)
@@ -97,10 +97,11 @@ describe('a whole record', () => {
     expect(facts.messages.map((message) => message.hide)).toEqual([true, false])
 
     const prompt = buildArticlePrompt(facts)
-    const notesAt = prompt.user.indexOf("The author's notes below")
-    expect(notesAt).toBeGreaterThan(-1)
-    expect(prompt.user.indexOf('The current is what the reader wants.')).toBeGreaterThan(notesAt)
-    expect(prompt.user.indexOf('Ohm law gives I = V / R.')).toBeLessThan(notesAt)
+    const noteAt = prompt.user.indexOf("The author's note at step")
+    expect(noteAt).toBeGreaterThan(-1)
+    // The note keeps its own seq position: written first, it is rendered first.
+    expect(prompt.user.indexOf('Ohm law gives I = V / R.')).toBeGreaterThan(noteAt)
+    expect(prompt.user).toContain('never copy it, never quote it')
   })
 
   it('exposes the six tools the record protocol uses', () => {

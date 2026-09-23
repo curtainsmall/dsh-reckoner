@@ -46,27 +46,39 @@ describe('the facts text', () => {
     expect(text).toContain('Ohm law: I = V / R')
     expect(text).toContain('@V_in/@R2')
     expect(text).toContain('substituting: V_in = {"num":12,')
-    expect(text).toContain('result: {"num":0.05454545454545454,')
+    // Numbers reach the writer cut to four decimal places, dims untouched.
+    expect(text).toContain('result: {"num":0.0545,"dim":[0,0,0,1,0,0,0]}')
+    expect(text).not.toContain('0.05454545454545454')
     expect(text).toContain('I = 54.5 mA')
     expect(text).toContain('m, kg, s, A, K, mol, cd')
+    expect(text).toContain('never add digits and never recompute')
   })
 
-  it("puts hidden messages in the author's notes, not in the content", () => {
+  it('keeps the record timeline in seq order, with each message beside its steps', () => {
     const text = renderRecordFacts(FACTS)
-    const notesAt = text.indexOf("The author's notes below")
-    expect(notesAt).toBeGreaterThan(-1)
-    expect(text.indexOf('Use the amplitude convention (20) throughout.')).toBeGreaterThan(notesAt)
-    expect(text.indexOf('Ohm law: I = V / R')).toBeLessThan(notesAt)
-    expect(text).toContain('Do NOT copy them into the article')
+    const explanationAt = text.indexOf("The record's own explanation: Ohm law")
+    const noteAt = text.indexOf("The author's note at step 5")
+    const stepAt = text.indexOf('- Step 6: @V_in/@R2')
+    expect(explanationAt).toBeGreaterThan(-1)
+    expect(noteAt).toBeGreaterThan(explanationAt)
+    expect(stepAt).toBeGreaterThan(noteAt)
+    expect(text).not.toContain('Derivation step')
+  })
+
+  it("marks a hidden message as the author's note, in its own place", () => {
+    const text = renderRecordFacts(FACTS)
+    expect(text).toContain("The author's note at step 5")
+    expect(text).toContain('never copy it, never quote it')
+    expect(text).toContain('Use the amplitude convention (20) throughout.')
     expect(text).not.toContain("The record's own explanation: Use the amplitude convention")
   })
 
   it('omits what the record does not have', () => {
     const text = renderRecordFacts({ title: 'q', conditions: [], messages: [], steps: [], closing: null })
     expect(text).toContain('q')
-    expect(text).not.toContain('Derivation step')
+    expect(text).not.toContain('Step ')
     expect(text).not.toContain('closing text')
-    expect(text).not.toContain("author's notes")
+    expect(text).not.toContain("author's note")
   })
 })
 
@@ -86,7 +98,7 @@ describe('the article prompt', () => {
 
   it("gives the hidden messages to the writer but keeps them out of the article", () => {
     const prompt = buildArticlePrompt(FACTS, ArticleLanguage.Auto, ArticleFormat.Markdown)
-    expect(prompt.user).toContain("The author's notes below")
+    expect(prompt.user).toContain("The author's note at step 5")
     expect(prompt.user).toContain('Use the amplitude convention (20) throughout.')
     expect(prompt.system).toContain("the author's notes in the article")
   })

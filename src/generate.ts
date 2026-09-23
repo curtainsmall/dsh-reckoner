@@ -188,49 +188,81 @@ export function normalizeFileName(fileName: string, format: ArticleFormat): stri
   return base.length === 0 ? `reckoner-article${extension}` : `${base}${extension}`
 }
 
+/** Article numbers carry at most four decimal places - the panel's own rule, applied only to the prompt. */
+function cutNumber(value: number): number {
+  if (!Number.isFinite(value)) return value
+  const abs = Math.abs(value)
+  if (abs !== 0 && (abs >= 1e6 || abs < 1e-3)) return Number(value.toExponential(4))
+  return Math.round(value * 10000) / 10000
+}
+
+/** The same cut, applied to every number inside a stored value; its structure and its dim stay as they are. */
+function cutNumbers(value: unknown): unknown {
+  if (typeof value === 'number') return cutNumber(value)
+  if (Array.isArray(value)) return value.map((item) => cutNumbers(item))
+  if (typeof value === 'object' && value !== null) {
+    const cut: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      cut[key] = key === 'dim' ? item : cutNumbers(item)
+    }
+    return cut
+  }
+  return value
+}
+
 /** The substituted slots of one step as a single line (`name = value`), empty when none was read. */
 function renderStepVars(vars: Record<string, unknown>): string {
   const entries = Object.entries(vars)
   if (entries.length === 0) return ''
-  return entries.map(([name, value]) => `${name} = ${JSON.stringify(value)}`).join(', ')
+  return entries.map(([name, value]) => `${name} = ${JSON.stringify(cutNumbers(value))}`).join(', ')
 }
 
-/** The record rendered as neutral facts for the model (values verbatim, in SI base units). */
+/**
+ * The record rendered as neutral facts for the model: title and conditions first,
+ * then the record's own timeline - messages and evaluation steps interleaved by
+ * their `seq`, so an explanation sits next to the steps it covers - and the
+ * closing text last. Numbers are cut to four decimal places; dims stay 7-tuples.
+ */
 export function renderRecordFacts(facts: GenerationFacts): string {
   const lines: string[] = ['Record information to base the article on:', '']
   if (facts.title.trim().length > 0) lines.push(`- The title the record was opened with: ${facts.title.trim()}`)
   for (const condition of facts.conditions) {
-    lines.push(`- A condition recorded under the name ${condition.name}: ${JSON.stringify(condition.value)}`)
+    lines.push(`- A condition recorded under the name ${condition.name}: ${JSON.stringify(cutNumbers(condition.value))}`)
   }
-  const writer = facts.messages.filter((message) => message.hide)
-  const reader = facts.messages.filter((message) => !message.hide)
-  for (const message of reader) {
-    if (message.text.trim().length > 0) lines.push(`- The record's own explanation: ${message.text.trim()}`)
-  }
-  for (const step of facts.steps) {
+  const timeline = [
+    ...facts.messages.map((message) => ({ seq: message.seq, message, step: undefined })),
+    ...facts.steps.map((step) => ({ seq: step.seq, message: undefined, step })),
+  ].sort((left, right) => left.seq - right.seq)
+  for (const entry of timeline) {
+    if (entry.message !== undefined) {
+      const text = entry.message.text.trim()
+      if (text.length === 0) continue
+      lines.push(
+        entry.message.hide
+          ? `- The author's note at step ${entry.seq} (guidance for you: never copy it, never quote it, and never let it change a recorded number): ${text}`
+          : `- The record's own explanation: ${text}`,
+      )
+      continue
+    }
+    const step = entry.step
+    if (step === undefined) continue
     const formula = step.formula.trim()
-    if (formula.length > 0) lines.push(`- Derivation step: ${formula}`)
+    if (formula.length > 0) lines.push(`- Step ${step.seq}: ${formula}`)
     const vars = renderStepVars(step.vars)
     if (vars.length > 0) lines.push(`  substituting: ${vars}`)
-    const result = step.result === null || step.result === undefined ? '' : JSON.stringify(step.result)
+    const result = step.result === null || step.result === undefined ? '' : JSON.stringify(cutNumbers(step.result))
     if (result.length > 0) lines.push(`  result: ${result}`)
   }
   if (facts.closing !== null && facts.closing.trim().length > 0) lines.push(`- The record's closing text: ${facts.closing.trim()}`)
   lines.push('')
-  lines.push('A recorded value is a number plus a "dim": 7 integer exponents in the order m, kg, s, A, K, mol, cd. Write it in the unit the question used (the exponents name the quantity), and keep every number exactly as recorded.')
-  if (writer.length > 0) {
-    lines.push('')
-    lines.push('The author\'s notes below are guidance for you as the writer. Do NOT copy them into the article, do NOT quote them, and do not let them change any recorded number:')
-    for (const message of writer) {
-      if (message.text.trim().length > 0) lines.push(`- ${message.text.trim()}`)
-    }
-  }
+  lines.push('A recorded value is a number plus a "dim": 7 integer exponents in the order m, kg, s, A, K, mol, cd. Write it in the unit the question used (the exponents name the quantity). Every number above is already cut to four decimal places: copy them as they stand, never add digits and never recompute.')
   return lines.join('\n')
 }
 
 const MARKDOWN_SHARED_RULES = [
   'Use the recorded title as the article title, restated as a proper heading, and reconstruct the problem statement from the recorded explanations and notes. Never invent a detail the record does not carry.',
   'Every number must come from the provided derivation steps and the closing text — never invent or recompute values.',
+  'Write every number with at most four decimal places: the facts are already cut that way, so copy them as they stand and never append digits the fact does not have.',
   'Never include record ids, timestamps or the author\'s notes in the article.',
   "Never mention Reckoner, DeepSeek Harness, the harness, formulae, derivation steps, records or the generation process in the article — present the work as if you carried out the calculation yourself, from the problem statement to the final result. The only allowed occurrences of the name are the document's fixed title 'DeepSeek Harness Reckoner Solution' and the author line 'DeepSeek Harness Reckoner'.",
 ]
