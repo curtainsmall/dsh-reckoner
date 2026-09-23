@@ -398,12 +398,12 @@ A `dim` given to `get` is a claim about what the slot holds: 7 integers must equ
 
 | marker | argument | effect |
 |---|---|---|
-| `record_start` | `title`, a non-empty string | opens a record: allocates its id, writes the header line and the start row. It fails with `ENGINE_OPEN_RECORD_FOUND` while a record is open, so a record carries exactly one title |
+| `record_start` | `title`, a non-empty string | opens a record: allocates its identifier, writes the header line and the start row. It fails with `ENGINE_OPEN_RECORD_FOUND` while a record is open, so a record carries exactly one title |
 | `record_message` | `text`, a non-empty string, and the optional `hide` (a boolean, default false) | appends one explanation to the open record |
 | `record_end` | optional `text` | appends the closing row, renames the open file into the closed tier (Section 7.3), and clears the slot table. It fails with `ENGINE_OPEN_RECORD_NOT_FOUND` when no record is open |
 
 - `set`, `get` and `eval` require an open record, and so does `record_message`; without one the call fails with `ENGINE_OPEN_RECORD_NOT_FOUND`, and nothing is written anywhere.
-- The record id is the clock reading in milliseconds as a string; while that name is taken, `-2`, `-3` and so on are appended.
+- The record identifier is the clock reading in milliseconds as a string; while that name is taken, `-2`, `-3` and so on are appended.
 - A message with `hide: true` is marked as a note for the article writer rather than for the record view (Section 10).
 - A closing text that is empty or only whitespace counts as absent.
 - Each marker answers `{ ok: true }` and nothing else.
@@ -429,7 +429,7 @@ Every call appends at most one row to the open record, inputs and outputs alike.
 | `set` | `{ name, value }`: the stored value with its `dim` as 7 integers; a deletion is `{ name, value: null }` |
 | `get` | `{ name, value }`: the value as it was rendered for the receipt. The `form`, `digits` and `dim` that were asked for are not stored |
 | `eval` | `{ formula, target, rev, vars, result }`: the text as written, the slot written, its new revision, every slot the formula actually read mapped to its stored value, and the result |
-| `record_start` | `{ title, record }`: the title and the allocated id |
+| `record_start` | `{ title, record }`: the title and the allocated identifier |
 | `record_message` | `{ text }`, or `{ text, hide: true }` |
 | `record_end` | `{ record }`, or `{ text, record }` when a closing text was given |
 | a refused call | `{ code, error }` |
@@ -442,12 +442,12 @@ Every call appends at most one row to the open record, inputs and outputs alike.
 
 - The first line of every record file is its header, `{"seq": 0, "version": 1}`. `seq: 0` is the only marker that distinguishes it from a trace row, and `version` is the design version this build writes and accepts.
 - **Two tiers.** The one unclosed record lives in `<home>/open-record.jsonl`. Closing renames that file into `<home>/records/<id>.jsonl` in one atomic step, so a file under `records/` is always a complete record.
-- **The version gate.** A file whose first line is not a header, or whose version is below the current one, is refused by every reader: at start the open file is discarded, and a closed record is not listed as a row but its id is reported among the ids that cannot be read.
+- **The version gate.** A file whose first line is not a header, or whose version is below the current one, is refused by every reader: at start the open file is discarded, and a closed record is not listed as a row but its identifier is reported among the identifiers that cannot be read.
 - A line that does not parse is dropped, so a torn last line from a crash mid-append costs only that line: the record keeps every row that parsed.
 
 ### 7.4 Recovery by replay
 
-At start the engine clears the slot table and then reads the unclosed file. A file that fails the version gate, or whose start row carries no title or no id, is discarded. Otherwise the record is resumed from its start row, with the last row's `seq`, and its rows are replayed in order:
+At start the engine clears the slot table and then reads the unclosed file. A file that fails the version gate, or whose start row carries no title or no identifier, is discarded. Otherwise the record is resumed from its start row, with the last row's `seq`, and its rows are replayed in order:
 
 | row | what the replay does |
 |---|---|
@@ -461,7 +461,7 @@ At start the engine clears the slot table and then reads the unclosed file. A fi
 
 ### 7.5 The record list
 
-- The list reports the closed records (id, version, title, opened time, ended time), the one open record (id, title, opened time) and the ids that cannot be read.
+- The list reports the closed records (identifier, version, title, opened time, ended time), the one open record (identifier, title, opened time) and the identifiers that cannot be read.
 - The title and the span of a record come from its rows: the first accepted `record_start` row's title, the last accepted `record_end` row's time as the end, and the last row's time when there is none.
 - The closed list is cached and rebuilt when the modification time of the `records/` directory changes, so a scan does not run on every read.
 
@@ -509,7 +509,7 @@ The plugin home is `~/.dsh-reckoner`, and `DSH_RECKONER_HOME` moves it.
 ```
 ~/.dsh-reckoner/
   open-record.jsonl       the one unclosed record: its header line and its trace rows
-  records/<id>.jsonl      closed records, one file each, named by the record id
+  records/<id>.jsonl      closed records, one file each, named by the record identifier
   state.json              the plugin's remembered settings
   logs/                   one file per host run
 ```
@@ -549,7 +549,7 @@ A closed record can be written up as a standalone solution article. The host red
 - **Language.** `auto`, `zh-CN` or `en`. The shell language is resolved before generation, so an auto job probes the record's own prose (title, messages and closing text) for CJK ideographs.
 - **Job phases.** prepare, generate, write, compile. A LaTeX article is written into a folder named after the file, which also receives the PDF and the compiler's artifacts; a Markdown article is written flat and is never compiled.
 - PDF compilation is LaTeX-only and optional. It runs a driver, `latexmk` preferred and `texify` as the fallback, which in turn runs `xelatex`; the article is written to disk either way, and a compile failure is reported without discarding it.
-- The file name is forced to the format's extension and defaults to `reckoner-<first 8 characters of the record id>`.
+- The file name is forced to the format's extension and defaults to `reckoner-<first 8 characters of the record identifier>`.
 - The article is written as the author's own solution: the prompt forbids mentioning Reckoner, the harness, formulas, derivation steps, records or the generation process, and forbids inventing or recomputing a number.
 
 ## 11. The panel
@@ -559,14 +559,14 @@ The records panel is a **Reckoner** entry in the sidebar that opens over the con
 ### 11.1 Records list
 
 - Reads `GET /api/dsh-reckoner/records-index` and polls it every 5 seconds; it never reads a trace body.
-- The open record is pinned above the list with an incomplete badge. The closed records follow, newest first, each showing its title (or its id when the title is empty) and its open and end times.
+- The open record is pinned above the list with an incomplete badge. The closed records follow, newest first, each showing its title (or its identifier when the title is empty) and its open and end times.
 - **Select** mode turns the rows into a selection with **Select all** and **Delete selected**, guarded by a confirmation dialog. Deleting removes a closed record's file; the open record never joins the selection, because the endpoint refuses it.
-- A line reports the ids no build can read and offers to delete them, since nothing else can reach them.
+- A line reports the identifiers no build can read and offers to delete them, since nothing else can reach them.
 
 ### 11.2 Record detail
 
 - Fetched from `GET /api/dsh-reckoner/records/<id>` and polled every 5 seconds, so a running solve appears live.
-- A header card with the record id, the count of visible rows, the count of failed rows among them, and either the end time or an incomplete badge.
+- A header card with the record identifier, the count of visible rows, the count of failed rows among them, and either the end time or an incomplete badge.
 - **Display all** off keeps refused rows and messages marked `hide: true` out of the timeline: they are the engine's account and the writer's notes, not part of the solution. The failed count is therefore zero until it is on.
 - Rows are grouped into the narrative: consecutive accepted `set` rows collapse into one **Writes ({n})** card (one line per slot, with its revision), consecutive accepted `get` rows into a **Reads ({n})** card, and consecutive failures into a red **Failed attempts ({n})** card showing the sequence number, the tool, the formula when there is one, the `code` and the `error` text.
 - Every accepted `eval` gets its own card: the formula, the written slot with its revision, one row per slot the formula read with the value it held, chips that jump to the `set` row of each of those slots, and the result as a tree.
@@ -577,7 +577,7 @@ The records panel is a **Reckoner** entry in the sidebar that opens over the con
 
 | endpoint | purpose |
 |---|---|
-| `GET /api/dsh-reckoner/records-index` | the closed records, the open record and the ids that cannot be read |
+| `GET /api/dsh-reckoner/records-index` | the closed records, the open record and the identifiers that cannot be read |
 | `GET /api/dsh-reckoner/records/<id>` | one record's identity and trace rows; the open record included, with `endedAt: null` |
 | `DELETE /api/dsh-reckoner/records/<id>` | removes a closed record's file; refused with 409 while it is the open record, 404 when it does not exist |
 | `POST /api/dsh-reckoner/generate` | starts an article job (`recordId`, `format`, `directory`, `fileName`, `language`, `compile`) |

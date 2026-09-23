@@ -167,7 +167,7 @@ export function parseDim(input: unknown, where: string): DimSpec {
   )
 }
 
-/** The dim of a vector already in the table, spelled by its first name. */
+/** The dimension spec of a vector already in the table: the row's first name and its affine map. */
 export function dimSpecOfVector(vector: SiVector): DimSpec {
   const first = siTableRow(vector)?.names[0]
   return first === undefined

@@ -106,7 +106,7 @@ export function parseRecordFile(text: string): RecordFile {
 }
 
 /**
- * Order two record ids: they are creation timestamps, so plain string order is
+ * Order two record identifiers: they are creation timestamps, so plain string order is
  * creation order - except for the `-2` suffix used when two records were
  * created inside the same millisecond.
  */
@@ -170,7 +170,7 @@ export class RecordStore {
     return readText(this.recordPath(id)).length > 0
   }
 
-  /** The ids of the closed records, newest first. */
+  /** The identifiers of the closed records, newest first. */
   listRecordIds(): string[] {
     let names: string[]
     try {

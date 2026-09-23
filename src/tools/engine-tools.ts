@@ -23,7 +23,7 @@ const VALUE_DESCRIPTION =
   '{"mag": r, "ang": theta} (a complex; theta is radians), {"array": [...]} (an array) or {"object": {...}} ' +
   '(named fields). "dim" travels with the value: one of the SI names, or 7 integers in the order ' +
   `${SI_COMPONENT_ORDER}; omitted means the zero SI vector. Array elements are bare numbers, {re,im} or nested ` +
-  "arrays, all sharing the array's dim; an object carries one dim per field and no dim of its own. A complex " +
+  "arrays, all sharing the array's dimension; an object carries one dimension per field and no dimension of its own. A complex " +
   'is stored rectangular, so a polar input is converted on the way in. Pass null to delete the slot.'
 
 const DIM_DESCRIPTION =
@@ -53,8 +53,8 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
       name: TraceTool.Set,
       description:
         'Write one slot: each quantity the user gave, transcribed. The engine converts nothing by itself - write ' +
-        `the value in SI and let dim name the quantity. The accepted names are ${allSiNames().join(', ')}. ` +
-        `${VALUE_DESCRIPTION} The receipt echoes what was stored: dim as 7 integers, a complex as re/im.`,
+        `the value in SI and let "dim" name the quantity. The accepted names are ${allSiNames().join(', ')}. ` +
+        `${VALUE_DESCRIPTION} The receipt echoes what was stored: the "dim" as 7 integers, a complex as "re" and "im".`,
       parameters: {
         name: { type: 'string', description: NAME_DESCRIPTION, required: true },
         value: { type: 'json', description: VALUE_DESCRIPTION, required: true },

@@ -64,7 +64,7 @@ dsh plugin --profile <profile> add dsh-reckoner
 | Markdown | 平铺的 `.md` 文件，从不编译 |
 | LaTeX | `.tex` 源文件写入以文件名命名的目录，按需编译为 PDF |
 
-设置对话框会记住文章语言、输出目录，LaTeX 还会记住是否编译；文件名默认由记录 id 预填。PDF 编译交由 latexmk 或 MiKTeX 的 texify 完成，并需要 `xelatex` 引擎；勾选编译而没有可用驱动或引擎时，「生成」按钮禁用，对话框指明缺少的部分。
+设置对话框会记住文章语言、输出目录，LaTeX 还会记住是否编译；文件名默认由记录标识符预填。PDF 编译交由 latexmk 或 MiKTeX 的 texify 完成，并需要 `xelatex` 引擎；勾选编译而没有可用驱动或引擎时，「生成」按钮禁用，对话框指明缺少的部分。
 
 ## 配置
 

@@ -646,7 +646,7 @@ async function readCapability(language: ArticleLanguage): Promise<CapabilityRepo
   }
 }
 
-/** Start a background generation job and return its id; progress is polled via GET /generate-progress. */
+/** Start a background generation job and return its identifier; progress is polled via GET /generate-progress. */
 function startGenerateJob(
   ctx: GenerateContext,
   deps: GenerateDeps,

@@ -118,7 +118,7 @@ export function startGenerate(request: GenerateRequest): void {
       )
       const body = (await res.json()) as { jobId?: string; error?: string }
       if (!res.ok) throw new Error(body.error ?? `generate returned ${res.status}`)
-      if (body.jobId === undefined) throw new Error('no job id returned')
+      if (body.jobId === undefined) throw new Error('no job identifier returned')
       jobId = body.jobId
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, 500))

@@ -30,7 +30,7 @@ import {
 export type Receipt = Record<string, unknown>
 
 export interface EngineOptions {
-  /** The clock; injected so a record's timestamps and id are reproducible in tests. */
+  /** The clock; injected so a record's timestamps and identifier are reproducible in tests. */
   readonly now?: () => number
 }
 
@@ -47,7 +47,7 @@ interface OpenRecord {
   seq: number
 }
 
-/** What the list endpoint reports: the closed records, the unclosed one, and the ids that cannot be read. */
+/** What the list endpoint reports: the closed records, the unclosed one, and the identifiers that cannot be read. */
 export interface RecordListing {
   readonly rows: RecordSummary[]
   readonly open: { id: string; title: string; openedAt: number } | null
@@ -134,7 +134,7 @@ export class Engine {
     this.write(target, parseSetValue(result, `the stored result of "${target}"`))
   }
 
-  /** The list: closed records newest first, the unclosed record, and the ids that cannot be read. */
+  /** The list: closed records newest first, the unclosed record, and the identifiers that cannot be read. */
   listRecords(): RecordListing {
     const mtime = this.store.recordsDirMtime()
     if (this.roster === null || this.roster.mtime !== mtime) {

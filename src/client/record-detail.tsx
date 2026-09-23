@@ -129,7 +129,7 @@ function viewRow(row: WireRow): TraceRow {
 
 /* ── JSON tree display ────────────────────────────────────────────────────── */
 
-/** A tagged scalar (a real or a complex, with or without its dim) is a leaf, shown as text. */
+/** A tagged scalar (a real or a complex, with or without its `dim`) is a leaf, shown as text. */
 function isTaggedScalar(v: Record<string, unknown>): boolean {
   return typeof v['num'] === 'number'
     || typeof v['re'] === 'number'

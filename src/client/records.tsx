@@ -27,7 +27,7 @@ interface OpenRow {
   openedAt: number
 }
 
-/** The records index the endpoint serves: closed rows (newest first), the open record, the unreadable ids. */
+/** The records index the endpoint serves: closed rows (newest first), the open record, the unreadable identifiers. */
 interface RecordsIndex {
   rows: IndexRow[]
   open: OpenRow | null
@@ -160,7 +160,7 @@ function formatTime(time: number): string {
 
 /**
  * The "X unknown records" line. It is clickable (and offers to delete them) only
- * when the host reported their ids: a host built before the ids existed reports a
+ * when the host reported their identifiers: a host built before the identifiers existed reports a
  * bare count, and then the line still shows the number instead of disappearing.
  */
 function UnknownRecordsLine({ ids, count, onDelete }: { ids: string[]; count: number; onDelete: () => void }): React.JSX.Element | null {

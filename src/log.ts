@@ -32,7 +32,7 @@
  *
  * Logging is disposable run-time diagnostics, never the engine's bookkeeping: the record
  * trace is the authoritative account of a calculation, no record field is derived from a
- * log line, and nothing record- or session-shaped (record id, sequence, job id) is logged
+ * log line, and nothing record- or session-shaped (record identifier, sequence, job identifier) is logged
  * as a key. Every write is guarded — a failing sink is disabled instead of throwing — and
  * this module imports no engine, record or tool code (host side only; never bundled into
  * the client).

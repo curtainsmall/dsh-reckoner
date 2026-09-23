@@ -30,7 +30,7 @@ function userPresetRoot(): string {
 
 /**
  * Sync every packaged preset into the user preset root, overwriting any
- * existing copy. Returns the ids it synced (for logging); throws on
+ * existing copy. Returns the identifiers it synced (for logging); throws on
  * filesystem errors so the caller can warn without breaking the plugin.
  */
 export function installPresets(): string[] {

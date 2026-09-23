@@ -14,7 +14,7 @@
 import type { TraceRow } from './engine/record.ts'
 import { TraceTool } from './engine/trace-tools.ts'
 
-/** One stored condition: the slot name and the value `set` stored (SI numbers with a 7-integer dim). */
+/** One stored condition: the slot name and the value `set` stored (SI numbers with a 7-integer `dim`). */
 export interface GenerationCondition {
   readonly name: string
   readonly value: unknown
@@ -197,7 +197,7 @@ function cutNumber(value: number): number {
   return Math.round(value * 10000) / 10000
 }
 
-/** The same cut, applied to every number inside a stored value; its structure and its dim stay as they are. */
+/** The same cut, applied to every number inside a stored value; its structure and its `dim` stay as they are. */
 function cutNumbers(value: unknown): unknown {
   if (typeof value === 'number') return cutNumber(value)
   if (Array.isArray(value)) return value.map((item) => cutNumbers(item))
@@ -222,7 +222,7 @@ function renderStepVars(vars: Record<string, unknown>): string {
  * The record rendered as neutral facts for the model: title and conditions first,
  * then the record's own timeline - messages and evaluation steps interleaved by
  * their `seq`, so an explanation sits next to the steps it covers - and the
- * closing text last. Numbers are cut to four decimal places; dims stay 7-tuples.
+ * closing text last. Numbers are cut to four decimal places; `dim` fields stay 7-tuples.
  */
 export function renderRecordFacts(facts: GenerationFacts): string {
   const lines: string[] = ['Record information to base the article on:', '']
@@ -264,7 +264,7 @@ const MARKDOWN_SHARED_RULES = [
   'Use the recorded title as the article title, restated as a proper heading, and reconstruct the problem statement from the recorded explanations and notes. Never invent a detail the record does not carry.',
   'Every number must come from the provided derivation steps and the closing text — never invent or recompute values.',
   'Write every number with at most four decimal places: the facts are already cut that way, so copy them as they stand and never append digits the fact does not have.',
-  'Never include record ids, timestamps or the author\'s notes in the article.',
+  'Never include record identifiers, timestamps or the author\'s notes in the article.',
   "Never mention Reckoner, DeepSeek Harness, the harness, formulae, derivation steps, records or the generation process in the article — present the work as if you carried out the calculation yourself, from the problem statement to the final result. The only allowed occurrences of the name are the document's fixed title 'DeepSeek Harness Reckoner Solution' and the author line 'DeepSeek Harness Reckoner'.",
 ]
 

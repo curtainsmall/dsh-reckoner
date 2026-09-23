@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The project is renamed to dsh-reckoner.** The package name, plugin id, cordis row, environment variable prefix, plugin home, agent preset, skills, locale namespace, route prefix and client bundle ids all move from electro-lab to reckoner, so this plugin and its predecessor can be installed side by side without sharing a row, a data directory or a skill name.
+- **The project is renamed to dsh-reckoner.** The package name, plugin identifier, cordis row, environment variable prefix, plugin home, agent preset, skills, locale namespace, route prefix and client bundle identifiers all move from electro-lab to reckoner, so this plugin and its predecessor can be installed side by side without sharing a row, a data directory or a skill name.
 - **The version line restarts at 0.1.0.** This project derives from `dsh-electro-lab` v0.13.0 (MIT, © curtainsmall) and is not API-continuous with it. The entries below `[Unreleased]` are that project's history, kept under its own name.
 - The persona, both skills, the engine manual and the readmes are rewritten for the current surface: the six tools, the `$` notation, the dimension rules, the record markers and the "prefer several `eval` calls over one deep expression" discipline replace the solver catalog, the value-string grammar and the external-solver guide. The persona gained a seventh standing rule: a question with several sub-questions opens one `record_message` per part and keeps that part's `set` and `eval` calls beneath it.
 - The article prompt is built from the record's facts rather than from a flattened summary: the writer is told to use the recorded title, to reconstruct the problem statement from the record's own explanations, to copy numbers as they stand and to keep the author's notes out of the article.
@@ -93,13 +93,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The tool catalog is replaced by a deterministic calculation **engine** (`set` / `get` / `call` primitives over typed values — number/complex/string/boolean/array/object with kind, variant and prefix — plus slot references that resolve at call time and are copied on `set`). One engine per process, one variable table per question; failures are receipts with no side effects.
-- Engine terminology everywhere: callables are **solvers** (38 kernel solvers: expression algebra, series, transfer functions, DSP/DFT, signal quality, circuits, electronics, RF & Smith chart, transmission lines, noise, filter design), the docs are the ElectroLab engine manual, and the record markers bracket each solve.
+- Engine terminology everywhere: callables are **solvers** (38 kernel solvers: expression algebra, series, transfer functions, DSP/DFT, signal quality, circuits, electronics, RF & Smith chart, transmission lines, noise, filter design), the documentation is the ElectroLab engine manual, and the record markers bracket each solve.
 - The records UI follows the trace: **Records** list (indexed, 5 s refresh, incomplete badge, select mode with multi-delete) and a per-record **timeline detail** (collapsible writes/reads/failures/call cards, JSON tree values with zebra rows, display-all toggle, fixed toolbar/title with the timeline scrolling beneath, right-hand article rail).
 - Record storage moved to append-only traces: `record-index.jsonl` + `records/<id>.jsonl` under `~/.dsh-electro-lab` (or `DSH_ELECTRO_LAB_HOME`), replayed — never recomputed — after a host restart.
 
 ### Added
 
-- Self-healing receipts: missing or mistyped arguments are listed together with the expected spec and a ready-to-send typed example; `@name` slot strings are rejected with a migration hint; `solver_info` introspects any solver before its first call.
+- Self-healing receipts: missing or mistyped arguments are listed together with the expected specification and a ready-to-send typed example; `@name` slot strings are rejected with a migration hint; `solver_info` introspects any solver before its first call.
 - Article generation (Markdown and LaTeX) through the host LLM: the detail rail's two buttons open per-format setup dialogs (article language, host-driven directory browser, file name — remembered), and a cancellable background job reports phase progress in a dialog that can minimize to a corner pill surviving navigation. LaTeX output is a sanitized model body inside a XeLaTeX shell (ctexart / fontspec + unicode-math + siunitx, pure Unicode); **PDF compilation is LaTeX-only** (xelatex, two passes). Articles are written as the model's own calculation — never mentioning ElectroLab, solvers or the generation process.
 
 ### Removed
@@ -144,10 +144,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Markdown export of a record (save-file picker with a download fallback): a localized H1, the id and timestamps as separate paragraphs, the five steps as unnumbered H2 sections, and each tool call as an H3 block with `Parameters` / `Result` H4 headings — value objects render in compact mathematical notation (`100 Ω`, `100 + 25j Ω`, `1 ∠ 0 rad`) and the outermost JSON braces are dropped.
+- Markdown export of a record (save-file picker with a download fallback): a localized H1, the identifier and timestamps as separate paragraphs, the five steps as unnumbered H2 sections, and each tool call as an H3 block with `Parameters` / `Result` H4 headings — value objects render in compact mathematical notation (`100 Ω`, `100 + 25j Ω`, `1 ∠ 0 rad`) and the outermost JSON braces are dropped.
 - Compact mathematical display for value objects in the records page: rect/polar inputs and serialized outputs (`{re, im, kind, …}`) render as one math line with the unit from `kind` and no expansion; numbers use standard notation (6 significant digits, scientific for extreme magnitudes).
 - Tool calls and results merged into one collapsible panel per call in the detail page (name → parameters → result); strings that embed JSON unwrap into trees.
-- Record cards show the record id beneath the title (11 px monospace).
+- Record cards show the record identifier beneath the title (11 px monospace).
 - Multi-select mode: a select button toggles selection of settled records — selected cards get the accent border plus a tint heavier than hover; a delete button batch-deletes the selection through a confirm dialog.
 - Visible scrollbars in both themes (label-colored thumbs with the padding-box rounding trick) now that the page-level blur root cause is gone.
 - Persona hard rules: value parameters must be value objects, never stringified JSON or bare numbers; the model must read the electro-lab-template skill before any tool call; `record_analyse` must precede the first calculation tool and hold only the conditions and the approach — every computed value belongs in `record_answer`.
@@ -180,12 +180,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Record detail as a tab-covering page: a back header with the record title, id and timestamps, a left table of contents that jumps to each section heading, and ONE shared scroll area where the five part headings stick to the top while scrolling (plain text only, no nested scrollbars).
+- Record detail as a tab-covering page: a back header with the record title, identifier and timestamps, a left table of contents that jumps to each section heading, and ONE shared scroll area where the five part headings stick to the top while scrolling (plain text only, no nested scrollbars).
 - Collapsible tool-call panels in the detail page: one panel per call (expanded by default), arguments rendered as a recursive collapsible JSON tree.
 
 ### Changed
 
-- Detail texts use the session-chat font size; id/timestamps, the table of contents and the record-card title/timestamp use the navbar size. The back-to-record button matches the back-to-session button, with the title on its own line beneath; the panel back button now reads 返回会话.
+- Detail texts use the session-chat font size; identifier/timestamps, the table of contents and the record-card title/timestamp use the navbar size. The back-to-record button matches the back-to-session button, with the title on its own line beneath; the panel back button now reads 返回会话.
 
 ## [0.5.0] - 2026-08-29
 
@@ -215,7 +215,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Unit conversion is now the `convert` primitive: per-family math functions (temperature affine, real only; pressure/energy/power/length/mass/angle linear, complex-capable; log ratio ↔ dB) dispatched by one tool through an O(1) family lookup. Angle conversion is degree → radian only — angles are always radians.
-- Ratio kinds renamed `power`/`voltage` → `linear`/`quadratic` (10·log₁₀ vs 20·log₁₀), keeping the log conversion general outside any electronics context.
+- Ratio kinds renamed `power`/`voltage` → `linear`/`quadratic` (10·log₁₀ versus 20·log₁₀), keeping the log conversion general outside any electronics context.
 - npm publishing uses OIDC trusted publishing exclusively — the `NPM_TOKEN` fallback is removed.
 
 ### Removed

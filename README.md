@@ -64,7 +64,7 @@ Every closed record can be written up as a standalone article. A host-side LLM c
 | Markdown | a flat `.md` file, never compiled |
 | LaTeX | a `.tex` source in a folder named after the file, compiled to PDF when requested |
 
-The setup dialog remembers the article language, the output directory and, for LaTeX, whether to compile; the file name is prefilled from the record id. PDF compilation is delegated to latexmk or MiKTeX's texify and needs the `xelatex` engine; with compilation requested and no usable driver or engine, Generate is disabled and the dialog names what is missing.
+The setup dialog remembers the article language, the output directory and, for LaTeX, whether to compile; the file name is prefilled from the record identifier. PDF compilation is delegated to latexmk or MiKTeX's texify and needs the `xelatex` engine; with compilation requested and no usable driver or engine, Generate is disabled and the dialog names what is missing.
 
 ## Configuration
 

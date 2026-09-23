@@ -160,7 +160,7 @@ export function apply(ctx: Context): void {
         const id = path.startsWith(`${RECORDS_BODY_PREFIX}/`) ? path.slice(RECORDS_BODY_PREFIX.length + 1) : ''
         if (id.length === 0) {
           res.statusCode = 400
-          res.end(JSON.stringify({ error: 'a record id is required' }))
+          res.end(JSON.stringify({ error: 'a record identifier is required' }))
           return
         }
         if (method === 'DELETE') {

@@ -396,7 +396,7 @@ describe('the record files', () => {
     expect(lines.slice(1).map((line) => (JSON.parse(line) as TraceRow).seq)).toEqual(rows.map((row) => row.seq))
   })
 
-  it('reads the rows of the open record by its id', () => {
+  it('reads the rows of the open record by its identifier', () => {
     const id = openRecordWithConditions()
     const record = engine.readRecordRows(id)
     expect(record?.version).toBe(RECORD_VERSION)

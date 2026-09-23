@@ -163,7 +163,7 @@ function parseBareElement(input: unknown, spec: DimSpec, where: string): Value {
   }
   fail(
     EngineErrorCode.InvalidArgs,
-    `${where}: an array element is a bare number, {re,im}, {mag,ang} or a nested array - it carries no tag and no dim, because the whole array shares one SI vector. Got ${describe(input)}.`,
+    `${where}: an array element is a bare number, {re,im}, {mag,ang} or a nested array - it carries no tag and no "dim", because the whole array shares one SI vector. Got ${describe(input)}.`,
   )
 }
 
@@ -172,7 +172,7 @@ export function parseSetValue(input: unknown, where = 'value'): Value {
   const bag = requireBag(input, where)
   for (const key of Object.keys(bag)) {
     if (!VALUE_KEYS.includes(key)) {
-      fail(EngineErrorCode.InvalidArgs, `${where}: unknown key "${key}"; the tags are num, re+im, mag+ang, array, object and dim.`)
+      fail(EngineErrorCode.InvalidArgs, `${where}: unknown key "${key}"; the tags are num, re+im, mag+ang, array and object, and "dim" may travel with them.`)
     }
   }
   const numTag = hasKey(bag, ValueTag.Num)
@@ -289,7 +289,7 @@ export interface RenderOptions {
   readonly spellDim: (dim: SiVector) => SiVector | string
 }
 
-/** One scalar's payload, already scaled, formed and rounded - without its dim. */
+/** One scalar's payload, already scaled, formed and rounded - without its `dim` key. */
 function scalarPayload(scalar: Scalar, options: RenderOptions, isComplex: boolean): Record<string, unknown> {
   const scaled = scaledScalar(scalar, options)
   if (options.form === 'rect') {
@@ -312,7 +312,7 @@ function scaledScalar(scalar: Scalar, options: RenderOptions): Scalar {
   return options.scale === undefined ? scalar : backwardScalar(scalar, options.scale)
 }
 
-/** An array element: a bare scalar or a nested array, never carrying a dim of its own. */
+/** An array element: a bare scalar or a nested array, never carrying a `dim` of its own. */
 function renderBareValue(value: Value, options: RenderOptions): unknown {
   if (value.kind === 'array') return value.items.map((item) => renderBareValue(item, options))
   if (value.kind === 'object') return renderValue(value, options)
