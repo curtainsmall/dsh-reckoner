@@ -203,7 +203,7 @@ export class Engine {
       const entry = this.slots.get(slotName)
       if (entry === undefined) {
         fail(
-          'ENGINE_SLOT_UNDECLARED',
+          'ENGINE_SLOT_NOT_FOUND',
           `the slot "${slotName}" does not exist yet; declare it with set {name:"${slotName}", value:{num:..., dim:...}} before reading it.`,
         )
       }
@@ -227,11 +227,11 @@ export class Engine {
     return this.run('eval', () => {
       this.requireOpenRecord()
       if (typeof formula !== 'string') {
-        fail('ENGINE_ARGS_INVALID', `eval takes the formula as a string; got ${describe(formula)}.`)
+        fail('ENGINE_INVALID_ARGS', `eval takes the formula as a string; got ${describe(formula)}.`)
       }
       if (target === undefined || target === null) {
         fail(
-          'ENGINE_ARGS_INVALID',
+          'ENGINE_INVALID_ARGS',
           'eval needs target: the slot name the result is written into. Read the value back with get - eval does not return it.',
         )
       }
@@ -264,7 +264,7 @@ export class Engine {
       const recordTitle = readText(title, 'record_start', 'title')
       if (this.open !== null) {
         fail(
-          'ENGINE_RECORD_DUPLICATE',
+          'ENGINE_OPEN_RECORD_FOUND',
           `the record "${this.open.id}" is not closed yet; call record_end for it first - a record carries exactly one title.`,
         )
       }
@@ -283,7 +283,7 @@ export class Engine {
       this.requireOpenRecord()
       const message = readText(text, 'record_message', 'text')
       if (hide !== undefined && hide !== null && typeof hide !== 'boolean') {
-        fail('ENGINE_ARGS_INVALID', `record_message takes hide as a boolean; got ${describe(hide)}.`)
+        fail('ENGINE_INVALID_ARGS', `record_message takes hide as a boolean; got ${describe(hide)}.`)
       }
       this.appendRow('record_message', true, hide === true ? { text: message, hide: true } : { text: message })
       return { ok: true }
@@ -294,12 +294,12 @@ export class Engine {
     return this.run('record_end', () => {
       if (this.open === null) {
         fail(
-          'ENGINE_NO_OPEN_RECORD',
+          'ENGINE_OPEN_RECORD_NOT_FOUND',
           'no record is open, so there is nothing to close; call record_start first.',
         )
       }
       if (text !== undefined && text !== null && typeof text !== 'string') {
-        fail('ENGINE_ARGS_INVALID', `record_end takes the closing text as a string; got ${describe(text)}.`)
+        fail('ENGINE_INVALID_ARGS', `record_end takes the closing text as a string; got ${describe(text)}.`)
       }
       const current = this.open
       const closing = typeof text === 'string' && text.trim().length > 0 ? text : undefined
@@ -334,7 +334,7 @@ export class Engine {
   private requireOpenRecord(): void {
     if (this.open !== null) return
     fail(
-      'ENGINE_NO_OPEN_RECORD',
+      'ENGINE_OPEN_RECORD_NOT_FOUND',
       'no record is open: call record_start first. It opens a record, and set / get / eval are refused until a record is open.',
     )
   }
@@ -343,7 +343,7 @@ export class Engine {
     try {
       return body()
     } catch (error) {
-      const code = isEngineError(error) ? error.code : 'ENGINE_TOOL'
+      const code = isEngineError(error) ? error.code : 'ENGINE_UNKNOWN_ERROR'
       const message = isEngineError(error)
         ? error.message
         : `internal error: ${error instanceof Error ? error.message : String(error)}`
@@ -370,7 +370,7 @@ export class Engine {
 /** A non-empty text argument; `record_start`'s title and `record_message`'s text share the rule. */
 function readText(input: unknown, tool: string, field: string): string {
   if (typeof input !== 'string' || input.trim().length === 0) {
-    fail('ENGINE_ARGS_INVALID', `${tool} takes a non-empty ${field} string; got ${describe(input)}.`)
+    fail('ENGINE_INVALID_ARGS', `${tool} takes a non-empty ${field} string; got ${describe(input)}.`)
   }
   return input
 }
@@ -378,13 +378,13 @@ function readText(input: unknown, tool: string, field: string): string {
 function readForm(input: unknown): 'rect' | 'polar' | undefined {
   if (input === undefined || input === null) return undefined
   if (input === 'rect' || input === 'polar') return input
-  fail('ENGINE_ARGS_INVALID', `form must be "rect" or "polar"; got ${describe(input)}.`)
+  fail('ENGINE_INVALID_ARGS', `form must be "rect" or "polar"; got ${describe(input)}.`)
 }
 
 function readDigits(input: unknown): number | undefined {
   if (input === undefined || input === null) return undefined
   if (typeof input !== 'number' || !Number.isInteger(input) || input < 1) {
-    fail('ENGINE_ARGS_INVALID', `digits must be a positive integer (the number of significant digits to keep); got ${describe(input)}.`)
+    fail('ENGINE_INVALID_ARGS', `digits must be a positive integer (the number of significant digits to keep); got ${describe(input)}.`)
   }
   return input
 }

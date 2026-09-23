@@ -36,11 +36,11 @@ A slot holds one of four value types: `number` (a JSON number), `complex` (store
 
 Every call answers `{ok: true, ...}` or `{ok: false, code, error}`. A failure writes nothing: no slot changes, and the trace records the failure row. `error` is written for you - it carries the concrete value, the boundary or the expectation, and the fix. `code` is a stable identifier, useful in logs and tests.
 
-The codes: `ENGINE_PARSE_SYNTAX`, `ENGINE_PARSE_NUMBER`, `ENGINE_PARSE_IDENT`, `ENGINE_PARSE_UNIT`, `ENGINE_PARSE_SYMBOL`, `ENGINE_PARSE_ARITY`, `ENGINE_SLOT_UNDECLARED`, `ENGINE_IDENT_UNBOUND`, `ENGINE_DIM_MISMATCH`, `ENGINE_TYPE_NOT_ARITHMETIC`, `ENGINE_RANGE_INDEX`, `ENGINE_RANGE_DOMAIN`, `ENGINE_NOT_INDEXABLE`, `ENGINE_NO_FIELD`, `ENGINE_SYMBOL_NOT_EVALUABLE`, `ENGINE_ARGS_INVALID`, `ENGINE_NO_OPEN_RECORD`, `ENGINE_RECORD_DUPLICATE`, `ENGINE_TOOL`.
+The codes: `ENGINE_INVALID_FORMULA`, `ENGINE_INVALID_NUMBER`, `ENGINE_INVALID_IDENTIFIER`, `ENGINE_INVALID_DIMENSION`, `ENGINE_INVALID_NOTATION`, `ENGINE_INVALID_ARITY`, `ENGINE_SLOT_NOT_FOUND`, `ENGINE_NAME_NOT_BOUND`, `ENGINE_INCOMPATIBLE_DIMENSION`, `ENGINE_UNSUPPORTED_OPERATION`, `ENGINE_INVALID_INDEX`, `ENGINE_UNDEFINED_RESULT`, `ENGINE_UNSUPPORTED_INDEX`, `ENGINE_FIELD_NOT_FOUND`, `ENGINE_UNSUPPORTED_SYMBOL`, `ENGINE_INVALID_ARGS`, `ENGINE_OPEN_RECORD_NOT_FOUND`, `ENGINE_OPEN_RECORD_FOUND`, `ENGINE_UNKNOWN_ERROR`.
 
 ## Record markers
 
-`record_start {title}` opens a record; it fails while a record is open (`ENGINE_RECORD_DUPLICATE`). `record_message {text, hide?}` writes one explanation - as many as the work needs, in any order relative to `eval`; `hide: true` keeps it out of the record view but still gives it to the article writer. `record_end {text?}` closes the record and writes it to disk; it fails when no record is open (`ENGINE_NO_OPEN_RECORD`). `set`, `get` and `eval` are refused while no record is open. Closing clears the slot table, so a new record starts empty. Each marker answers `{ok}`.
+`record_start {title}` opens a record; it fails while a record is open (`ENGINE_OPEN_RECORD_FOUND`). `record_message {text, hide?}` writes one explanation - as many as the work needs, in any order relative to `eval`; `hide: true` keeps it out of the record view but still gives it to the article writer. `record_end {text?}` closes the record and writes it to disk; it fails when no record is open (`ENGINE_OPEN_RECORD_NOT_FOUND`). `set`, `get` and `eval` are refused while no record is open. Closing clears the slot table, so a new record starts empty. Each marker answers `{ok}`.
 
 ## Notation
 

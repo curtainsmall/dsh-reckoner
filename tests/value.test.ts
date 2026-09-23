@@ -87,22 +87,22 @@ describe('the set value structure', () => {
   })
 
   it('refuses a tag combination that is not exactly one complete tag', () => {
-    expect(failureCode(() => parseSetValue({ num: 1, re: 2, im: 3 }))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue({ num: 1, array: [1] }))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue({ re: 2 }))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue({ mag: 2 }))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue({}))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue([1, 2]))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue(null))).toBe('ENGINE_ARGS_INVALID')
+    expect(failureCode(() => parseSetValue({ num: 1, re: 2, im: 3 }))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({ num: 1, array: [1] }))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({ re: 2 }))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({ mag: 2 }))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({}))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue([1, 2]))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue(null))).toBe('ENGINE_INVALID_ARGS')
   })
 
   it('refuses a dim on an object, an unknown key, a tagged array element and a non-number', () => {
-    expect(failureCode(() => parseSetValue({ object: { a: { num: 1 } }, dim: 'ohm' }))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue({ num: 1, kind: 'ohm' }))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue({ array: [{ num: 1 }] }))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue({ num: '1' }))).toBe('ENGINE_ARGS_INVALID')
-    expect(failureCode(() => parseSetValue({ num: 1, dim: 'bogus' }))).toBe('ENGINE_PARSE_UNIT')
-    expect(failureCode(() => parseSetValue({ object: { '1x': { num: 1 } } }))).toBe('ENGINE_PARSE_IDENT')
+    expect(failureCode(() => parseSetValue({ object: { a: { num: 1 } }, dim: 'ohm' }))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({ num: 1, kind: 'ohm' }))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({ array: [{ num: 1 }] }))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({ num: '1' }))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({ num: 1, dim: 'bogus' }))).toBe('ENGINE_INVALID_DIMENSION')
+    expect(failureCode(() => parseSetValue({ object: { '1x': { num: 1 } } }))).toBe('ENGINE_INVALID_IDENTIFIER')
   })
 })
 
@@ -180,7 +180,7 @@ describe('claims about a stored value', () => {
 
   it('accepts the vector it holds and refuses another one', () => {
     expect(() => assertValueDim(value, parseDim('ohm', 'dim'), 'the slot "R1"')).not.toThrow()
-    expect(failureCode(() => assertValueDim(value, parseDim('volt', 'dim'), 'the slot "R1"'))).toBe('ENGINE_DIM_MISMATCH')
+    expect(failureCode(() => assertValueDim(value, parseDim('volt', 'dim'), 'the slot "R1"'))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
     expect(failureMessage(() => assertValueDim(value, parseDim('volt', 'dim'), 'the slot "R1"'))).toContain('ohm')
   })
 
@@ -192,7 +192,7 @@ describe('claims about a stored value', () => {
 
   it('refuses a fractional SI vector on the way into a slot', () => {
     const fractional: Value = { kind: 'number', num: 2, dim: [0.5, 0, 0, 0, 0, 0, 0] }
-    expect(failureCode(() => assertIntegralValue(fractional, 'the slot "x"'))).toBe('ENGINE_DIM_MISMATCH')
+    expect(failureCode(() => assertIntegralValue(fractional, 'the slot "x"'))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
     expect(() => assertIntegralValue(value, 'the slot "R1"')).not.toThrow()
   })
 })

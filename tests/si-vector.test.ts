@@ -84,11 +84,11 @@ describe('dim parsing', () => {
     expect(parseDim('dim-less', 'dim').name).toBe('dim-less')
   })
 
-  it('refuses anything else with ENGINE_PARSE_UNIT and lists the names', () => {
-    expect(failureCode(() => parseDim('bogus', 'dim'))).toBe('ENGINE_PARSE_UNIT')
-    expect(failureCode(() => parseDim([1, 0, -1], 'dim'))).toBe('ENGINE_PARSE_UNIT')
-    expect(failureCode(() => parseDim([1.5, 0, 0, 0, 0, 0, 0], 'dim'))).toBe('ENGINE_PARSE_UNIT')
-    expect(failureCode(() => parseDim(5, 'dim'))).toBe('ENGINE_PARSE_UNIT')
+  it('refuses anything else with ENGINE_INVALID_DIMENSION and lists the names', () => {
+    expect(failureCode(() => parseDim('bogus', 'dim'))).toBe('ENGINE_INVALID_DIMENSION')
+    expect(failureCode(() => parseDim([1, 0, -1], 'dim'))).toBe('ENGINE_INVALID_DIMENSION')
+    expect(failureCode(() => parseDim([1.5, 0, 0, 0, 0, 0, 0], 'dim'))).toBe('ENGINE_INVALID_DIMENSION')
+    expect(failureCode(() => parseDim(5, 'dim'))).toBe('ENGINE_INVALID_DIMENSION')
     try {
       parseDim('bogus', 'dim')
     } catch (error) {

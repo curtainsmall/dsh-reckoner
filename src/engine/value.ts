@@ -78,15 +78,15 @@ export function collectArray(items: readonly Value[], where: string): ArrayValue
   if (first === undefined) return { kind: 'array', items, dim: ZERO_SI_VECTOR }
   const dim = first.kind === 'object' ? undefined : first.dim
   if (dim === undefined) {
-    fail('ENGINE_TYPE_NOT_ARITHMETIC', `${where}: an object cannot be an element of an array; an array's elements are numbers or nested arrays sharing one SI vector.`)
+    fail('ENGINE_UNSUPPORTED_OPERATION', `${where}: an object cannot be an element of an array; an array's elements are numbers or nested arrays sharing one SI vector.`)
   }
   for (const item of items) {
     if (item.kind === 'object') {
-      fail('ENGINE_TYPE_NOT_ARITHMETIC', `${where}: an object cannot be an element of an array; an array's elements are numbers or nested arrays sharing one SI vector.`)
+      fail('ENGINE_UNSUPPORTED_OPERATION', `${where}: an object cannot be an element of an array; an array's elements are numbers or nested arrays sharing one SI vector.`)
     }
     if (!siVectorsEqual(item.dim, dim)) {
       fail(
-        'ENGINE_DIM_MISMATCH',
+        'ENGINE_INCOMPATIBLE_DIMENSION',
         `${where}: every element of an array must share one SI vector, but one element is ${formatSiVector(item.dim)} (${kindOfSiVector(item.dim)}) while another is ${formatSiVector(dim)} (${kindOfSiVector(dim)}).`,
       )
     }
@@ -96,7 +96,7 @@ export function collectArray(items: readonly Value[], where: string): ArrayValue
 
 function requireJsonNumber(input: unknown, where: string): number {
   if (typeof input !== 'number' || !Number.isFinite(input)) {
-    fail('ENGINE_ARGS_INVALID', `${where}: expected a JSON number; got ${describe(input)}.`)
+    fail('ENGINE_INVALID_ARGS', `${where}: expected a JSON number; got ${describe(input)}.`)
   }
   return input
 }
@@ -110,7 +110,7 @@ function hasKey(bag: Record<string, unknown>, key: string): boolean {
 function requireBag(input: unknown, where: string): Record<string, unknown> {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     fail(
-      'ENGINE_ARGS_INVALID',
+      'ENGINE_INVALID_ARGS',
       `${where}: expected an object carrying exactly one tag of num, re+im, mag+ang, array or object; got ${describe(input)}.`,
     )
   }
@@ -143,7 +143,7 @@ function parseBareElement(input: unknown, dim: SiVector, where: string): Value {
     }
   }
   fail(
-    'ENGINE_ARGS_INVALID',
+    'ENGINE_INVALID_ARGS',
     `${where}: an array element is a bare number, {re,im}, {mag,ang} or a nested array - it carries no tag and no dim, because the whole array shares one SI vector. Got ${describe(input)}.`,
   )
 }
@@ -153,7 +153,7 @@ export function parseSetValue(input: unknown, where = 'value'): Value {
   const bag = requireBag(input, where)
   for (const key of Object.keys(bag)) {
     if (!VALUE_KEYS.includes(key)) {
-      fail('ENGINE_ARGS_INVALID', `${where}: unknown key "${key}"; the tags are num, re+im, mag+ang, array, object and dim.`)
+      fail('ENGINE_INVALID_ARGS', `${where}: unknown key "${key}"; the tags are num, re+im, mag+ang, array, object and dim.`)
     }
   }
   const numTag = hasKey(bag, 'num')
@@ -164,12 +164,12 @@ export function parseSetValue(input: unknown, where = 'value'): Value {
   const tags = [numTag, rectTag, polarTag, arrayTag, objectTag].filter(Boolean).length
   if (tags !== 1) {
     fail(
-      'ENGINE_ARGS_INVALID',
+      'ENGINE_INVALID_ARGS',
       `${where}: exactly one tag must be given - num, re+im, mag+ang, array or object; got ${describe(input)}.`,
     )
   }
   if (objectTag && hasKey(bag, 'dim')) {
-    fail('ENGINE_ARGS_INVALID', `${where}: an object carries one dim per field, so it takes no "dim" of its own; move "dim" into each field.`)
+    fail('ENGINE_INVALID_ARGS', `${where}: an object carries one dim per field, so it takes no "dim" of its own; move "dim" into each field.`)
   }
   const spec = parseDim(bag['dim'], `${where}.dim`)
 
@@ -178,7 +178,7 @@ export function parseSetValue(input: unknown, where = 'value'): Value {
   }
   if (rectTag) {
     if (!hasKey(bag, 're') || !hasKey(bag, 'im')) {
-      fail('ENGINE_ARGS_INVALID', `${where}: the rectangular form needs both "re" and "im"; got ${describe(input)}.`)
+      fail('ENGINE_INVALID_ARGS', `${where}: the rectangular form needs both "re" and "im"; got ${describe(input)}.`)
     }
     const re = requireJsonNumber(bag['re'], `${where}.re`)
     const im = requireJsonNumber(bag['im'], `${where}.im`)
@@ -187,7 +187,7 @@ export function parseSetValue(input: unknown, where = 'value'): Value {
   }
   if (polarTag) {
     if (!hasKey(bag, 'mag') || !hasKey(bag, 'ang')) {
-      fail('ENGINE_ARGS_INVALID', `${where}: the polar form needs both "mag" and "ang" (radians); got ${describe(input)}.`)
+      fail('ENGINE_INVALID_ARGS', `${where}: the polar form needs both "mag" and "ang" (radians); got ${describe(input)}.`)
     }
     const mag = requireJsonNumber(bag['mag'], `${where}.mag`)
     const ang = requireJsonNumber(bag['ang'], `${where}.ang`)
@@ -197,13 +197,13 @@ export function parseSetValue(input: unknown, where = 'value'): Value {
   if (arrayTag) {
     const list = bag['array']
     if (!Array.isArray(list)) {
-      fail('ENGINE_ARGS_INVALID', `${where}.array: expected an array; got ${describe(list)}.`)
+      fail('ENGINE_INVALID_ARGS', `${where}.array: expected an array; got ${describe(list)}.`)
     }
     return { kind: 'array', items: list.map((item, index) => parseBareElement(item, spec.vector, `${where}.array[${index}]`)), dim: spec.vector }
   }
   const fields = bag['object']
   if (typeof fields !== 'object' || fields === null || Array.isArray(fields)) {
-    fail('ENGINE_ARGS_INVALID', `${where}.object: expected an object of named fields; got ${describe(fields)}.`)
+    fail('ENGINE_INVALID_ARGS', `${where}.object: expected an object of named fields; got ${describe(fields)}.`)
   }
   const parsed: Record<string, Value> = {}
   for (const [key, field] of Object.entries(fields as Record<string, unknown>)) {
@@ -222,7 +222,7 @@ export function assertValueDim(value: Value, target: DimSpec, label: string): vo
   if (siVectorsEqual(value.dim, target.vector)) return
   const wanted = target.name ?? formatSiVector(target.vector)
   fail(
-    'ENGINE_DIM_MISMATCH',
+    'ENGINE_INCOMPATIBLE_DIMENSION',
     `${label} holds ${spellSiVector(value.dim)} ${formatSiVector(value.dim)} but dim "${wanted}" is ${formatSiVector(target.vector)} (${kindOfSiVector(target.vector)}). Read it without dim, or convert in a formula instead.`,
   )
 }
@@ -235,7 +235,7 @@ export function assertIntegralValue(value: Value, label: string): void {
   }
   if (isIntegralSiVector(value.dim)) return
   fail(
-    'ENGINE_DIM_MISMATCH',
+    'ENGINE_INCOMPATIBLE_DIMENSION',
     `${label} would hold the SI vector ${formatSiVector(value.dim)}, whose exponents are not all integers (a fractional vector comes from a root or a fractional power). Scale the formula so the result is a whole vector.`,
   )
 }

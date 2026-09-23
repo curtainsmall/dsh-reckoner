@@ -43,10 +43,10 @@ function openRecordWithConditions(): string {
 
 describe('the record gate', () => {
   it('refuses set, get and eval while no record is open', () => {
-    expect(engine.opSet('R1', { num: 1, dim: 'ohm' })).toMatchObject({ ok: false, code: 'ENGINE_NO_OPEN_RECORD' })
-    expect(engine.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_NO_OPEN_RECORD' })
-    expect(engine.opEval('1+1', 'x')).toMatchObject({ ok: false, code: 'ENGINE_NO_OPEN_RECORD' })
-    expect(engine.markerMessage('a message', undefined)).toMatchObject({ ok: false, code: 'ENGINE_NO_OPEN_RECORD' })
+    expect(engine.opSet('R1', { num: 1, dim: 'ohm' })).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
+    expect(engine.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
+    expect(engine.opEval('1+1', 'x')).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
+    expect(engine.markerMessage('a message', undefined)).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
     expect(existsSync(join(home, 'open-record.jsonl'))).toBe(false)
     expect(existsSync(join(home, 'record-index.jsonl'))).toBe(false)
     expect(existsSync(join(home, 'records'))).toBe(false)
@@ -85,16 +85,16 @@ describe('the record markers', () => {
     engine.opSet('R1', { num: 1, dim: 'ohm' })
     engine.markerEnd('done')
     // The table lives exactly as long as the record: with it closed there is nothing to read.
-    expect(engine.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_NO_OPEN_RECORD' })
+    expect(engine.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
     engine.markerStart('second')
-    expect(engine.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+    expect(engine.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_NOT_FOUND' })
     expect(engine.opSet('R1', { num: 2, dim: 'ohm' })['rev']).toBe(1)
   })
 
   it('refuses record_start with an empty or non-string title', () => {
-    expect(engine.markerStart('')).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.markerStart('   ')).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.markerStart(42)).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(engine.markerStart('')).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.markerStart('   ')).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.markerStart(42)).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
     expect(engine.openRecordId()).toBeNull()
     expect(existsSync(join(home, 'open-record.jsonl'))).toBe(false)
   })
@@ -102,7 +102,7 @@ describe('the record markers', () => {
   it('refuses a second record_start while a record is open, and records the failure in it', () => {
     const id = openRecordWithConditions()
     const receipt = engine.markerStart('another')
-    expect(receipt).toMatchObject({ ok: false, code: 'ENGINE_RECORD_DUPLICATE' })
+    expect(receipt).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_FOUND' })
     expect(String(receipt['error'])).toContain('record_end')
     expect(engine.openRecordId()).toBe(id)
 
@@ -111,7 +111,7 @@ describe('the record markers', () => {
     expect(last?.tool).toBe('record_start')
     expect(last?.ok).toBe(false)
     expect(Object.keys(last?.content ?? {}).sort()).toEqual(['code', 'error'])
-    expect(last?.content['code']).toBe('ENGINE_RECORD_DUPLICATE')
+    expect(last?.content['code']).toBe('ENGINE_OPEN_RECORD_FOUND')
 
     // The refused call opened nothing: closing writes exactly one record.
     engine.markerEnd('done')
@@ -120,21 +120,21 @@ describe('the record markers', () => {
 
   it('refuses record_message with an empty text or a non-boolean hide', () => {
     const id = openRecordWithConditions()
-    expect(engine.markerMessage('', undefined)).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.markerMessage(12, undefined)).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.markerMessage('a note', 'yes')).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(engine.markerMessage('', undefined)).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.markerMessage(12, undefined)).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.markerMessage('a note', 'yes')).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
 
     const rows = rowsOf(engine, id)
     expect(rows.filter((row) => row.tool === 'record_message' && row.ok)).toEqual([])
     expect(rows.filter((row) => !row.ok).map((row) => row.content['code'])).toEqual([
-      'ENGINE_ARGS_INVALID',
-      'ENGINE_ARGS_INVALID',
-      'ENGINE_ARGS_INVALID',
+      'ENGINE_INVALID_ARGS',
+      'ENGINE_INVALID_ARGS',
+      'ENGINE_INVALID_ARGS',
     ])
   })
 
   it('refuses record_end with no record open and writes nothing', () => {
-    expect(engine.markerEnd('nothing')).toMatchObject({ ok: false, code: 'ENGINE_NO_OPEN_RECORD' })
+    expect(engine.markerEnd('nothing')).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
     expect(engine.listRecords()).toMatchObject({ rows: [], open: null, unknown: 0 })
     expect(existsSync(join(home, 'open-record.jsonl'))).toBe(false)
     expect(existsSync(join(home, 'records'))).toBe(false)
@@ -142,7 +142,7 @@ describe('the record markers', () => {
 
   it('refuses a non-string closing text and keeps the record open', () => {
     const id = openRecordWithConditions()
-    expect(engine.markerEnd(42)).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(engine.markerEnd(42)).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
     expect(engine.openRecordId()).toBe(id)
     const last = rowsOf(engine, id).at(-1)
     expect(last?.tool).toBe('record_end')
@@ -192,10 +192,10 @@ describe('set', () => {
   })
 
   it('refuses a name that is not an identifier and a value outside the tagged shape', () => {
-    expect(engine.opSet('1x', { num: 1 })).toMatchObject({ ok: false, code: 'ENGINE_PARSE_IDENT' })
-    expect(engine.opSet('R1', { num: 1, dim: 'bogus' })).toMatchObject({ ok: false, code: 'ENGINE_PARSE_UNIT' })
-    expect(engine.opSet('R1', { num: 1, array: [1] })).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+    expect(engine.opSet('1x', { num: 1 })).toMatchObject({ ok: false, code: 'ENGINE_INVALID_IDENTIFIER' })
+    expect(engine.opSet('R1', { num: 1, dim: 'bogus' })).toMatchObject({ ok: false, code: 'ENGINE_INVALID_DIMENSION' })
+    expect(engine.opSet('R1', { num: 1, array: [1] })).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_NOT_FOUND' })
   })
 })
 
@@ -230,7 +230,7 @@ describe('get', () => {
   })
 
   it('refuses a dim the slot does not hold', () => {
-    expect(engine.opGet('R1', { dim: 'volt' })).toMatchObject({ ok: false, code: 'ENGINE_DIM_MISMATCH' })
+    expect(engine.opGet('R1', { dim: 'volt' })).toMatchObject({ ok: false, code: 'ENGINE_INCOMPATIBLE_DIMENSION' })
   })
 
   it('applies digits and form to the leaves', () => {
@@ -257,11 +257,11 @@ describe('get', () => {
   })
 
   it('refuses an unknown slot and a malformed request', () => {
-    expect(engine.opGet('missing')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
-    expect(engine.opGet('R1', { form: 'json' })).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.opGet('R1', { digits: 0 })).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.opGet('R1', { digits: 2.5 })).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.opGet('R1', { dim: 'bogus' })).toMatchObject({ ok: false, code: 'ENGINE_PARSE_UNIT' })
+    expect(engine.opGet('missing')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_NOT_FOUND' })
+    expect(engine.opGet('R1', { form: 'json' })).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.opGet('R1', { digits: 0 })).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.opGet('R1', { digits: 2.5 })).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.opGet('R1', { dim: 'bogus' })).toMatchObject({ ok: false, code: 'ENGINE_INVALID_DIMENSION' })
   })
 
   it('returns a value that set accepts again', () => {
@@ -285,15 +285,15 @@ describe('eval', () => {
   })
 
   it('requires the target slot name', () => {
-    expect(engine.opEval('1+1', null)).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
-    expect(engine.opEval('1+1', '1x')).toMatchObject({ ok: false, code: 'ENGINE_PARSE_IDENT' })
-    expect(engine.opEval(12 as unknown as string, 'x')).toMatchObject({ ok: false, code: 'ENGINE_ARGS_INVALID' })
+    expect(engine.opEval('1+1', null)).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
+    expect(engine.opEval('1+1', '1x')).toMatchObject({ ok: false, code: 'ENGINE_INVALID_IDENTIFIER' })
+    expect(engine.opEval(12 as unknown as string, 'x')).toMatchObject({ ok: false, code: 'ENGINE_INVALID_ARGS' })
   })
 
   it('refuses a fractional vector landing in a slot and leaves the slot unset', () => {
     engine.opSet('L', { num: 8, dim: 'metre' })
-    expect(engine.opEval('@L^(1/3)', 'side')).toMatchObject({ ok: false, code: 'ENGINE_DIM_MISMATCH' })
-    expect(engine.opGet('side')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_UNDECLARED' })
+    expect(engine.opEval('@L^(1/3)', 'side')).toMatchObject({ ok: false, code: 'ENGINE_INCOMPATIBLE_DIMENSION' })
+    expect(engine.opGet('side')).toMatchObject({ ok: false, code: 'ENGINE_SLOT_NOT_FOUND' })
   })
 
   it('counts the revisions of a rewritten target', () => {
@@ -341,7 +341,7 @@ describe('the trace', () => {
     const rows = rowsOf(engine, id)
     const failure = rows[rows.length - 1]
     expect(failure?.ok).toBe(false)
-    expect(failure?.content['code']).toBe('ENGINE_DIM_MISMATCH')
+    expect(failure?.content['code']).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
     expect(Object.keys(failure?.content ?? {}).sort()).toEqual(['code', 'error'])
   })
 
@@ -519,7 +519,7 @@ describe('recovery', () => {
     const revived = new Engine(home, { now: () => clock })
     revived.start()
     expect(revived.openRecordId()).toBeNull()
-    expect(revived.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_NO_OPEN_RECORD' })
+    expect(revived.opGet('R1')).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
     expect(revived.listRecords().rows).toHaveLength(1)
   })
 
@@ -535,7 +535,7 @@ describe('recovery', () => {
     revived.start()
     expect(revived.openRecordId()).toBeNull()
     expect(existsSync(openFile)).toBe(false)
-    expect(revived.opSet('R1', { num: 1 })).toMatchObject({ ok: false, code: 'ENGINE_NO_OPEN_RECORD' })
+    expect(revived.opSet('R1', { num: 1 })).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
     expect(revived.listRecords()).toMatchObject({ rows: [], open: null, unknown: 0 })
   })
 

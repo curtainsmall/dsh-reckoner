@@ -90,7 +90,7 @@ class Parser {
     const token = this.peek()
     if (token.kind !== 'eof') {
       fail(
-        'ENGINE_PARSE_SYNTAX',
+        'ENGINE_INVALID_FORMULA',
         `${formulaPosition(this.formula, token.at)}: ${tokenLabel(token)} follows a complete expression, but a formula is ONE expression. Join the parts with an operator, or evaluate one step per call.`,
       )
     }
@@ -118,7 +118,7 @@ class Parser {
       this.next()
       return
     }
-    fail('ENGINE_PARSE_SYNTAX', `${formulaPosition(this.formula, token.at)}: expected "${text}"; found ${tokenLabel(token)}. ${hint}`)
+    fail('ENGINE_INVALID_FORMULA', `${formulaPosition(this.formula, token.at)}: expected "${text}"; found ${tokenLabel(token)}. ${hint}`)
   }
 
   private parseAdditive(): Expression {
@@ -161,7 +161,7 @@ class Parser {
     const after = this.peek()
     if (after.kind === 'punct' && after.text === '{') {
       fail(
-        'ENGINE_PARSE_SYNTAX',
+        'ENGINE_INVALID_FORMULA',
         `${formulaPosition(this.formula, after.at)}: "{" cannot follow "^". A position is written directly after its notation name, as in $sum_{k=a}^{b}(body); for a power write $e^(2) or $pi^2.`,
       )
     }
@@ -185,7 +185,7 @@ class Parser {
         const name = this.peek()
         if (name.kind !== 'name') {
           fail(
-            'ENGINE_PARSE_SYNTAX',
+            'ENGINE_INVALID_FORMULA',
             `${formulaPosition(this.formula, name.at)}: "." takes an object field name after it, as in @th.field; found ${tokenLabel(name)}.`,
           )
         }
@@ -202,7 +202,7 @@ class Parser {
     if (token.kind === 'number') {
       this.next()
       const scalar = token.scalar
-      if (scalar === undefined) fail('ENGINE_TOOL', `internal: the number token "${token.text}" carries no value.`)
+      if (scalar === undefined) fail('ENGINE_UNKNOWN_ERROR', `internal: the number token "${token.text}" carries no value.`)
       return { kind: 'scalar', scalar, at: token.at }
     }
     if (token.kind === 'slot') {
@@ -221,7 +221,7 @@ class Parser {
       return inner
     }
     fail(
-      'ENGINE_PARSE_SYNTAX',
+      'ENGINE_INVALID_FORMULA',
       `${formulaPosition(this.formula, token.at)}: expected a number, a slot (@name), a notation ($name), a bound variable name or "("; found ${tokenLabel(token)}.`,
     )
   }
@@ -231,7 +231,7 @@ class Parser {
     const entry = notationLookup(token.text)
     if (entry === undefined) {
       fail(
-        'ENGINE_PARSE_SYMBOL',
+        'ENGINE_INVALID_NOTATION',
         `${formulaPosition(this.formula, token.at)}: "${token.text}" is not in the notation table. The notation is: ${notationVocabulary()}.`,
       )
     }
@@ -239,7 +239,7 @@ class Parser {
       const after = this.peek()
       if (after.kind === 'punct' && (after.text === '(' || after.text === '_')) {
         fail(
-          'ENGINE_PARSE_SYMBOL',
+          'ENGINE_INVALID_NOTATION',
           `${formulaPosition(this.formula, after.at)}: "${token.text}" is a constant and takes no arguments or position. Write it bare, and use "^" for a power such as ${token.text}^2.`,
         )
       }
@@ -248,13 +248,13 @@ class Parser {
     if (entry.notationClass === 'function') {
       if (this.isPunct('_')) {
         fail(
-          'ENGINE_PARSE_SYMBOL',
+          'ENGINE_INVALID_NOTATION',
           `${formulaPosition(this.formula, this.peek().at)}: "${token.text}" takes its arguments in parentheses, not a subscript. Write ${entry.form}.`,
         )
       }
       if (!this.isPunct('(')) {
         fail(
-          'ENGINE_PARSE_SYMBOL',
+          'ENGINE_INVALID_NOTATION',
           `${formulaPosition(this.formula, this.peek().at)}: "${token.text}" needs its arguments in parentheses. Write ${entry.form}.`,
         )
       }
@@ -269,7 +269,7 @@ class Parser {
     if (entry.symbol === '$diff') {
       if (!this.isPunct('(')) {
         fail(
-          'ENGINE_PARSE_SYMBOL',
+          'ENGINE_INVALID_NOTATION',
           `${formulaPosition(this.formula, this.peek().at)}: "$diff" is written ${entry.form}.`,
         )
       }
@@ -288,7 +288,7 @@ class Parser {
         return { kind: 'call', symbol: entry.symbol, args, at: token.at }
       }
       fail(
-        'ENGINE_PARSE_ARITY',
+        'ENGINE_INVALID_ARITY',
         `${formulaPosition(this.formula, this.peek().at)}: "${entry.symbol}" needs its bounds. Write ${entry.form}.`,
       )
     }
@@ -301,7 +301,7 @@ class Parser {
     if (entry.symbol === '$integral') {
       if (content.kind === 'binder') {
         fail(
-          'ENGINE_PARSE_ARITY',
+          'ENGINE_INVALID_ARITY',
           `${formulaPosition(this.formula, token.at)}: "$integral" takes its bounds as plain expressions, not a bound variable. Write ${entry.form}.`,
         )
       }
@@ -314,14 +314,14 @@ class Parser {
 
     if (content.kind !== 'binder') {
       fail(
-        'ENGINE_PARSE_ARITY',
+        'ENGINE_INVALID_ARITY',
         `${formulaPosition(this.formula, token.at)}: "${entry.symbol}" needs a bound variable in its subscript. Write ${entry.form}.`,
       )
     }
     if (entry.symbol === '$limit') {
       if (!content.binder.arrow) {
         fail(
-          'ENGINE_PARSE_ARITY',
+          'ENGINE_INVALID_ARITY',
           `${formulaPosition(this.formula, token.at)}: "$limit" binds its variable with "->". Write ${entry.form}.`,
         )
       }
@@ -339,7 +339,7 @@ class Parser {
     const token = this.peek()
     if (token.kind !== 'punct' || token.text !== '^') {
       fail(
-        'ENGINE_PARSE_ARITY',
+        'ENGINE_INVALID_ARITY',
         `${formulaPosition(this.formula, token.at)}: "${entry.symbol}" needs its upper bound. Write ${entry.form}.`,
       )
     }
@@ -390,7 +390,7 @@ class Parser {
         return args
       }
       fail(
-        'ENGINE_PARSE_SYNTAX',
+        'ENGINE_INVALID_FORMULA',
         `${formulaPosition(this.formula, token.at)}: expected "," or ")" in the argument list of "${entry.symbol}"; found ${tokenLabel(token)}.`,
       )
     }
@@ -399,7 +399,7 @@ class Parser {
   private requireArity(entry: NotationEntry, count: number, token: Token): void {
     if (entry.arities.includes(count)) return
     fail(
-      'ENGINE_PARSE_ARITY',
+      'ENGINE_INVALID_ARITY',
       `${formulaPosition(this.formula, token.at)}: "${entry.symbol}" takes ${entry.arities.join(' or ')} argument(s); got ${count}. Write ${entry.form}.`,
     )
   }
@@ -407,7 +407,7 @@ class Parser {
   private requireVariableArgument(argument: Expression | undefined, entry: NotationEntry, token: Token): void {
     if (argument !== undefined && argument.kind === 'binding') return
     fail(
-      'ENGINE_PARSE_SYNTAX',
+      'ENGINE_INVALID_FORMULA',
       `${formulaPosition(this.formula, argument?.at ?? token.at)}: the second argument of "${entry.symbol}" names the variable the body is taken over; write a plain name, as in ${entry.form}.`,
     )
   }

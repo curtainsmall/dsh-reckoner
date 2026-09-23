@@ -8,25 +8,25 @@ describe('the error code table', () => {
     expect(ENGINE_ERROR_CODES).toHaveLength(19)
     expect(new Set(ENGINE_ERROR_CODES).size).toBe(19)
     expect([...ENGINE_ERROR_CODES]).toEqual([
-      'ENGINE_PARSE_SYNTAX',
-      'ENGINE_PARSE_NUMBER',
-      'ENGINE_PARSE_IDENT',
-      'ENGINE_PARSE_UNIT',
-      'ENGINE_PARSE_SYMBOL',
-      'ENGINE_PARSE_ARITY',
-      'ENGINE_SLOT_UNDECLARED',
-      'ENGINE_IDENT_UNBOUND',
-      'ENGINE_DIM_MISMATCH',
-      'ENGINE_TYPE_NOT_ARITHMETIC',
-      'ENGINE_RANGE_INDEX',
-      'ENGINE_RANGE_DOMAIN',
-      'ENGINE_NOT_INDEXABLE',
-      'ENGINE_NO_FIELD',
-      'ENGINE_SYMBOL_NOT_EVALUABLE',
-      'ENGINE_ARGS_INVALID',
-      'ENGINE_NO_OPEN_RECORD',
-      'ENGINE_RECORD_DUPLICATE',
-      'ENGINE_TOOL',
+      'ENGINE_INVALID_FORMULA',
+      'ENGINE_INVALID_NUMBER',
+      'ENGINE_INVALID_IDENTIFIER',
+      'ENGINE_INVALID_DIMENSION',
+      'ENGINE_INVALID_NOTATION',
+      'ENGINE_INVALID_ARITY',
+      'ENGINE_SLOT_NOT_FOUND',
+      'ENGINE_NAME_NOT_BOUND',
+      'ENGINE_INCOMPATIBLE_DIMENSION',
+      'ENGINE_UNSUPPORTED_OPERATION',
+      'ENGINE_INVALID_INDEX',
+      'ENGINE_UNDEFINED_RESULT',
+      'ENGINE_UNSUPPORTED_INDEX',
+      'ENGINE_FIELD_NOT_FOUND',
+      'ENGINE_UNSUPPORTED_SYMBOL',
+      'ENGINE_INVALID_ARGS',
+      'ENGINE_OPEN_RECORD_NOT_FOUND',
+      'ENGINE_OPEN_RECORD_FOUND',
+      'ENGINE_UNKNOWN_ERROR',
     ])
   })
 
@@ -46,8 +46,8 @@ describe('the error code table', () => {
 
 describe('EngineError', () => {
   it('carries the code and the message', () => {
-    const error = new EngineError('ENGINE_NO_OPEN_RECORD', 'no record is open')
-    expect(error.code).toBe('ENGINE_NO_OPEN_RECORD')
+    const error = new EngineError('ENGINE_OPEN_RECORD_NOT_FOUND', 'no record is open')
+    expect(error.code).toBe('ENGINE_OPEN_RECORD_NOT_FOUND')
     expect(error.message).toBe('no record is open')
     expect(error).toBeInstanceOf(Error)
     expect(isEngineError(error)).toBe(true)
@@ -55,11 +55,11 @@ describe('EngineError', () => {
   })
 
   it('is what fail throws', () => {
-    expect(() => fail('ENGINE_TOOL', 'internal')).toThrowError(EngineError)
+    expect(() => fail('ENGINE_UNKNOWN_ERROR', 'internal')).toThrowError(EngineError)
     try {
-      fail('ENGINE_TOOL', 'internal')
+      fail('ENGINE_UNKNOWN_ERROR', 'internal')
     } catch (error) {
-      expect(isEngineError(error) && error.code).toBe('ENGINE_TOOL')
+      expect(isEngineError(error) && error.code).toBe('ENGINE_UNKNOWN_ERROR')
     }
   })
 })

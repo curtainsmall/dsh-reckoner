@@ -8,17 +8,17 @@ export function isIdentifier(text: string): boolean {
   return IDENTIFIER_PATTERN.test(text)
 }
 
-/** The identifier, or ENGINE_PARSE_IDENT naming what was given instead. */
+/** The identifier, or ENGINE_INVALID_IDENTIFIER naming what was given instead. */
 export function requireIdentifier(input: unknown, what: string): string {
   if (typeof input !== 'string') {
     fail(
-      'ENGINE_PARSE_IDENT',
+      'ENGINE_INVALID_IDENTIFIER',
       `${what} must be an identifier string (letters, digits and underscore, starting with a letter or underscore); got ${describe(input)}.`,
     )
   }
   if (!isIdentifier(input)) {
     fail(
-      'ENGINE_PARSE_IDENT',
+      'ENGINE_INVALID_IDENTIFIER',
       `${what}: "${input}" is not an identifier - it must start with a letter or underscore and continue with letters, digits or underscores only.`,
     )
   }
