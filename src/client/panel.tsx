@@ -187,10 +187,10 @@ const SIDEBAR_COLUMN_SELECTOR = '[data-pane="sidebar"], [class*="sidebarCol"]'
 const ENTRY_ATTR = 'data-dsh-reckoner-entry'
 /** The rail family this entry joins, in shell order — placed after the last one. */
 const ENTRY_FAMILY = ['[data-dsh-taskboard-entry]', '[data-dsh-ssh-entry]', '[data-dsh-skill-explorer-entry]']
-/** Square-root-variable glyph (Font Awesome, CC BY 4.0) — the Reckoner identity, rendered like the shell's line icons. */
+/** Pen-ruler glyph (Font Awesome, CC BY 4.0) — the Reckoner identity: a written derivation beside the measurement it rests on. */
 const ENTRY_ICON =
-  '<svg viewBox="0 0 576 512" fill="currentColor" aria-hidden="true">' +
-  '<path d="M282.6 78.1c8-27.3 33-46.1 61.4-46.1l200 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L344 96 238.7 457c-3.6 12.3-14.1 21.2-26.8 22.8s-25.1-4.6-31.5-15.6L77.6 288 32 288c-17.7 0-32-14.3-32-32s14.3-32 32-32l45.6 0c22.8 0 43.8 12.1 55.3 31.8l65.2 111.8 84.4-289.5zM393.4 233.4c12.5-12.5 32.8-12.5 45.3 0l41.4 41.4 41.4-41.4c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3l-41.4 41.4 41.4 41.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0l-41.4-41.4-41.4 41.4c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l41.4-41.4-41.4-41.4c-12.5-12.5-12.5-32.8 0-45.3z"/></svg>'
+  '<svg viewBox="0 0 512 512" fill="currentColor" aria-hidden="true">' +
+  '<path d="M404 0c19.2 0 37.6 7.6 51.1 21.2l35.7 35.7C504.4 70.4 512 88.8 512 108s-7.6 37.6-21.2 51.1L445.9 204 308 66.1 352.9 21.2C366.4 7.6 384.8 0 404 0zM58.9 315.1L274.1 100 412 237.9 196.9 453.1c-10.7 10.7-24.1 18.5-38.7 22.6L30.4 511.1c-8.3 2.3-17.3 0-23.4-6.2s-8.5-15.1-6.2-23.4L36.4 353.8c4.1-14.6 11.8-27.9 22.6-38.7zM225.4 80.8L80.8 225.4 11.7 156.3c-15.6-15.6-15.6-40.9 0-56.6l88-88c15.6-15.6 40.9-15.6 56.6 0l5.9 5.9-56.3 56.3c-7.8 7.8-7.8 20.5 0 28.3s20.5 7.8 28.3 0l56.3-56.3 34.9 34.9zM431.2 286.6l34.9 34.9-56.3 56.3c-7.8 7.8-7.8 20.5 0 28.3s20.5 7.8 28.3 0l56.3-56.3 5.9 5.9c15.6 15.6 15.6 40.9 0 56.6l-88 88c-15.6 15.6-40.9 15.6-56.6 0l-69.1-69.1 144.6-144.6z"/></svg>'
 /** Entry styles: the exact rules the SSH/task-board/skills entries use, self-contained.
  *  The collapsed variant keys off ANY ancestor whose class contains "collapsed"
  *  (the shell's rail carries e.g. "hHd-Xa_collapsed"); there is no stable
