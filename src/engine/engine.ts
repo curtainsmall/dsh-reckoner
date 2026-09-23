@@ -370,7 +370,7 @@ export class Engine {
 }
 
 /** A non-empty text argument; `record_start`'s title and `record_message`'s text share the rule. */
-function readText(input: unknown, tool: string, field: string): string {
+function readText(input: unknown, tool: TraceTool, field: string): string {
   if (typeof input !== 'string' || input.trim().length === 0) {
     fail(EngineErrorCode.InvalidArgs, `${tool} takes a non-empty ${field} string; got ${describe(input)}.`)
   }

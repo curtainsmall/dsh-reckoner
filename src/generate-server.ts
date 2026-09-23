@@ -82,6 +82,20 @@ enum FinishReasonKind {
   Error = 'error',
 }
 
+/** Whether a string read off the stream is a chunk kind this module acts on. */
+function toStreamChunkKind(value: unknown): StreamChunkKind | undefined {
+  return typeof value === 'string' && (Object.values(StreamChunkKind) as readonly string[]).includes(value)
+    ? (value as StreamChunkKind)
+    : undefined
+}
+
+/** Whether a string read off the stream is a finish reason this module acts on. */
+function toFinishReasonKind(value: unknown): FinishReasonKind | undefined {
+  return typeof value === 'string' && (Object.values(FinishReasonKind) as readonly string[]).includes(value)
+    ? (value as FinishReasonKind)
+    : undefined
+}
+
 interface LlmLike {
   stream(options: {
     provider: string
@@ -304,7 +318,7 @@ async function generateArticle(
   const startedAt = Date.now()
   let text = ''
   /** The provider's own finish reason, kept so an empty result can name it instead of guessing. */
-  let seenFinish: string | undefined
+  let seenFinish: FinishReasonKind | undefined
   for await (const raw of llm.stream({
     provider: route.provider,
     model: route.model,
@@ -318,17 +332,18 @@ async function generateArticle(
       text?: string
       reason?: string | { kind?: string; failure?: { message?: string } }
     }
-    if (chunk.type === StreamChunkKind.TextDelta) {
+    const chunkKind = toStreamChunkKind(chunk.type)
+    if (chunkKind === StreamChunkKind.TextDelta) {
       text += chunk.text ?? ''
-    } else if (chunk.type === StreamChunkKind.ToolCallDelta) {
+    } else if (chunkKind === StreamChunkKind.ToolCallDelta) {
       throw new Error('the generation model unexpectedly requested a tool')
-    } else if (chunk.type === StreamChunkKind.Finish) {
+    } else if (chunkKind === StreamChunkKind.Finish) {
       // The finish chunk carries the provider's reason as an object (`{kind, failure}`);
       // a bare string is tolerated too. Without this the reason is silently lost and any
       // failed call surfaces as "no article text", which is what the first attempt of a
       // cold provider looks like.
       const reason = chunk.reason
-      const kind = typeof reason === 'string' ? reason : reason?.kind
+      const kind = toFinishReasonKind(typeof reason === 'string' ? reason : reason?.kind)
       const detail = typeof reason === 'string' ? '' : (reason?.failure?.message ?? '')
       seenFinish = kind ?? seenFinish
       if (kind === FinishReasonKind.Aborted) throw new Error('article generation was aborted')

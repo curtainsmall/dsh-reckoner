@@ -116,7 +116,7 @@ export enum ValueTag {
 /** The same tags as a list, for rejecting an unknown key. */
 const VALUE_KEYS: readonly string[] = Object.values(ValueTag)
 
-function hasKey(bag: Record<string, unknown>, key: string): boolean {
+function hasKey(bag: Record<string, unknown>, key: ValueTag): boolean {
   return Object.prototype.hasOwnProperty.call(bag, key)
 }
 

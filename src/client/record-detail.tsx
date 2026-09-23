@@ -13,6 +13,7 @@ import { t, useAppLocale } from './locales.ts'
 import { IconChevronLeft, IconMarkdown, IconTex } from './icons.tsx'
 import { displayValue } from './ui.tsx'
 import { TraceTool } from '../engine/trace-tools.ts'
+import { ValueTag } from '../engine/value.ts'
 import { ArticleFormat } from '../generate.ts'
 import { useGenState } from './generation.ts'
 import { GenerationSetupDialog } from './generation-ui.tsx'
@@ -47,9 +48,12 @@ enum MarkerKind {
 /** One trace row as the view reads it: the tool's own fields are lifted onto the row. */
 interface TraceRow {
   seq: number
+  /** The wire tool name; an unknown one cannot be a marker, so it is kept as a plain string. */
   tool: string
   ok: boolean
   at: number
+  /** The flavour iewRow derived from the tool name and its outcome. */
+  kind?: MarkerKind
   [key: string]: unknown
 }
 
@@ -119,7 +123,7 @@ function viewRow(row: WireRow): TraceRow {
     ...row,
     ...content,
     kind: markerKind(row.tool, row.ok),
-    deleted: row.tool === 'set' && content['value'] === null,
+    deleted: row.tool === TraceTool.Set && content[ValueTag.Num] === null,
   }
 }
 
@@ -546,7 +550,7 @@ function TimelineItem({ item }: { item: Item }): React.JSX.Element {
 /* ── Marker rows: start / message / end ───────────────────────────────────── */
 
 /** Marker label for a row's derived `kind` (see markerKind): start/message/end, or a duplicate flavour. */
-function markerLabel(kind: string): string {
+function markerLabel(kind: MarkerKind): string {
   switch (kind) {
     case MarkerKind.Start: return t('markerStart')
     case MarkerKind.Message: return t('markerMessage')
@@ -558,7 +562,7 @@ function markerLabel(kind: string): string {
 }
 
 function MarkerRow({ row }: { row: TraceRow }): React.JSX.Element {
-  const kind = String(row.kind ?? '')
+  const kind = row.kind ?? MarkerKind.None
   const accent = !row.ok
     ? 'var(--dsw-alias-state-error-primary)'
     : kind === 'end'
