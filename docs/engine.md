@@ -2,11 +2,11 @@
 
 [简体中文](engine.zh-CN.md)
 
-Every calculation in the Reckoner plugin happens inside one deterministic **engine**. It is a calculator with no domain knowledge: no built-in solver, no registry, no solver signature, no physics and no named formula. The model supplies the mathematics as a formula, and the engine applies every numerical rule — it parses values, resolves prefixes and unit variants, does complex arithmetic, derives dimensions while it evaluates, and records every step into a record that can be read back.
+Every calculation in the Reckoner plugin happens inside one deterministic **engine**. Its whole scope is four steps: parse one formula, derive the SI vector of every intermediate value, evaluate the arithmetic, and record the call. It holds no domain knowledge, no solver and no table of named formulas, and the only conversion it performs is the affine map carried by the names of its own SI table (Section 6.1).
 
-One engine runs per host process. Any session's markers act on it, and at most one record is open at a time.
+One engine runs per host process. The markers of any session act on it, and at most one record is open at a time.
 
-Sessions started in **Reckoner Mode** carry the same rules in the `reckoner-interface` and `reckoner-template` skills.
+The same material in model-facing form is carried by the `reckoner-interface` and `reckoner-template` skills, which the plugin registers.
 
 ## Contents
 
@@ -24,458 +24,533 @@ Sessions started in **Reckoner Mode** carry the same rules in the `reckoner-inte
 
 ## 1. What the engine is
 
-The engine is deterministic, and the split of work is exact:
-
-| the engine does | the model does |
+| the engine does | the caller does |
 |---|---|
-| parse one value string into SI and keep its kind | write the value the way it is said: `4.7kohm`, `25degC` |
-| resolve a prefix, a unit variant and a complex form | choose the relations and write the formula |
-| evaluate one expression | reference the user's quantities with `@name` |
-| derive the dimension of every intermediate and of the result | — |
-| refuse a result that does not measure what the target slot pins | fix the formula and call `eval` again |
-| append one trace row per step, input and output both | read the numbers back with `get` |
+| parses one formula into an expression tree | writes the formula |
+| derives the SI vector of every intermediate and of the result | writes each value with its `dim` |
+| evaluates the arithmetic of numbers and vectors | chooses the relations |
+| refuses a value that cannot be stored as it stands | fixes the formula and calls `eval` again |
+| writes the result into the target slot | reads it back with `get` |
+| appends one trace row per call to the open record | - |
 
-- **There is no registry and no solver signature.** The engine holds no domain knowledge at all; it knows no physics, no electronics and no named formula. The mathematics comes from the model as a formula, the numerical rules come from the engine.
+- **No domain knowledge.** The engine knows no physics, no electronics and no named formula. The mathematics exists only inside the formula it is given.
+- **No solver.** There is no way to ask the engine for an unknown, to solve an equation, or to invert a relation; every step is an expression the caller writes.
+- **No unit conversion beyond the name table.** The table holds SI names only. A quantity given in any other unit is converted by the caller before `set`, and `dim` then names the quantity that came out (Section 3.3).
 - **Arithmetic happens only inside `eval`.** `set` transcribes what it was given; nothing is computed at that boundary.
-- **Numbers come from slots, never from memory.** Every number in an answer is a condition stored by `set`, or a value a previous `eval` wrote into its target, and it is read back with `get`.
-- **A formula must use the conditions.** A formula that ignores the user's quantities and hard-codes a number is wrong even when it evaluates.
+- **Numbers come from slots or from the formula's own literals.** The engine keeps no memory between calls other than the slot table, so every quantity in a derivation is a stored value or a constant written into the formula.
+- **Deterministic.** The same slot table and the same formula produce the same value: no randomness, no clock in the arithmetic, no network.
 
 ## 2. The plugin surface
 
-| tool | parameters | receipt |
+### 2.1 The six operations
+
+| operation | parameters | success receipt |
 |---|---|---|
-| `set` | `name`, `value` (one value string, or `null` to delete the slot) | `{ ok:true, name, rev, value }`; delete: `{ ok:true, name, deleted }` |
-| `get` | `name`, `format` (optional) | `{ ok:true, name, format, value }` — `value` is the printed text |
-| `eval` | `formula` (one expression), `target` (a slot name, or `null`) | `{ ok:true, target, rev }` |
-| `record_question` | `text` | `{ ok:true, record }` — opens a record and clears the variable table |
-| `record_analyse` | `text` | `{ ok:true }` |
-| `record_answer` | `text` | `{ ok:true, record }` — seals the record |
+| `set` | `name` (a slot name), `value` (a tagged value, or `null` to delete the slot) | `{ ok:true, name, rev, value }`; a deletion answers `{ ok:true, name, rev:null, value:null }` |
+| `get` | `name`, and the optional `form`, `digits` and `dim` | `{ ok:true, name, value }` |
+| `eval` | `formula` (one expression), `target` (a slot name) | `{ ok:true, target, rev }` |
+| `record_start` | `title` (a non-empty string) | `{ ok:true }` |
+| `record_message` | `text` (a non-empty string), optional `hide` (a boolean) | `{ ok:true }` |
+| `record_end` | optional `text` (a string) | `{ ok:true }` |
 
-Every call returns one receipt, and there is no second failure channel:
+- `set`, `get` and `eval` are refused while no record is open (Section 7.1).
+- `name` and `target` are bare slot names, never `@name`: the `@` form exists only inside a formula (Section 4.3).
+- `set` stores a value and echoes what was stored; `get` is the only operation that returns a value.
+- `eval` does not return its value. The receipt names the slot that was written and its new revision; the value is read with `get` or referenced as `@name` in a later formula.
+
+### 2.2 Receipts
+
+Every call answers with one JSON receipt, and there is no second failure channel:
 
 ```
-success: set  → { ok:true, name, rev, value }    delete: { ok:true, name, deleted }
-         get  → { ok:true, name, format, value }
-         eval → { ok:true, target, rev }         target null: { ok:true, target:null, rev:null }
-failure:      → { ok:false, code, error }
+success: set  -> { ok:true, name, rev, value }    delete: { ok:true, name, rev:null, value:null }
+         get  -> { ok:true, name, value }
+         eval -> { ok:true, target, rev }
+         markers -> { ok:true }
+failure:      -> { ok:false, code, error }
 ```
 
-- `set` writes **the conditions the user gave** (transcription). Its receipt echoes the stored value printed in its SI form: `value: "4.7kohm"` comes back as `value: "4700ohm"`.
-- `eval` writes **a computed quantity**. `target` is the slot the result is stored in; `target: null` evaluates without storing anything.
-- **`eval` does not return its value.** To see a number, call `get` on the slot you wrote it into.
-- `get`'s `format` decides how the stored value is printed (§3.4); omit it for the SI form.
-- **A failed call has no side effects**: no slot is written, no value changes. Read the receipt, fix what `error` names, call again (§8).
+`error` is one sentence written for the reader: the concrete value that failed, the boundary or the expectation, and the fix. `code` is the stable machine-readable half of the same failure (Section 8). A failed call changes no slot and no revision; when a record is open, the failure is nevertheless appended to it as a row with `ok: false` (Section 7.2).
 
-### 2.1 Slot rules
+### 2.3 The slot table and its rules
 
 | rule | behaviour |
 |---|---|
-| name | letters, digits and underscore, starting with a letter or underscore; `name` and `target` are bare slot names, never `@name` |
-| pin | the first write pins the slot's kind; a later write of a different kind or type fails with `ENGINE_SLOT_KIND` and does not advance the revision |
-| overwrite | a same-kind overwrite replaces the value and bumps `rev`; nothing is inherited |
-| delete | `set` with `value: null` removes the slot; deleting a missing slot is an idempotent ok with `deleted: false`, and re-creating it starts at rev 1 |
+| name | an identifier: a letter or underscore, then letters, digits or underscores. The same rule covers slot names, `eval` targets, object field names and bound variable names |
+| write | a write to a name that does not exist creates the slot at revision 1 |
+| overwrite | a write to an existing slot replaces the value and increments the revision by one. Nothing of the previous value is inherited, and no vector is pinned: a slot may be overwritten by a value of any vector |
+| delete | `set` with `value: null` removes the slot, idempotently: a deletion of a missing slot is still `ok`, and the slot is recreated at revision 1 |
 | failure | a failed operation writes nothing |
+| lifetime | the table lives exactly as long as the record is open. `record_end` clears it, so a non-empty table means a record is open |
 
 ## 3. Values
 
-A value is **ONE plain string**, written the way it is said:
+### 3.1 The four value types
 
-```
-4.7kohm        4700ohm       100uohm       12volt        1.5second     50hertz
-25degC         14.7psi       2hp           5             (a bare count)
-2j             3+4i          1e5                          (complex, scientific notation)
-[100ohm, 220ohm]             {v: 12volt, r: 100ohm}       (array, object)
-"a string"
-```
-
-There is no typed-value envelope and no slot-reference value: a value is a string, `@name` is syntax inside a formula (§4), and there is no `boolean` type — an indicator is `0`/`1` with kind `none`.
-
-### 3.1 Prefixes, units and variants
-
-**A prefix is one letter, a unit is a whole word.** The prefixes are `p n u m k M G T` (10^-12 through 10^12) and a prefix must be followed by a unit: `5k` is refused, `5kohm` is fine. A prefix also combines with a variant word: `10kdegC` is `k` + `degC`.
-
-The unit words are `second metre gram amp kelvin radian decibel hertz ohm farad henry volt watt pascal joule`, plus the variants — each one expressing a kind in a non-SI way:
-
-| variant | kind | SI base it converts to |
+| type | content | vector |
 |---|---|---|
-| `degC`, `degF` | temperature | K |
-| `deg` | angle | rad |
-| `bar`, `psi`, `atm` | pressure | Pa |
-| `cal`, `Wh` | energy | J |
-| `hp` | power | W |
-| `inch`, `foot`, `yard`, `mile` | length | m |
-| `lb`, `oz` | mass | kg |
+| `number` | one JSON number (`num`) | one SI vector |
+| `complex` | `re` and `im`, stored rectangular | one SI vector |
+| `array` | `items`, each a number, a complex or a nested array | one SI vector, shared by every element |
+| `object` | named `fields`, each a full value | one vector per field; the object carries none of its own |
 
-- **Whole words only**: `ohm` never `Ω`, `second` never `s`, `degC` never `°C`. Symbols are refused at the character level; everything is ASCII.
-- **A bare number is a plain count** (kind `none`). It never inherits a neighbour's unit, which is why `5 + @V_in` is refused — write `5volt`.
-- **What is stored is SI**: `4.7kohm` and `4700ohm` are the same stored value (`4700` + `resistance`); `25degC` becomes `298.15` + `temperature`. The prefix and the variant word exist only while parsing and printing.
+- A value's identity is its SI vector: 7 integer exponents in ISO 80000-1 order (m, kg, s, A, K, mol, cd). Two values with the same vector are the same quantity however they are spelled, and the kind label of Section 6.1 is a name for humans: it is never stored and never decides anything.
+- A numeric position holds a JSON number only, that is, a finite double. A string, a boolean or `null` in a numeric position is `ENGINE_INVALID_ARGS`.
+- Only whole vectors reach a slot: a vector with a fractional exponent is refused before anything is written (Section 6.4).
 
-### 3.2 Complex and scientific notation
+### 3.2 `set`'s tagged structure
 
-`2j`, `3+4i`, `3-4j`: `i` and `j` are the imaginary suffix, so a term carrying one is imaginary, and a bare `i` or `j` is the imaginary unit itself. A complex is stored rectangular (`re`, `im`). Scientific notation takes a lowercase `e` only: `1e5`; `1E5` and `2e` are refused, each with the rewrite in `error`.
+`set`'s `value` is a JSON object carrying exactly one tag, plus the optional `dim`:
 
-### 3.3 Structures
+```
+{"num": 4.7e3}                               a real
+{"re": 3, "im": 4}                           a complex, rectangular
+{"mag": 5, "ang": 0.927295218}               a complex, polar (radians)
+{"array": [1, 2, 3]}                         an array
+{"object": {"v": {"num": 12}}}               an object
+```
 
-`[100ohm, 220ohm]` is an array, `{v: 12volt, r: 100ohm}` is an object with literal field names, and `"a string"` is a string (escapes `\"`, `\\`, `\n`, `\t`). A value is one value and never an arithmetic expression: `2*3` is refused, and the message says that a value is one quantity, complex number, array, object or string.
+- **Exactly one tag.** The tags are `num`, `re` with `im`, `mag` with `ang`, `array` and `object`; a bag with none or with more than one is `ENGINE_INVALID_ARGS`. An unknown key is refused with the tag vocabulary, and `dim` beside `object` is refused because an object takes its dimensions per field.
+- **Both halves of a pair.** `re` without `im` and `mag` without `ang` are refused, each naming the pair it needs.
+- **Polar is converted on entry.** `mag` and `ang` become `re = mag*cos(ang)` and `im = mag*sin(ang)`; the stored value is always rectangular.
+- **Array elements are bare.** An element is a number, `{re,im}`, `{mag,ang}` or a nested array, and it carries no tag of its own and no `dim`, because the whole array shares one vector. An object can never be an element of an array.
+- **An object carries one `dim` per field.** `object` maps field names to full values parsed by this same rule, so a field may itself be an object; a field name must satisfy the name rule of Section 2.3.
 
-### 3.4 Printing: `get`'s `format`
+### 3.3 `dim`
 
-`get` prints a stored value; printing never changes what is stored. The format vocabulary is the vocabulary of §3.1, so what `get` prints can usually be fed straight back into `set` or a formula.
+`dim` is the spelling of the value's vector:
 
-| format | prints |
+| `dim` | meaning |
 |---|---|
-| omitted | the SI form: `4700ohm` |
-| a unit (`ohm`) | the same word: `4700ohm` |
-| a prefix + unit (`kohm`) | `4.7kohm` |
-| a variant (`degC`) | `25degC` — the affine conversion happens here |
-| `deg` / `rad` | an angle |
-| `polar` | a complex in polar form: `111.80339887498948∠0.4636476090008061` (the default is rectangular: `100+50j`) |
-| `json` | the stored envelope: `{"type":"number","value":4700,"kind":"resistance"}` |
+| a table name (Section 6.1) | the vector of that row, together with the row's affine map |
+| exactly 7 integers in the order m,kg,s,A,K,mol,cd | that vector, with no affine map |
+| omitted or `null` | the zero vector |
 
-- A word that names no unit, no prefix+unit and no variant, and is none of the special words (`rad`, `polar`, `json`), is refused, and the message lists the legal ones.
-- A kind with no unit word (`none`) prints as a bare number.
-- An array prints element-wise and an object field-wise, each with the same format.
-- One exception to round-tripping: a complex is always printed unitless, so `3+4j` is what the parser reads back.
+- Any other value is `ENGINE_INVALID_DIMENSION`: a string that names no row (the message lists every name), an array of the wrong length, or a component that is not an integer.
+- For `num`, `re`/`im` and `mag`/`ang`, the affine map is applied before the value is stored: `SI = x*factor + offset`, with the offset on the real part and the factor alone scaling the imaginary part. An array's bare elements are stored as written against the array's vector. `degC` is the only name in the table whose map is not the identity (Section 6.1).
 
-### 3.5 Slot references
+### 3.4 `get`
 
-A slot reference is `@name`, and it exists **only inside a formula** (§4). It is read-only; the slot that receives a result is `eval`'s `target` parameter. Nothing stores a reference, and no reference ever appears in a value or in a printed result.
+`get {name, form?, digits?, dim?}` reads one slot. Reading never changes what is stored.
+
+| option | meaning |
+|---|---|
+| `form: "rect"` | every scalar leaf is rendered `{re, im}` |
+| `form: "polar"` | every scalar leaf is rendered `{mag, ang}`, `ang` in radians |
+| `form` omitted | the stored form: a real stays `{num}`, a complex stays `{re, im}` |
+| `digits` | a positive integer: every leaf number is rounded to at most that many significant digits, never padded |
+| `dim`, a table name | the leaves are mapped out of SI through that row's affine map and the receipt's `dim` is that name |
+| `dim`, 7 integers | the stored vector is checked against them and nothing is converted; the receipt's `dim` is those 7 integers |
+| `dim` omitted | the receipt's `dim` is the vector's first table name, or the 7 integers when the vector has no row |
+
+- `form`, `digits` and `dim` reach every scalar leaf alike: an object's fields and an array's elements included.
+- A `dim` that does not match the stored vector is refused with `ENGINE_INCOMPATIBLE_DIMENSION`, naming both vectors; an object is checked field by field, and nothing is converted.
+- A negative real under `polar` is `{mag: -x, ang: pi}`; a real under `rect` is `{re: x, im: 0}`.
+- `form` must be `"rect"` or `"polar"`, and `digits` must be a positive integer; anything else is `ENGINE_INVALID_ARGS`.
+- Receipts: a real is `{num, dim}`, a complex is `{re, im, dim}` or `{mag, ang, dim}`, an array is `{array: [bare elements], dim}` with a bare number, a `{re,im}`/`{mag,ang}` scalar or a nested array per element, and an object is `{object: {field: <receipt>}}` with no `dim` at its own level.
+- The receipt is the tagged shape `set` accepts, so it can be fed back into `set` unchanged. `digits` has already cut the numbers, so a receipt carrying it stores the cut numbers.
 
 ## 4. Formulas
 
-`eval` takes **one expression** and a `target`:
+### 4.1 The charset and the literals
+
+A formula is ASCII. The scanner accepts digits; names (a letter or underscore, then letters, digits or underscores); `$name`; `@name`; the whitespace characters space, tab and newline; and the punctuation `+ - * / ^ ( ) [ ] { } , . _ =` together with the two-character token `->`. Any other character is refused with `ENGINE_INVALID_FORMULA`, whose message names the character, its code point and the whole charset.
+
+| literal | reads as |
+|---|---|
+| `12`, `4.7` | a real; the fraction needs a digit after the point |
+| `1e5`, `2.5e-3` | a real in scientific notation: a lowercase `e`, an optional sign, and at least one exponent digit |
+| `2j`, `4i` | an imaginary scalar (`{re: 0, im: 2}`); `i` and `j` are the imaginary suffix |
+| `2.5j`, `1e3i` | the same suffix on a fraction or an exponent |
+
+- A scalar literal is always dimensionless: it carries the zero vector.
+- An `e` with no exponent digits is `ENGINE_INVALID_NUMBER`.
+- A letter directly after a number is `ENGINE_INVALID_IDENTIFIER`: a letter may follow a number only as the imaginary suffix `i` or `j`. `1E5` and `2x` are refused; for the second the message gives the rewrite `2*x`.
+- There is no boolean literal, no string literal, no unit literal and no array or object literal: a formula has numbers, slots and notation only.
+
+### 4.2 The grammar
 
 ```
-formula        := expression
-expression     := additive
+formula        := additive EOF
 additive       := multiplicative (('+' | '-') multiplicative)*
 multiplicative := unary (('*' | '/') unary)*
-unary          := ('-' | '+')* power
-power          := postfix ('^' unary)?              # right-associative
-postfix        := primary ('[' expression ']' | '.' IDENT)*
-primary        := NUMBER | IDENT | '$' symbol | '@' IDENT
-                | '(' expression ')' | arrayLiteral | objectLiteral | STRING
-symbol         := '$' IDENT
-                | '$' IDENT '(' args ')'
-                | '$' IDENT '_{' subexpr '}' ['^{' subexpr '}'] '(' args ')'
+unary          := ('-' | '+') unary | power
+power          := postfix ('^' unary)?
+postfix        := primary ('[' additive ']' | '.' NAME)*
+primary        := NUMBER | NAME | SLOT | SYMBOL | '(' additive ')'
+SLOT           := '@' NAME
+SYMBOL         := '$' NAME
+                | '$' NAME '(' args ')'
+                | '$' NAME '_' '{' subscript '}' '^' '{' additive '}' '(' args ')'
+                | '$' NAME '_' '{' subscript '}' '(' args ')'
+subscript      := NAME '=' additive | NAME '->' additive | additive
+args           := [ additive (',' additive)* ]
 ```
 
-### 4.1 Reading and writing
-
-- `@name` **READS** a slot. It is read-only and never appears on the left of anything.
-- `target` is the slot the call **WRITES**, and it is a parameter, not syntax.
-- **There is no assignment inside a formula**: neither `@x = …` (slots are read-only) nor `x = …` (there is no local variable), and no statement sequence. `=` exists only inside a subscript position (`_{k=a}`), where it binds.
-- A bare name is a **binding variable** introduced by a bounded notation (`$sum_{k=a}^{b}(…)`, `$prod_{k=a}^{b}(…)`, `$seq_{k=a}^{b}(…)`, `$diff(body, x)`, `$integral_{a}^{b}(body, x)`, `$limit_{x->a}(…)`). Any other bare name is refused with `ENGINE_IDENT_UNBOUND`, whose message tells you to write `@name`.
-- String literals (`"…"`) are values; the language has no operation on them beyond carrying them.
-
-### 4.2 Operators and precedence
-
-- The operators are `+ - * / ^`; `->` appears only inside a `$limit` subscript (`x->a`).
-- Precedence runs additive → multiplicative → unary → power → postfix → primary. `^` is right-associative and binds tighter than unary minus, so `-2^2` is `-4`.
-- **Multiplication always needs `*`**: `2@R`, `2$pi` and `2(3)` are all refused.
-- A unit written after a space belongs to the number: `100 ohm` is `100ohm`.
+- The four `SYMBOL` shapes are the constant, the function, the bounded form with both positions, and the form with a subscript only (`$diff` and an unbounded `$integral` are written in the second shape). Which shapes a symbol accepts, and how many arguments it takes, is the notation table's business (Section 5).
+- A formula is exactly ONE expression: a token following a complete expression is `ENGINE_INVALID_FORMULA`, not a second statement.
+- Precedence runs additive, multiplicative, unary, power, postfix, primary: `*` and `/` bind tighter than `+` and `-`, a unary sign binds looser than `^` on the left, and `^` is right-associative. `-2^2` is `-4`, and `2^3^2` is `2^(3^2)`.
+- A leading `+` is dropped; a leading `-` negates.
+- Multiplication must be written `*`. `2@R`, `2$pi` and `2(3)` are all refused.
+- A position is the brace directly after a notation name, so every other `^` is the power operator: `$e^(2)` and `$pi^2` are powers, while `^` followed by `{` is refused.
+- Parentheses group; a `(` or `[` that is never closed is refused, naming the character that opened it.
 
 ### 4.3 Data access
 
-| form | meaning |
+| form | reads |
 |---|---|
-| `@x[k]` | element `k` of an array; the index is an expression and must be a whole number with no unit |
-| `@th.field` | the object field `field`; a literal name, not an expression |
-| chaining | `@net.ports[0].z` — indexes and fields chain in one path |
+| `@name` | the value of one slot |
+| `@name[index]` | one element of an array; the index is an additive expression |
+| `@name.field` | one field of an object; the field name is a literal name, not an expression |
+| chaining | `@net.ports[0].z`: indices and fields chain in one path |
 
-An index outside the array is refused with the index and the length, a non-array is refused as not indexable, and a field that does not exist is refused together with the fields the object does have.
+- `@name` only ever reads; the slot a call writes is `eval`'s `target` parameter (Section 2.1). Nothing stores a reference and no reference ever appears in a value or a receipt.
+- A slot that does not exist is `ENGINE_SLOT_NOT_FOUND`.
+- An index must evaluate to an integer with the zero vector: a number, or a complex with `im` 0. Anything else, and an index outside `0..len-1`, is `ENGINE_INVALID_INDEX`; the second names the length.
+- `[ ]` on a value that is not an array, and `.` on a value that is not an object, are `ENGINE_UNSUPPORTED_INDEX`. A field the object does not have is `ENGINE_FIELD_NOT_FOUND`, and the message lists the fields it has.
+- A bare name is a bound variable (Section 5.4); any other bare name is `ENGINE_NAME_NOT_BOUND`, whose message gives the rewrite `@name`.
 
-### 4.4 Arrays are element-wise
+### 4.4 Arrays
 
-- Both sides of an operator must have the same length (`ENGINE_ARGS_INVALID` names both lengths), elements are combined one by one, and a scalar broadcasts over the other side.
-- A formula's array literal must hold one kind; a mixed literal fails with `ENGINE_TYPE_MIXED_KIND`, naming the element that broke it and the first element.
-- There is no matrix algebra: `$seq` builds the arrays, `[...]` walks them, and `$transpose` transposes a matrix written as arrays of arrays (§5).
+- An array's elements share one vector, and a nested array shares it too, so the whole structure carries exactly one vector.
+- An operator applies element by element. Two arrays must have the same length, otherwise `ENGINE_INVALID_ARGS` names both lengths; a scalar on one side is broadcast over every element of the other.
+- A unary function maps over the elements and re-collects them, keeping the vector. `$len` counts the elements instead, and `$transpose` rearranges a rectangular two-dimensional array (Section 5.3).
+- No operator and no function is defined on an object: a field is read first (Section 4.3). The refusal is `ENGINE_UNSUPPORTED_OPERATION`, and the same code refuses an object built as an array element.
+- There is no matrix algebra: `$seq` builds arrays, `[i]` indexes them, and `$transpose` transposes an array of arrays.
 
-### 4.5 `target` and the size of a step
+### 4.5 Powers
 
-- `target` is a bare slot name. An existing slot must match the kind it pins; a new slot is pinned to the kind the formula derived. A result whose kind contradicts the slot is refused before anything is written (§6).
-- `target: null` evaluates without storing anything; the result still lands in the record.
-- **Prefer several `eval` calls over one deep expression.** Split the work when the same sub-expression appears twice, when parentheses nest more than about three deep, or when the line stops being readable: evaluate the intermediate with its own `target`, then read it back with `@` in the next call. Each call leaves its own formula and result in the record, so the article can show `Vth`, `Rth` and `Pmax` as named steps instead of one wall of symbols.
+- An exponent must have the zero vector, otherwise `ENGINE_INCOMPATIBLE_DIMENSION`.
+- A real exponent scales the base's vector by the exponent, so `(4volt)^2` measures `volt^2` (Section 6.2).
+- A complex exponent requires a dimensionless base, because `a^z` is `exp(z*Log a)`: the result is dimensionless, and a zero base is `ENGINE_UNDEFINED_RESULT`.
+- `0^0` is 1, zero to a negative power is `ENGINE_UNDEFINED_RESULT`, and a negative real base under a fractional exponent is `ENGINE_UNDEFINED_RESULT` because it has no real value.
+- A result is a complex when either operand is a complex, or when its imaginary part is not zero; otherwise it is a real.
 
-### 4.6 What the language does not have
+### 4.6 `eval`'s target
 
-**No comparison, no logic, no conditional and no assignment**: there is no `if`, no `==`, no `&&`, no `x = …`, and no statement sequence. `boolean` does not exist either — an indicator function is a `0`/`1` with kind `none`.
+- `target` is required and is a bare slot name.
+- The result must have a whole vector: a fractional one is refused before anything is written (Section 6.4).
+- The target is written unconditionally: the write replaces whatever the slot held and increments its revision (Section 2.3). No vector is checked against the slot's previous content.
+- One call produces one trace row, so each evaluated step leaves its own formula and result in the record (Section 7.2).
+
+### 4.7 What the language does not have
+
+No assignment, no comparison, no logic, no conditional and no statement sequence: there is no `if`, no `==`, no `&&`, no `x = ...` and no way to write two expressions in one call. `=` exists only inside a subscript (`_{k=a}`), where it binds. There is no user-defined function, no comment syntax, and no literal for a unit or a dimension.
 
 ## 5. Notation
 
-Every notation starts with `$`, which is the engine's namespace: a user name (`sum`, `abs`, `ohm`) never collides with a notation, and no name is reserved. A `$` name outside the table below is a parse error, not a function discovered at run time, and its message lists the whole vocabulary.
+### 5.1 The namespace and the positions
 
-A notation may carry a **subscript** `_{...}` and a **superscript** `^{...}`, written as brace-delimited positions. Each notation defines what its own positions hold, so they may differ: for the bounded forms the subscript gives the bound variable and its lower bound (`_{k=0}`) and the superscript gives the upper bound (`^{@N-1}` — the bound is an expression, so a slot is written `@N`). A constant takes no position at all, and because a position is the brace that follows the marker, every other `^` is the power operator: `$e^(2)` and `$pi^2` are fine. A position holds either the notation's own binding form (`k=a`, `x->a`) or an expression; a bare name in one is a binding variable, so `^{N-1}` is refused with the reminder to write `@N`.
+- Every notation name starts with `$`. That namespace is the engine's own: a slot name (`sum`, `abs`, `ohm`) can never collide with a notation, and no name is reserved.
+- A `$name` outside the table is `ENGINE_INVALID_NOTATION`, and the message lists the whole vocabulary of 35 names.
+- A notation may carry a subscript `_{...}` and, where it defines one, an upper bound `^{...}`, each written as the brace directly after the notation name: `$sum_{k=a}^{b}(body)`. A subscript holds either the notation's binding form `name = expression` or `name -> expression`, or a plain expression; a bare name inside a position is still a bound variable.
+- A constant takes no parenthesis and no position; a function takes its arguments in parentheses only; a bounded form takes its bounds in positions and its body in parentheses.
+- Argument counts are checked against the table (Section 5.2, Section 5.3, Section 5.4), and a wrong count is `ENGINE_INVALID_ARITY`.
 
-### 5.1 Constants (5)
+### 5.2 Constants (5)
 
-| notation | meaning |
-|---|---|
-| `$pi` | the ratio of a circle to its diameter |
-| `$e` | the base of the natural logarithm |
-| `$inf` | infinity |
-| `$i` | the imaginary unit |
-| `$j` | the imaginary unit (engineering spelling) |
+| notation | written form | meaning |
+|---|---|---|
+| `$pi` | bare | the ratio of a circle's circumference to its diameter |
+| `$e` | bare | the base of the natural logarithm |
+| `$inf` | bare | positive infinity |
+| `$i` | bare | the imaginary unit |
+| `$j` | bare | the imaginary unit, the engineering spelling |
 
-### 5.2 Functions (19 unary)
+A constant takes no arguments and no position: `$pi()` and `$pi_` are refused, and a power is written with `^` (`$e^(2)`, `$pi^2`).
 
-| notation | meaning |
-|---|---|
-| `$abs` | absolute value |
-| `$sqrt` | square root |
-| `$exp` | e raised to the argument |
-| `$ln` | natural logarithm |
-| `$log` | logarithm base 10 |
-| `$sin` | sine of a dimensionless value or an angle |
-| `$cos` | cosine of a dimensionless value or an angle |
-| `$tan` | tangent of a dimensionless value or an angle |
-| `$asin` | inverse sine, result in radians |
-| `$acos` | inverse cosine, result in radians |
-| `$atan` | inverse tangent, result in radians |
-| `$floor` | largest integer not greater than the argument |
-| `$ceil` | smallest integer not less than the argument |
-| `$sign` | sign of the argument: -1, 0 or 1 |
-| `$re` | real part |
-| `$im` | imaginary part |
-| `$arg` | argument (phase) in radians |
-| `$conj` | complex conjugate |
-| `$transpose` | transpose of a matrix given as arrays of arrays |
+### 5.3 Functions (20 unary, 4 binary)
 
-### 5.3 Functions (4 binary)
+| notation | written form | meaning |
+|---|---|---|
+| `$abs` | `$abs(x)` | absolute value (the magnitude of a complex) |
+| `$sqrt` | `$sqrt(x)` | square root; the principal complex root of a complex argument |
+| `$exp` | `$exp(x)` | `e` raised to the argument |
+| `$ln` | `$ln(x)` | natural logarithm (the principal one for a complex argument) |
+| `$log` | `$log(x)` | base-10 logarithm |
+| `$sin` | `$sin(x)` | sine |
+| `$cos` | `$cos(x)` | cosine |
+| `$tan` | `$tan(x)` | tangent |
+| `$asin` | `$asin(x)` | inverse sine, in radians |
+| `$acos` | `$acos(x)` | inverse cosine, in radians |
+| `$atan` | `$atan(x)` | inverse tangent, in radians |
+| `$floor` | `$floor(x)` | largest integer not greater than the argument |
+| `$ceil` | `$ceil(x)` | smallest integer not less than the argument |
+| `$sign` | `$sign(x)` | sign of the argument: -1, 0 or 1 |
+| `$re` | `$re(x)` | real part |
+| `$im` | `$im(x)` | imaginary part |
+| `$arg` | `$arg(x)` | argument (phase) in radians |
+| `$conj` | `$conj(x)` | complex conjugate |
+| `$len` | `$len(a)` | the number of elements of an array |
+| `$transpose` | `$transpose(M)` | the transpose of a rectangular two-dimensional array |
+| `$atan2` | `$atan2(x, y)` | the angle of the point `(x, y)`, in radians |
+| `$min` | `$min(a, b)` | the smaller of two arguments |
+| `$max` | `$max(a, b)` | the larger of two arguments |
+| `$mod` | `$mod(a, b)` | the remainder of `a` divided by `b` |
 
-| notation | meaning |
-|---|---|
-| `$atan2(x, y)` | angle of the point (x, y), in radians |
-| `$min(a, b)` | smaller of two values of the same kind |
-| `$max(a, b)` | larger of two values of the same kind |
-| `$mod(a, b)` | remainder of a divided by b |
+A function is always written with parentheses; a subscript on one is refused, and either form of misuse repeats the written form from this table.
 
 ### 5.4 Bounded forms (6)
 
-| notation | meaning | evaluable |
-|---|---|---|
-| `$sum_{k=a}^{b}(body)` | Σ: sum the body as the subscript variable runs from the lower to the upper bound | yes |
-| `$prod_{k=a}^{b}(body)` | Π: multiply the body over the same range | yes |
-| `$seq_{k=a}^{b}(body)` | build an array from the body over the same range | yes |
-| `$integral_{a}^{b}(body, x)` | ∫: parsed, not evaluated by this engine | no |
-| `$diff(body, x)` | d/dx: parsed, not evaluated by this engine | no |
-| `$limit_{x->a}(body)` | lim: parsed, not evaluated by this engine | no |
+| notation | written form | arguments | evaluable | meaning |
+|---|---|---|---|---|
+| `$sum` | `$sum_{k=a}^{b}(body)` | 1 | yes | the body accumulated with `+` as the variable runs from the lower to the upper bound |
+| `$prod` | `$prod_{k=a}^{b}(body)` | 1 | yes | the body accumulated with `*` over the same range |
+| `$seq` | `$seq_{k=a}^{b}(body)` | 1 | yes | the body collected into an array over the same range |
+| `$integral` | `$integral_{a}^{b}(body, x)` or `$integral(body, x)` | 2 | no | a definite integral; the second argument names the variable |
+| `$limit` | `$limit_{x->a}(body)` | 1 | no | a limit, with the variable bound by `->` |
+| `$diff` | `$diff(body, x)` or `$diff(body, x, n)` | 2 or 3 | no | a derivative, of order `n` when given |
 
-- The subscript must give a binding variable and its lower bound, and the superscript the upper bound; both bounds must be whole numbers with no unit. An upper bound below the lower one is refused: `the upper bound 1 is below the lower bound 5 — nothing to sum`.
-- `$seq` is the only notation that builds an array, and `[i]` then walks it; a nested `$seq` produces the rows of a 2-D array. `$sum` and `$prod` are the same body summed and multiplied instead of collected.
-- **`$integral`, `$diff` and `$limit` parse but are not evaluable.** Evaluating one fails with `ENGINE_SYMBOL_NOT_EVALUABLE`, whose message names the written form and tells you to state the closed form instead, or to say the value cannot be computed. They exist so a formula can still *say* what it means.
-- Argument counts are checked: `ENGINE_PARSE_ARITY` names the notation, the count it takes and the count it got.
-- What the functions need from their arguments is a dimension rule as much as a type rule — `$sin` takes a plain count or an angle, `$ln` takes a positive plain count, `$sqrt` halves the dimension, `$min`/`$max`/`$mod` need both sides to measure the same thing (§6).
+- Both bounds are required for `$sum`, `$prod`, `$seq` and the bounded `$integral`; `$limit` takes the subscript only, `$diff` takes neither, and `$integral` accepts either both or neither.
+- A bound is evaluated once, before the body, and must be an integer with the zero vector, otherwise `ENGINE_INVALID_INDEX`. The range is inclusive, and a lower bound above the upper one is `ENGINE_INVALID_INDEX`.
+- At each step the variable is bound to a dimensionless real. Binding it is the only way a bare name acquires a value, and the binding is visible only inside the notation's own body.
+- `$seq` yields an array; `$sum` and `$prod` fold the collected values with `+` and `*`, so their result follows the vector arithmetic of those operators.
+- `$integral`, `$limit` and `$diff` can be written but not evaluated. Evaluating one is `ENGINE_UNSUPPORTED_SYMBOL`, whose message repeats the written form. They exist so that a formula can still state what it means; the closed form has to be evaluated instead.
 
 ## 6. Dimensions
 
-Every kind maps to a vector of the seven SI base dimensions `(kg, m, s, A, K, mol, cd)`. The engine carries the vector through the whole expression, so it checks the mathematics as it computes it — you never have to name a kind anywhere.
+### 6.1 The name table
 
-| kind | vector | kind | vector |
-|---|---|---|---|
-| `time` | (0, 0, 1, 0, 0, 0, 0) | `voltage` | (1, 2, -3, -1, 0, 0, 0) |
-| `length` | (0, 1, 0, 0, 0, 0, 0) | `resistance` | (1, 2, -3, -2, 0, 0, 0) |
-| `mass` | (1, 0, 0, 0, 0, 0, 0) | `capacitance` | (-1, -2, 4, 2, 0, 0, 0) |
-| `current` | (0, 0, 0, 1, 0, 0, 0) | `inductance` | (1, 2, -2, -2, 0, 0, 0) |
-| `temperature` | (0, 0, 0, 0, 1, 0, 0) | `power` | (1, 2, -3, 0, 0, 0, 0) |
-| `amount-of-substance` | (0, 0, 0, 0, 0, 1, 0) | `frequency` | (0, 0, -1, 0, 0, 0, 0) |
-| `luminous-intensity` | (0, 0, 0, 0, 0, 0, 1) | `pressure` | (1, -1, -2, 0, 0, 0, 0) |
-| `angle` | dimensionless | `energy` | (1, 2, -2, 0, 0, 0, 0) |
-| `log` | dimensionless | `none` | dimensionless |
+The engine's only vocabulary of dimensions is this table of 24 rows. A name maps to a vector, a vector maps back to its row, and nothing else in the engine may spell a dimension.
 
-### 6.1 The rules
+| vector | kind | names |
+|---|---|---|
+| `[0,0,0,0,0,0,0]` | `dim-less` | `dim-less`, `radian`, `steradian` |
+| `[0,0,1,0,0,0,0]` | `time` | `second` |
+| `[1,0,0,0,0,0,0]` | `length` | `metre` |
+| `[0,1,0,0,0,0,0]` | `mass` | `kilogram` |
+| `[0,0,0,1,0,0,0]` | `current` | `ampere` |
+| `[0,0,0,0,1,0,0]` | `temperature` | `kelvin`, `degC` |
+| `[0,0,0,0,0,1,0]` | `amount-of-substance` | `mole` |
+| `[0,0,0,0,0,0,1]` | `luminous-intensity` | `candela`, `lumen` |
+| `[0,0,-1,0,0,0,0]` | `frequency` | `hertz`, `becquerel` |
+| `[1,1,-2,0,0,0,0]` | `force` | `newton` |
+| `[-1,1,-2,0,0,0,0]` | `pressure` | `pascal` |
+| `[2,1,-2,0,0,0,0]` | `energy` | `joule` |
+| `[2,1,-3,0,0,0,0]` | `power` | `watt` |
+| `[0,0,1,1,0,0,0]` | `charge` | `coulomb` |
+| `[2,1,-3,-1,0,0,0]` | `voltage` | `volt` |
+| `[-2,-1,4,2,0,0,0]` | `capacitance` | `farad` |
+| `[2,1,-3,-2,0,0,0]` | `resistance` | `ohm` |
+| `[-2,-1,3,2,0,0,0]` | `conductance` | `siemens` |
+| `[2,1,-2,-2,0,0,0]` | `inductance` | `henry` |
+| `[2,1,-2,-1,0,0,0]` | `magnetic-flux` | `weber` |
+| `[0,1,-2,-1,0,0,0]` | `flux-density` | `tesla` |
+| `[-2,0,0,0,0,0,1]` | `illuminance` | `lux` |
+| `[2,0,-2,0,0,0,0]` | `absorbed-dose` | `gray`, `sievert` |
+| `[0,0,-1,0,0,1,0]` | `catalytic-activity` | `katal` |
 
-- Addition and subtraction, and `$min`/`$max`/`$mod`, require the same dimension; the refusal spells both dimensions out. `none + voltage` is refused because the bare count does not say whether the 5 is volts: write `5volt`, or multiply if that is what you mean.
-- Multiplication adds the vectors, division subtracts them and `^` scales them by the exponent. An exponent must be dimensionless. A real exponent scales the base's vector (`(4volt)^2` measures `volt^2`); a complex exponent is allowed only on a dimensionless base, because its phase is `Im(exponent)×ln|base|` and `ln|base|` would otherwise shift with the unit the base is written in. So `$e^(-$j*$pi/6)` is a rotation, `2^(2j)` is one too, and `(4ohm)^(1+1j)` is refused. `0` to a negative or complex power has no value.
-- `none` is a plain count: multiplying by it keeps the other side's kind (`2*@R` is a resistance), and `none × voltage = voltage`.
-- `angle` and `log` are dimensionless, but each is its own kind: an angle can be added to an angle and to nothing else, and a logarithm is a plain ratio.
-- `$sin`/`$cos`/`$tan` take a plain count or an angle and return a plain count; `$asin`/`$acos`/`$atan` take a plain count between -1 and 1 and return an angle in radians; `$ln`/`$log`/`$exp`/`$floor`/`$ceil`/`$sign` take a plain count.
-- `$abs`, `$re`, `$im` and `$conj` keep the dimension of their argument, `$arg` returns an angle in radians, and `$sqrt` halves the vector (so `$sqrt((4ohm)^2)` is a resistance).
+- The components are read in the order m, kg, s, A, K, mol, cd.
+- A vector with no row has no kind: the engine calls it `unnamed`, and it is mentioned by its 7 integers.
+- The first name of a row is the one the engine mentions, in a message and in a `get` receipt without `dim`; the further names are accepted spellings of the same vector.
+- Every name carries an affine map `SI = x*factor + offset`. `degC` is the only name whose map is not the identity: its factor is 1 and its offset is 273.15. Every other name has factor 1 and offset 0.
+- The table holds SI names only. Any other unit is converted by the caller before `set` (Section 1).
 
-### 6.2 Unnamed intermediates and the result
+### 6.2 Vector arithmetic
 
-`volt^2` is a real dimension with no name, and it is perfectly legal **inside** a formula: `(@V)^2/@R` squares a voltage on the way to a power.
-
-**Only the RESULT must land on a named kind**, because the target slot pins one. A result like `(4ohm)^2` is refused with `ENGINE_DIM_MISMATCH`; the message says the result measures an unnamed dimension, and tells you to split the formula so each step lands on a named quantity.
-
-### 6.3 The refusal
-
-A result whose kind contradicts the slot it would be written into is refused **before anything is written**: the receipt is `{ ok:false, code:"ENGINE_DIM_MISMATCH", error:"…" }`, the message names the expected kind and the derived one with both vectors, and the slot is untouched.
-
-Where a slot's kind comes from:
-
-| write | the kind it pins |
+| operation | vector of the result |
 |---|---|
-| `set` with a unit | the kind that unit expresses (`4.7kohm` → `resistance`, `25degC` → `temperature`) |
-| `set` with a bare number | `none` |
-| `eval` into a new target | the kind the formula derived |
-| `eval` into an existing target | must match the kind already pinned, or the call is refused |
+| `a + b`, `a - b` | the shared vector; different vectors are `ENGINE_INCOMPATIBLE_DIMENSION` |
+| `a * b` | the component-wise sum of the two vectors |
+| `a / b` | the component-wise difference of the two vectors |
+| `a ^ p` with a real exponent `p` | every component of `a` scaled by `p` |
+
+- A scalar literal and every zero-vector value are dimensionless. A dimensionless factor multiplies without changing the other side's vector (`2*@R` is a resistance), while adding one to a dimensional value is refused, because a bare count does not say what it counts.
+- `$min`, `$max`, `$mod` and `$atan2` require both arguments to carry the same vector (Section 6.3).
+
+### 6.3 The dimension rule of every notation class
+
+| notation | argument vector | result vector |
+|---|---|---|
+| `$pi`, `$e`, `$inf`, `$i`, `$j` | none | the zero vector |
+| `$abs`, `$re`, `$im`, `$conj` | any | the argument's vector |
+| `$arg` | any | the zero vector (radians) |
+| `$sqrt` | any | half the argument's vector |
+| `$exp`, `$ln`, `$log`, `$sin`, `$cos`, `$tan`, `$asin`, `$acos`, `$atan`, `$floor`, `$ceil`, `$sign` | the zero vector; anything else is `ENGINE_INCOMPATIBLE_DIMENSION` | the zero vector |
+| `$len` | any vector, on an array | the zero vector |
+| `$transpose` | any vector, on a rectangular two-dimensional array | the same vector |
+| `$atan2` | both the same vector | the zero vector (radians) |
+| `$min`, `$max`, `$mod` | both the same vector; different ones are `ENGINE_INCOMPATIBLE_DIMENSION` | that vector |
+| `$sum`, `$prod` | the bound variable is a dimensionless real | whatever the fold of the body yields |
+| `$seq` | the bound variable is a dimensionless real | the body's vector, shared by the array's elements |
+
+Beyond the vector rules, some arguments are restricted in value:
+
+- `$ln`, `$log`: a real argument must be greater than 0; `$ln(0)` and `$ln(-1)` are `ENGINE_UNDEFINED_RESULT`.
+- `$sqrt` of a negative real is `ENGINE_UNDEFINED_RESULT`; a complex argument gives the principal root.
+- `$asin` and `$acos` of a real argument outside -1 to 1 are `ENGINE_UNDEFINED_RESULT`.
+- `$floor`, `$ceil`, `$sign` and the four binary functions require a real argument: a complex one is `ENGINE_UNDEFINED_RESULT`.
+- Division by zero and `$mod` by zero are `ENGINE_UNDEFINED_RESULT`.
+
+### 6.4 Whole vectors only
+
+- An intermediate may carry a fractional vector: `$sqrt` halves the vector and a power scales it.
+- Only the value written into a slot must have a whole vector. A fractional one is refused with `ENGINE_INCOMPATIBLE_DIMENSION` before anything is written, so a formula that produces a square root of a resistance is refused rather than stored.
+- An intermediate vector that names no row is perfectly legal: `(@V)^2/@R` squares a voltage on the way to a power, and `volt^2` is never a table row that has to exist.
+
+### 6.5 A `dim` read as a claim
+
+A `dim` given to `get` is a claim about what the slot holds: 7 integers must equal the stored vector exactly, and a table name must be a row of the same vector, after which the leaves are converted into that spelling. A mismatch is refused and nothing is converted (Section 3.4).
 
 ## 7. Records and the trace
 
-A solve is bracketed by the markers:
+### 7.1 The three markers
 
-| marker | effect |
-|---|---|
-| `record_question` | opens a record and clears the variable table |
-| `record_analyse` | submits the approach: the knowns, the relations and the plan, with no computed numbers |
-| `record_answer` | submits the final answer and seals the record |
+| marker | argument | effect |
+|---|---|---|
+| `record_start` | `title`, a non-empty string | opens a record: allocates its id, writes the header line and the start row. It fails with `ENGINE_OPEN_RECORD_FOUND` while a record is open, so a record carries exactly one title |
+| `record_message` | `text`, a non-empty string, and the optional `hide` (a boolean, default false) | appends one explanation to the open record |
+| `record_end` | optional `text` | appends the closing row, renames the open file into the closed tier (Section 7.3), and clears the slot table. It fails with `ENGINE_OPEN_RECORD_NOT_FOUND` when no record is open |
 
-- `record_question` appends its question row and clears the table; a second `record_question` first seals the record that was open with a `seal` row (`kind: "duplicate-start"`) and then starts a new one.
-- `record_answer` appends the answer row and seals the record. With no open record it keeps a short record whose only row is `{ tool:"seal", kind:"duplicate-end" }`, and its receipt carries `error: "duplicate-end"`.
-- Sealing closes a record for good: its trace is finished and never recomputed. A record that was never sealed stays marked incomplete in the panel.
-- Conditions are stored with `set` before anything else, and `record_analyse` comes before the first `eval`. Computed numbers exist only after the `eval` that produced them; an answer quotes slot values or `get` results, never a number from memory.
+- `set`, `get` and `eval` require an open record, and so does `record_message`; without one the call fails with `ENGINE_OPEN_RECORD_NOT_FOUND`, and nothing is written anywhere.
+- The record id is the clock reading in milliseconds as a string; while that name is taken, `-2`, `-3` and so on are appended.
+- A message with `hide: true` is marked as a note for the article writer rather than for the record view (Section 10).
+- A closing text that is empty or only whitespace counts as absent.
+- Each marker answers `{ ok: true }` and nothing else.
 
-### 7.1 Trace rows
+### 7.2 Trace rows
 
-Every engine operation appends exactly one self-describing JSON line to the open record's body — inputs and outputs both:
+Every call appends at most one row to the open record, inputs and outputs alike. A call made while no record is open appends nothing.
 
-```json
-{ "seq": 1, "tool": "marker", "kind": "question", "ok": true, "text": "…", "at": … }
-{ "seq": 2, "tool": "set", "ok": true, "name": "R1", "value": { "type": "number", "value": 4700, "kind": "resistance" }, "rev": 1, "at": … }
-{ "seq": 3, "tool": "get", "ok": true, "name": "R1", "format": null, "value": { …the stored value… }, "at": … }
-{ "seq": 4, "tool": "eval", "ok": true, "formula": "@V_in*@R2/(@R1+@R2)", "target": "V_out", "rev": 1,
-  "vars": { "V_in": { … }, "R1": { … }, "R2": { … } }, "result": { …the typed result… }, "at": … }
-{ "seq": 5, "tool": "eval", "ok": true, "formula": "@R/@R", "target": null, "rev": null,
-  "vars": { "R": { … } }, "result": { "type": "number", "value": 1, "kind": "none" }, "at": … }
-{ "seq": 6, "tool": "set", "ok": true, "name": "tmp", "value": null, "deleted": false, "at": … }
-{ "seq": 7, "tool": "eval", "ok": false, "code": "ENGINE_SLOT_UNDECLARED", "error": "…", "at": … }
-{ "seq": 8, "tool": "marker", "kind": "analyse", "ok": true, "text": "…", "at": … }
-{ "seq": 9, "tool": "marker", "kind": "answer", "ok": true, "text": "…", "at": … }
+```
+{ "seq": 4, "at": 1700000000004, "tool": "eval", "ok": true, "content": { ... } }
 ```
 
 | field | meaning |
 |---|---|
-| `seq` | the row's position in the record, from 1 |
-| `tool` | `set`, `get`, `eval`, `marker` or `seal` |
-| `ok` | `true`, or `false` together with `code` and `error` |
-| `at` | when the step happened |
-| `value` | a `set` row's stored value, or the value a `get` row read; `null` marks a deletion |
-| `rev` | the slot's revision after the write |
-| `formula`, `target`, `vars`, `result` | the `eval` row: the expression as written, the slot it was written into (`null` for a pure evaluation), the slots the formula read mapped to their stored values, and the result |
-| `code`, `error` | present on a failed row |
+| `seq` | the row's position in the record, from 1, incremented per appended row |
+| `at` | the clock reading of the call, in milliseconds |
+| `tool` | `set`, `get`, `eval`, `record_start`, `record_message` or `record_end` |
+| `ok` | `true`, or `false` for a refused call |
+| `content` | what that tool stores |
 
-- `vars` holds exactly the slots the formula read, in first-use order; a successful `eval` row is written whether or not a target was given, and binding variables never enter the trace.
-- The `get` receipt carries the printed text, while its trace row carries the stored value and the requested format (`null` when none was asked for): the record keeps facts, not formatted strings.
-- A trace holds engine operations only: no kernel internals and no model reasoning. Its reader is a human, and every step shows its input and its output in place.
-- **Every primitive appends a row to the open record**, so `set`, `get` and `eval` need one: with no record open the call fails with an `error` naming `record_question`.
+| tool | `content` |
+|---|---|
+| `set` | `{ name, value }`: the stored value with its `dim` as 7 integers; a deletion is `{ name, value: null }` |
+| `get` | `{ name, value }`: the value as it was rendered for the receipt. The `form`, `digits` and `dim` that were asked for are not stored |
+| `eval` | `{ formula, target, rev, vars, result }`: the text as written, the slot written, its new revision, every slot the formula actually read mapped to its stored value, and the result |
+| `record_start` | `{ title, record }`: the title and the allocated id |
+| `record_message` | `{ text }`, or `{ text, hide: true }` |
+| `record_end` | `{ record }`, or `{ text, record }` when a closing text was given |
+| a refused call | `{ code, error }` |
 
-### 7.2 Recovery by replay
+- `vars` holds exactly the slots the formula read, in first-use order, each with the value the slot held at that moment. A bound variable never enters the trace.
+- The record keeps facts, not formatted strings: a `get` row stores the value, not the options that produced its rendering.
+- A trace that cannot be written does not turn a successful call into a failure: the append failure is dropped.
 
-A host that starts with a record still open — an index row with `sealedAt: null` whose body exists — rebuilds the variable table by replaying that record's rows in order:
+### 7.3 The record file
+
+- The first line of every record file is its header, `{"seq": 0, "version": 1}`. `seq: 0` is the only marker that distinguishes it from a trace row, and `version` is the design version this build writes and accepts.
+- **Two tiers.** The one unclosed record lives in `<home>/open-record.jsonl`. Closing renames that file into `<home>/records/<id>.jsonl` in one atomic step, so a file under `records/` is always a complete record.
+- **The version gate.** A file whose first line is not a header, or whose version is below the current one, is refused by every reader: at start the open file is discarded, and a closed record is not listed as a row but its id is reported among the ids that cannot be read.
+- A line that does not parse is dropped, so a torn last line from a crash mid-append costs only that line: the record keeps every row that parsed.
+
+### 7.4 Recovery by replay
+
+At start the engine clears the slot table and then reads the unclosed file. A file that fails the version gate, or whose start row carries no title or no id, is discarded. Otherwise the record is resumed from its start row, with the last row's `seq`, and its rows are replayed in order:
 
 | row | what the replay does |
 |---|---|
-| `set` | writes its value, or deletes the slot when the row is a deletion |
-| `eval` with a target | writes the **stored** result into the target, without recomputing anything |
-| `eval` with `target: null` | nothing |
-| `marker`, `seal`, failed rows | skipped |
+| `set`, ok | writes the stored value, or deletes the slot when its value is `null` |
+| `eval`, ok | writes the stored result into its target, without recomputing anything |
+| any other row | skipped |
 
-The trace then continues in the same file, with the sequence resuming after its last row. The stored results are taken as facts, so nothing is recomputed, nothing is fetched and nothing is random. A sealed record is history rather than state, and every one of its lines stays readable on its own.
+- The stored results are taken as facts: nothing is recomputed, nothing is fetched and nothing is random.
+- A row that no longer parses is skipped, so recovery can never keep the plugin from mounting.
+- The trace then continues in the same file, the next row following the last one's `seq`.
 
-### 7.3 Consistency
+### 7.5 The record list
 
-| situation | behaviour |
-|---|---|
-| an index row whose body file is missing while it is still open | cleared at engine start |
-| an open record | the index row with `sealedAt: null` whose body exists; a restart recovers it from that pair |
-| `state.json` | written by one owner as read-modify-write and replaced atomically, so a crash mid-write leaves the previous file; an unreadable file reads as `{}` |
+- The list reports the closed records (id, version, title, opened time, ended time), the one open record (id, title, opened time) and the ids that cannot be read.
+- The title and the span of a record come from its rows: the first accepted `record_start` row's title, the last accepted `record_end` row's time as the end, and the last row's time when there is none.
+- The closed list is cached and rebuilt when the modification time of the `records/` directory changes, so a scan does not run on every read.
 
 ## 8. Errors
 
-Every failure is one receipt — `{ ok: false, code, error }` — and nothing is written:
+### 8.1 The failure shape
 
-- **`error` is the one sentence written for you.** It names the position in the text, the concrete value that failed and the fix. Read it and change that specific thing; do not retry the same call unchanged.
-- **`code` is for machines**: the trace, the tests and the panel match on it. It never replaces the sentence.
-- **A failed call has no side effects**: no slot is created, no value is changed, no revision moves.
+Every failure is one receipt, `{ ok: false, code, error }`, and it writes nothing:
 
-The scheme is `ENGINE_<position>_<reason>`; the position segment says what has to change:
+- **`error` is one sentence written for the reader.** Where the failure concerns the text, it carries the position in it; it always carries the concrete value that failed, the boundary or the expectation, and the fix.
+- **`code` is for machines.** The trace, the tests and the panel match on it; it never replaces the sentence. The codes are the 19 values of one enum (Section 8.2).
+- **A failed call has no side effects.** No slot is created, no value changes and no revision moves. What the failure does leave behind is its own trace row (Section 7.2).
+- An unexpected internal fault is reported as `ENGINE_UNKNOWN_ERROR` with the message `internal error: ...`, so no failure ever escapes the receipt.
 
-| position | meaning | what to do |
-|---|---|---|
-| `PARSE` | the source text is not valid | rewrite the text as the message says |
-| `SLOT` | a name or a slot rule failed | check the name, or declare the slot first |
-| `IDENT` | a bare identifier has no binding | write `@name`, or use a bounded notation |
-| `DIM`, `TYPE` | the mathematics does not line up | fix the quantities or the operation |
-| `RANGE` | an index or a domain is outside its range | fix the index or the input |
-| `SYMBOL`, `TOOL` | the notation cannot be evaluated, or another tool failure | take another route, or fix the arguments |
+### 8.2 The 19 codes
 
-Representative codes, and what their `error` carries:
-
-| code | raised when | the `error` carries |
-|---|---|---|
-| `ENGINE_PARSE_SYNTAX` | the text is structurally invalid, or a formula is empty | the position, and `expected the closing parenthesis (')')`, `the formula is empty — write one expression, referencing slots with @name`, … |
-| `ENGINE_PARSE_NUMBER` | a number literal is malformed (`1E5`, `2e`) | the position, `scientific notation takes a lowercase 'e'`, `'e' must be followed by digits (as in 1e5)`, and the rewrite to paste: `write "1e5"` |
-| `ENGINE_PARSE_IDENT` | a single letter directly follows a number (`1R`, `2x`) | the position, and `an identifier cannot follow a number directly; to multiply, write "*" (as in "1*R")` |
-| `ENGINE_PARSE_UNIT` | a unit, prefix or variant word is not accepted (`5k`, `4.7kΩ`, a bare word) | the position and what the word is: `'k' is a prefix and must be followed by a unit (p n u m k M G T); to write 5 metres use "5metre"`, or the whole unit vocabulary |
-| `ENGINE_PARSE_SYMBOL` | `$` is followed by a name outside the notation table, or a function is written without parentheses | the position and the complete vocabulary |
-| `ENGINE_PARSE_ARITY` | a notation was given the wrong number of arguments | the notation, the count it takes and the count it got |
-| `ENGINE_SLOT_UNDECLARED` | `@name`, or `get`'s `name`, is not declared | the name, and that only the conditions the user gave or an earlier `eval` target exist |
-| `ENGINE_SLOT_KIND` | a write would change a slot's pinned kind or type | the pinned identity and the incoming one, plus the delete-first fix |
-| `ENGINE_IDENT_UNBOUND` | a bare identifier is not bound by any notation | the name, the notations that bind, and `to read a slot write "@name"` |
-| `ENGINE_DIM_MISMATCH` | the derived dimension does not match, an operation mixes dimensions, an exponent carries a unit or a quantity is raised to a complex power, or a result has no named kind | both dimensions (or the unnamed one) and the fix, e.g. `write the count with its unit (for example 5volt), or multiply if that is what you mean`, `only a dimensionless base has a complex power`, `split the formula so each step lands on a named quantity` |
-| `ENGINE_TYPE_MIXED_KIND` | an array literal mixes kinds | the element that broke it, its measure, and the first element's |
-| `ENGINE_TYPE_NOT_ARITHMETIC` | a non-arithmetic value (an object, a string) took part in arithmetic | what was combined with what |
-| `ENGINE_RANGE_INDEX` | an index or a bound is out of range | the index and the length, or the two bounds |
-| `ENGINE_RANGE_DOMAIN` | a function is applied outside its domain: `$ln(-1)`, division by zero, `$mod` by zero | the function and its domain |
-| `ENGINE_NOT_INDEXABLE` | something that is not an array was indexed | what was indexed |
-| `ENGINE_NO_FIELD` | an object has no such field | the field, and the fields the object does have |
-| `ENGINE_SYMBOL_NOT_EVALUABLE` | `$integral`, `$diff` or `$limit` was evaluated | the written form, and to state the closed form or say the value cannot be computed |
-| `ENGINE_ARGS_INVALID` | an argument has the wrong shape: a bad slot name, an unknown `format`, arrays of different lengths | the expected shape and the received one |
-| `ENGINE_UNSUPPORTED_VARIANT` | `get`'s `format` names a unit that does not express the value's kind (`format: "degC"` on a resistance) | the format word, the kind, and the unit that kind prints with |
-| `ENGINE_TOOL` | the fallback, when no specific code applies | the internal error, as it is |
+| code | raised when |
+|---|---|
+| `ENGINE_INVALID_FORMULA` | the text is not one expression the grammar accepts: a character outside the charset, a `$` or `@` not followed by a name, a token after a complete expression, an unclosed `(` or `[` or `{`, `^` followed by `{`, `.` not followed by a field name, an argument list not closed with `,` or `)`, or a second argument of `$integral`/`$diff` that is not a plain name |
+| `ENGINE_INVALID_NUMBER` | a number's scientific form has no exponent digits, as in `2e` |
+| `ENGINE_INVALID_IDENTIFIER` | a letter directly follows a number (`1E5`, `2x`); a name given where an identifier is required (a `set` name, a `get` name, an `eval` target, an object field name) is not a string or does not satisfy the name rule |
+| `ENGINE_INVALID_DIMENSION` | `dim` is not a table name, is not exactly 7 integers, or has a component that is not an integer |
+| `ENGINE_INVALID_NOTATION` | a `$name` outside the notation table; a constant given `(` or `_`; a function written without `(` or with `_`; a bounded form written without the bounds it requires |
+| `ENGINE_INVALID_ARITY` | the argument count is not one the table lists; a bound variable is missing from a subscript that needs one; `$limit` is written with `=` instead of `->`; an upper bound is missing; `$integral` is given a bound variable in its subscript |
+| `ENGINE_SLOT_NOT_FOUND` | `@name` reads a slot that does not exist, or `get` names one |
+| `ENGINE_NAME_NOT_BOUND` | a bare name is not bound by any enclosing notation |
+| `ENGINE_INCOMPATIBLE_DIMENSION` | `+` or `-` with two different vectors; an exponent that is not dimensionless; a complex exponent on a dimensional base; a dimensionless argument required and a dimensional one given; two arguments of `$min`, `$max`, `$mod` or `$atan2` with different vectors; array elements that do not share one vector; a fractional vector written into a slot; a `get` `dim` that does not match the stored value |
+| `ENGINE_UNSUPPORTED_OPERATION` | an operator or a function applied to an object, or an object placed in an array |
+| `ENGINE_INVALID_INDEX` | an index that is not an integer with the zero vector, an index outside the array (both name the valid range), a bound that is not an integer with the zero vector, or a lower bound above the upper one |
+| `ENGINE_UNDEFINED_RESULT` | a value the engine defines none for: division by zero, `$mod` by zero, `$ln` or `$log` of a real that is not greater than 0, `$sqrt` of a negative real, `$asin` or `$acos` outside -1 to 1, a negative real base under a fractional exponent, zero under a negative or complex power, or a real-only function given a complex argument |
+| `ENGINE_UNSUPPORTED_INDEX` | `.` applied to a value that is not an object, or `[ ]` to a value that is not an array |
+| `ENGINE_FIELD_NOT_FOUND` | an object has no field of that name; the message lists the fields it has |
+| `ENGINE_UNSUPPORTED_SYMBOL` | `$integral`, `$limit` or `$diff` is evaluated |
+| `ENGINE_INVALID_ARGS` | a tool argument has the wrong shape: the `set` value is not an object, carries no tag or more than one, has an unknown key, `dim` beside `object`, half of a pair, an `array` that is not an array, an `object` that is not an object, or an element that is none of the four bare forms; two arrays combined have different lengths; `$len` or `$transpose` got the wrong value; `form` or `digits` is not what it must be; `eval`'s `formula` is not a string or `target` is missing; a marker's text is empty or not a string, or its `hide` is not a boolean |
+| `ENGINE_OPEN_RECORD_NOT_FOUND` | `set`, `get`, `eval` or `record_message` is called with no record open, or `record_end` is |
+| `ENGINE_OPEN_RECORD_FOUND` | `record_start` is called while a record is open |
+| `ENGINE_UNKNOWN_ERROR` | an unexpected internal fault: anything thrown that is not an engine failure, reported as `internal error: ...` |
 
 ## 9. Storage and logs
+
+### 9.1 The home directory
 
 The plugin home is `~/.dsh-reckoner`, and `DSH_RECKONER_HOME` moves it.
 
 ```
 ~/.dsh-reckoner/
-  record-index.jsonl      index rows, one per record
-  records/<id>.jsonl      trace bodies, one file per record
-  state.json              plugin state
+  open-record.jsonl       the one unclosed record: its header line and its trace rows
+  records/<id>.jsonl      closed records, one file each, named by the record id
+  state.json              the plugin's remembered settings
   logs/                   one file per host run
 ```
 
 | file | holds |
 |---|---|
-| `record-index.jsonl` | `{ id, openedAt, sealedAt, question }` per record; `sealedAt: null` marks the record that is still open |
-| `records/<id>.jsonl` | one trace line per engine operation |
-| `state.json` | the remembered generation settings (`generateDir`, `generateLanguage`, `generateFormat`, `generateCompile`) |
+| `open-record.jsonl` | the unclosed record, rewritten from its header on `record_start` and renamed on `record_end` |
+| `records/<id>.jsonl` | a closed record: the header line and one trace row per call |
+| `state.json` | the remembered generation settings (`generateDir`, `generateLanguage`, `generateFormat`, `generateCompile`). It is replaced atomically, and a missing, corrupt or non-object file reads as `{}` |
 | `logs/` | the run logs below |
 
-### 9.1 Logs
+### 9.2 Logs
 
-One file per host run, `<logs>/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, created exclusively and held open. Every line is `<timestamp> <LEVEL> <message>[ k=v …]` and goes to the file and to stdout. A field value is a JSON scalar; a nested object or array is one token, and an Error becomes its message plus `  | ` continuation lines carrying the stack.
-
-| setting | values |
-|---|---|
-| `DSH_RECKONER_LOG_LEVEL` | `debug`, `info`, `warn`, `error`, `off`; default `info` |
-| retention | the newest 20 files, up to 50 MB |
-
-The file describes its own run: the name is the start, the last line is the end, and a log whose last line is not `plugin unmounted` belongs to a run that was killed. The log carries the plugin's own diagnostics — mounts, endpoint failures, generation jobs — while a record holds engine operations only.
+- One file per plugin mount, that is per host run: `<home>/logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, created exclusively and held open. Writing is synchronous on the held descriptor.
+- A line is `<timestamp> <LEVEL> <message>[ k=v ...]`, and it goes to the file and to stdout. A field value is a JSON scalar; a nested object or array is one token; an Error is rendered as its message with `  | ` continuation lines carrying the stack.
+- The level comes from `DSH_RECKONER_LOG_LEVEL`: `debug`, `info`, `warn`, `error` or `off`; anything else keeps the default `info`.
+- Retention keeps the newest 20 run files, at most 50 MB in total.
+- The log carries the plugin's own diagnostics (mount and unmount, endpoint failures, generation jobs), while a record carries engine calls only.
 
 ## 10. Article generation
 
-Every record can be written up as a standalone solution article. The host flattens the record into plain facts, gives them to a model in a context of its own, and writes the article to disk. The article is written as the author's own solution: it never mentions Reckoner, the harness, formulas, derivation steps, records or the generation process, and the only allowed occurrences of the name are the fixed title `DeepSeek Harness Reckoner Solution` and the author line `DeepSeek Harness Reckoner`.
-
-What the record contributes:
+A closed record can be written up as a standalone solution article. The host reduces the record's rows to plain facts, gives them to a model in a context of its own, and writes the article to disk. The record that is still open cannot be generated.
 
 | fact | source in the record |
 |---|---|
-| the question | the index row's `question` |
-| the conditions | the `set` rows, each as `name: <stored value>`, or `name: removed` for a deletion |
-| the analysis | the `analyse` marker texts, under the list of established conditions |
-| one derivation step per successful `eval` | its `formula`, the slots it substituted (`vars`) and its `result` |
-| the answer | the `answer` marker text |
+| the title | the first accepted `record_start` row's `title` |
+| the conditions | the accepted `set` rows, accumulated per slot name; a deletion removes the name |
+| the messages | the accepted `record_message` rows, each with its `seq` and its `hide` flag |
+| the steps | the accepted `eval` rows carrying a formula: `seq`, `formula`, the slots it read and its result |
+| the closing text | the last accepted `record_end` row's `text` |
 
-- Failed rows and `get` rows are skipped: the article is built from the derivation that succeeded and the numbers it produced.
-- `formula` is what makes the derivation recoverable — the record is the only place the formula survives, so a step that is never taken leaves a gap the article cannot fill.
-- Every number in the article must come from those steps and the answer; the generation prompt forbids inventing or recomputing one, and forbids reproducing the record's internal step labels as headings.
-- **Formats**: Markdown (`.md`) and LaTeX (`.tex`). For LaTeX the host owns the document shell — XeLaTeX, `ctexart` for zh-CN and `article` with `fontspec` for en, plus amsmath, siunitx and unicode-math, with the fixed title and author — and the model writes the body only. PDF compilation is LaTeX-only and optional, driven by `latexmk` (or `texify`) around `xelatex`.
-- **Language**: `auto` (the language of the question), `zh-CN` or `en`. The shell language is resolved before generation, so an auto job probes the question text.
-- **Job phases**: prepare → generate → write → compile. A LaTeX job writes its source, its PDF and the compiler's artifacts into a folder named after the file; a Markdown job is written flat and is never compiled.
-- The file name is forced to the format's extension, and defaults to `reckoner-<first 8 characters of the record id>` when none is given. The output directory, language, format and compile toggle are remembered in `state.json` (§9).
+- Refused rows and `get` rows carry nothing to write, so they are skipped: the article is built from the derivation that succeeded and the numbers it produced.
+- The messages and the steps are interleaved by `seq`, so an explanation sits next to the steps it covers.
+- A message with `hide: true` becomes an author's note in the facts: the writer is told it is guidance that must not be copied, quoted, or allowed to change a recorded number. A message without `hide` becomes the record's own explanation.
+- Every number in the facts is cut before it reaches the model: a non-zero number below `1e-3` or at least `1e6` is written in exponential form with four decimals, and any other number is rounded to four decimal places. A field named `dim` keeps its 7 integers unchanged. The cut applies to the prompt only; the record keeps the stored numbers.
+- **Formats.** Markdown (`.md`) and LaTeX (`.tex`). For LaTeX the model writes the body only: the host refuses a body carrying document-restructuring commands, unbalanced braces or an odd number of `$`, and wraps the rest in a XeLaTeX document shell, `ctexart` for zh-CN and `article` with `fontspec` for en, with amsmath, siunitx and unicode-math, and with the fixed title and author.
+- **Language.** `auto`, `zh-CN` or `en`. The shell language is resolved before generation, so an auto job probes the record's own prose (title, messages and closing text) for CJK ideographs.
+- **Job phases.** prepare, generate, write, compile. A LaTeX article is written into a folder named after the file, which also receives the PDF and the compiler's artifacts; a Markdown article is written flat and is never compiled.
+- PDF compilation is LaTeX-only and optional. It runs a driver, `latexmk` preferred and `texify` as the fallback, which in turn runs `xelatex`; the article is written to disk either way, and a compile failure is reported without discarding it.
+- The file name is forced to the format's extension and defaults to `reckoner-<first 8 characters of the record id>`.
+- The article is written as the author's own solution: the prompt forbids mentioning Reckoner, the harness, formulas, derivation steps, records or the generation process, and forbids inventing or recomputing a number.
 
 ## 11. The panel
 
@@ -484,31 +559,32 @@ The records panel is a **Reckoner** entry in the sidebar that opens over the con
 ### 11.1 Records list
 
 - Reads `GET /api/dsh-reckoner/records-index` and polls it every 5 seconds; it never reads a trace body.
-- Newest first. Each row shows the question — or the record id when the question is empty — and the time the record was opened.
-- A record that is still open carries an **incomplete** badge.
-- **Select** mode turns the rows into checkboxes with **Select all** and **Delete selected**, guarded by a confirmation dialog. Deleting removes the record's body and its index row; the record that is currently open cannot be deleted.
+- The open record is pinned above the list with an incomplete badge. The closed records follow, newest first, each showing its title (or its id when the title is empty) and its open and end times.
+- **Select** mode turns the rows into a selection with **Select all** and **Delete selected**, guarded by a confirmation dialog. Deleting removes a closed record's file; the open record never joins the selection, because the endpoint refuses it.
+- A line reports the ids no build can read and offers to delete them, since nothing else can reach them.
 
 ### 11.2 Record detail
 
-- Fetched from `GET /api/dsh-reckoner/records/<id>` — the index meta plus the trace rows — and polled every 5 seconds while the record is open, so a running solve appears live.
-- A title card with the record id, the visible row count, the failed row count and either the sealed time or the incomplete badge.
-- **Display all** off keeps failed rows out of the timeline: they are the engine's account of the attempts, not part of the solution.
-- Rows are grouped into the narrative: consecutive `set` rows collapse into one **Writes ({n})** card (one line per slot, with its revision), consecutive `get` rows into a **Reads ({n})** card, and consecutive failures into a red **Failed attempts ({n})** card showing the sequence number, the tool, the formula when there is one, the `code` and the `error` text.
-- Every successful `eval` gets its own **Eval** card: **Formula**, **Written slot** with its revision (or *(evaluated without writing)* for `target: null`), one row per slot the formula read — `@name` with the stored value — chips that jump to the `set` row that created each of those slots, and **Result** as a tree.
-- Marker rows render as accent-striped cards: **Question**, **Analysis**, **Answer**, **Duplicate open (settled as an error record)** and **Settled with no open record (error record)**.
-- The right-hand column holds the two article buttons — **Generate Markdown** and **Generate LaTeX** — which open the generation setup dialog; progress, the written path and any compile error appear in an overlay that stays visible over both the panel and the session.
+- Fetched from `GET /api/dsh-reckoner/records/<id>` and polled every 5 seconds, so a running solve appears live.
+- A header card with the record id, the count of visible rows, the count of failed rows among them, and either the end time or an incomplete badge.
+- **Display all** off keeps refused rows and messages marked `hide: true` out of the timeline: they are the engine's account and the writer's notes, not part of the solution. The failed count is therefore zero until it is on.
+- Rows are grouped into the narrative: consecutive accepted `set` rows collapse into one **Writes ({n})** card (one line per slot, with its revision), consecutive accepted `get` rows into a **Reads ({n})** card, and consecutive failures into a red **Failed attempts ({n})** card showing the sequence number, the tool, the formula when there is one, the `code` and the `error` text.
+- Every accepted `eval` gets its own card: the formula, the written slot with its revision, one row per slot the formula read with the value it held, chips that jump to the `set` row of each of those slots, and the result as a tree.
+- Marker rows render as accent-striped cards: the record start, a message, the record end, a refused `record_start` and a refused `record_end`.
+- The right-hand column holds the two article buttons, **Generate Markdown** and **Generate LaTeX**, which open the generation setup dialog.
 
 ### 11.3 Host endpoints
 
 | endpoint | purpose |
 |---|---|
-| `GET /api/dsh-reckoner/records-index` | the list's index rows |
-| `GET /api/dsh-reckoner/records/<id>` | one record's index meta and trace rows |
-| `DELETE /api/dsh-reckoner/records/<id>` | removes a record's body and index row; refused while it is open |
+| `GET /api/dsh-reckoner/records-index` | the closed records, the open record and the ids that cannot be read |
+| `GET /api/dsh-reckoner/records/<id>` | one record's identity and trace rows; the open record included, with `endedAt: null` |
+| `DELETE /api/dsh-reckoner/records/<id>` | removes a closed record's file; refused with 409 while it is the open record, 404 when it does not exist |
 | `POST /api/dsh-reckoner/generate` | starts an article job (`recordId`, `format`, `directory`, `fileName`, `language`, `compile`) |
-| `GET /api/dsh-reckoner/generate-progress` | polls the job |
-| `POST /api/dsh-reckoner/generate-cancel` | cancels the job |
-| `GET /api/dsh-reckoner/generate-capability` | the LaTeX toolchain check behind the setup dialog |
-| `GET /api/dsh-reckoner/list-roots`, `GET /api/dsh-reckoner/list-dirs` | the directory browser |
-| `GET` / `PUT /api/dsh-reckoner/generate-dir` | the remembered generation directory and settings |
+| `GET /api/dsh-reckoner/generate-progress` | polls one job's status, percent, phase, path and error |
+| `POST /api/dsh-reckoner/generate-cancel` | cancels a running job |
+| `GET /api/dsh-reckoner/generate-capability` | the LaTeX toolchain and document-shell probe behind the setup dialog |
+| `GET /api/dsh-reckoner/list-roots`, `GET /api/dsh-reckoner/list-dirs` | the output-directory browser |
+| `GET /api/dsh-reckoner/directory-tree.css` | the vendored stylesheet the panel injects |
+| `GET` / `PUT /api/dsh-reckoner/generate-dir` | the remembered generation directory, language, format and compile toggle |
 | `POST /api/dsh-reckoner/reveal` | opens a generated file or its folder in the host's file manager |
