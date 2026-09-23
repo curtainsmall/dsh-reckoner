@@ -285,6 +285,8 @@ async function generateArticle(
   const { system, user } = buildArticlePrompt(facts, promptLanguage, format)
   const startedAt = Date.now()
   let text = ''
+  /** The provider's own finish reason, kept so an empty result can name it instead of guessing. */
+  let seenFinish: string | undefined
   for await (const raw of llm.stream({
     provider: route.provider,
     model: route.model,
@@ -293,20 +295,44 @@ async function generateArticle(
     maxTokens: 4096,
     signal,
   })) {
-    const chunk = raw as { type?: string; text?: string; reason?: string }
+    const chunk = raw as {
+      type?: string
+      text?: string
+      reason?: string | { kind?: string; failure?: { message?: string } }
+    }
     if (chunk.type === 'text-delta') {
       text += chunk.text ?? ''
     } else if (chunk.type === 'tool-call-delta') {
       throw new Error('the generation model unexpectedly requested a tool')
-    } else if (chunk.type === 'finish' && chunk.reason === 'aborted') {
-      throw new Error('article generation was aborted')
+    } else if (chunk.type === 'finish') {
+      // The finish chunk carries the provider's reason as an object (`{kind, failure}`);
+      // a bare string is tolerated too. Without this the reason is silently lost and any
+      // failed call surfaces as "no article text", which is what the first attempt of a
+      // cold provider looks like.
+      const reason = chunk.reason
+      const kind = typeof reason === 'string' ? reason : reason?.kind
+      const detail = typeof reason === 'string' ? '' : (reason?.failure?.message ?? '')
+      seenFinish = kind ?? seenFinish
+      if (kind === 'aborted') throw new Error('article generation was aborted')
+      if (kind === 'error') {
+        if (text.trim().length === 0) {
+          throw new Error(`the model call failed: ${detail.length > 0 ? detail : 'the provider reported an error without a message'}`)
+        }
+        log.warn('article generation finished with an error after some text', { detail })
+      }
+      if (kind === 'max-tokens') {
+        if (text.trim().length === 0) throw new Error('the model hit its token limit before producing any article text')
+        log.warn('article generation was cut off by the token limit', { chars: text.length })
+      }
     }
     if (onProgress !== undefined) {
       onProgress(Math.min(90, 10 + ((Date.now() - startedAt) / 30_000) * 80))
     }
   }
   const trimmed = text.trim()
-  if (trimmed.length === 0) throw new Error('the model produced no article text')
+  if (trimmed.length === 0) {
+    throw new Error(`the model produced no article text (finish: ${seenFinish ?? 'none'})`)
+  }
   if (templateLanguage === undefined) return trimmed
   const document = buildLatexDocument(trimmed, templateLanguage)
   if (!document.ok) throw new Error(`LaTeX validation failed: ${document.error}`)
