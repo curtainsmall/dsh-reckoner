@@ -66,7 +66,7 @@ describe('the record markers', () => {
     expect(typeof id).toBe('string')
     const listing = engine.listRecords()
     expect(listing.rows).toEqual([])
-    expect(listing.unknown).toBe(0)
+    expect(listing.unknownIds).toEqual([])
     expect(listing.open?.id).toBe(id)
     expect(listing.open?.title).toBe('The current through R2')
     expect(typeof listing.open?.openedAt).toBe('number')
@@ -135,7 +135,7 @@ describe('the record markers', () => {
 
   it('refuses record_end with no record open and writes nothing', () => {
     expect(engine.markerEnd('nothing')).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
-    expect(engine.listRecords()).toMatchObject({ rows: [], open: null, unknown: 0 })
+    expect(engine.listRecords()).toMatchObject({ rows: [], open: null, unknownIds: [] })
     expect(existsSync(join(home, 'open-record.jsonl'))).toBe(false)
     expect(existsSync(join(home, 'records'))).toBe(false)
   })
@@ -415,7 +415,7 @@ describe('the roster', () => {
 
     const listing = engine.listRecords()
     expect(listing.open).toBeNull()
-    expect(listing.unknown).toBe(0)
+    expect(listing.unknownIds).toEqual([])
     expect(listing.rows.map((row) => row.id)).toEqual([second, first])
     expect(listing.rows.map((row) => row.title)).toEqual(['second', 'first'])
     expect(listing.rows.every((row) => row.version === RECORD_VERSION)).toBe(true)
@@ -456,7 +456,7 @@ describe('the roster', () => {
 
     const listing = engine.listRecords()
     expect(listing.rows.map((row) => row.id)).toEqual([id])
-    expect(listing.unknown).toBe(1)
+    expect(listing.unknownIds).toHaveLength(1)
     expect(engine.readRecordRows('999')).toBeNull()
     expect(engine.summarize('999')).toBeNull()
   })
@@ -475,7 +475,7 @@ describe('the roster', () => {
 
     const listing = engine.listRecords()
     expect(listing.rows).toEqual([])
-    expect(listing.unknown).toBe(1)
+    expect(listing.unknownIds).toHaveLength(1)
     expect(engine.readRecordRows('404')).toBeNull()
   })
 
@@ -536,7 +536,7 @@ describe('recovery', () => {
     expect(revived.openRecordId()).toBeNull()
     expect(existsSync(openFile)).toBe(false)
     expect(revived.opSet('R1', { num: 1 })).toMatchObject({ ok: false, code: 'ENGINE_OPEN_RECORD_NOT_FOUND' })
-    expect(revived.listRecords()).toMatchObject({ rows: [], open: null, unknown: 0 })
+    expect(revived.listRecords()).toMatchObject({ rows: [], open: null, unknownIds: [] })
   })
 
   it('discards an open-record.jsonl written by an older version', () => {

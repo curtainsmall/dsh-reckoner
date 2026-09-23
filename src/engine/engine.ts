@@ -46,11 +46,12 @@ interface OpenRecord {
   seq: number
 }
 
-/** What the list endpoint reports: the closed records, the unclosed one, and how many are unreadable. */
+/** What the list endpoint reports: the closed records, the unclosed one, and the ids that cannot be read. */
 export interface RecordListing {
   readonly rows: RecordSummary[]
   readonly open: { id: string; title: string; openedAt: number } | null
-  readonly unknown: number
+  /** Records no build can show (no header line, or a version below the current one); the count is its length. */
+  readonly unknownIds: string[]
 }
 
 export interface GetOptions {
@@ -74,7 +75,7 @@ export class Engine {
   private readonly now: () => number
   private readonly slots = new Map<string, SlotEntry>()
   private open: OpenRecord | null = null
-  private roster: { mtime: number; rows: RecordSummary[]; unknown: number } | null = null
+  private roster: { mtime: number; rows: RecordSummary[]; unknownIds: string[] } | null = null
 
   constructor(readonly home: string, options: EngineOptions = {}) {
     this.store = new RecordStore(home)
@@ -132,28 +133,28 @@ export class Engine {
     this.write(target, parseSetValue(result, `the stored result of "${target}"`))
   }
 
-  /** The list: closed records newest first, the unclosed record, and the unreadable count. */
+  /** The list: closed records newest first, the unclosed record, and the ids that cannot be read. */
   listRecords(): RecordListing {
     const mtime = this.store.recordsDirMtime()
     if (this.roster === null || this.roster.mtime !== mtime) {
       const rows: RecordSummary[] = []
-      let unknown = 0
+      const unknownIds: string[] = []
       for (const id of this.store.listRecordIds()) {
         const file = this.store.readRecord(id)
         if (file === null) continue
         const summary = file.header === null || file.header.version < RECORD_VERSION ? null : summarizeRows(file.rows)
         if (summary === null) {
-          unknown += 1
+          unknownIds.push(id)
           continue
         }
         rows.push({ id, version: file.header!.version, ...summary })
       }
-      this.roster = { mtime, rows, unknown }
+      this.roster = { mtime, rows, unknownIds }
     }
     return {
       rows: this.roster.rows,
       open: this.open === null ? null : { id: this.open.id, title: this.open.title, openedAt: this.open.openedAt },
-      unknown: this.roster.unknown,
+      unknownIds: this.roster.unknownIds,
     }
   }
 

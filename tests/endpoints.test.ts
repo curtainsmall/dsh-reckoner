@@ -1,7 +1,7 @@
 /**
  * The record endpoints the panel reads: the list, one record's body, and the
  * delete route. These pin the wire contract the client depends on - the list's
- * `{rows, open, unknown}`, the body's identity fields and the trace rows'
+ * `{rows, open, unknownIds}`, the body's identity fields and the trace rows'
  * `content`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -26,7 +26,7 @@ interface FakeResponse {
 interface IndexBody {
   rows: Array<Record<string, unknown>>
   open: { id: string; title: string; openedAt: number } | null
-  unknown: number
+  unknownIds: string[]
 }
 
 interface RecordBody {
@@ -131,10 +131,10 @@ describe('the records endpoints', () => {
   it('lists the closed records with the open one apart and the unknown count', () => {
     const { status, json } = call(routeFor(INDEX), 'GET', INDEX)
     expect(status).toBe(200)
-    expect(Object.keys(json as object).sort()).toEqual(['open', 'rows', 'unknown'])
+    expect(Object.keys(json as object).sort()).toEqual(['open', 'rows', 'unknownIds'])
     const listing = json as IndexBody
     expect(listing.open).toBeNull()
-    expect(listing.unknown).toBe(0)
+    expect(listing.unknownIds).toEqual([])
     expect(listing.rows).toHaveLength(1)
     const row = listing.rows[0]!
     expect(Object.keys(row).sort()).toEqual(['endedAt', 'id', 'openedAt', 'title', 'version'])
@@ -214,7 +214,7 @@ describe('the records endpoints', () => {
     )
 
     const listing = index()
-    expect(listing.unknown).toBe(1)
+    expect(listing.unknownIds).toHaveLength(1)
     expect(listing.rows.some((row) => row['id'] === '999')).toBe(false)
     expect(body('999').status).toBe(404)
   })
