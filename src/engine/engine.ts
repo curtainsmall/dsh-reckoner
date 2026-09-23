@@ -8,12 +8,13 @@
  * The slot table lives exactly as long as the record is open: `record_end`
  * clears it, so a non-empty table means an unclosed record exists.
  */
-import { fail, isEngineError } from '../errors.ts'
+import { EngineErrorCode, fail, isEngineError } from '../errors.ts'
 import { describe } from './describe.ts'
 import { evaluateFormula, type SlotAccess } from './formula-eval.ts'
 import { parseFormula } from './formula-parser.ts'
 import { requireIdentifier } from './identifier.ts'
-import { RECORD_VERSION, RecordStore, type RecordSummary, type TraceRow, type TraceTool } from './record.ts'
+import { RECORD_VERSION, RecordStore, type RecordSummary, type TraceRow } from './record.ts'
+import { TraceTool } from './trace-tools.ts'
 import { type DimSpec, parseDim } from './si-vector.ts'
 import {
   assertIntegralValue,
@@ -62,10 +63,10 @@ export interface GetOptions {
 
 /** The title, start and end a record's rows carry. */
 function summarizeRows(rows: readonly TraceRow[]): { title: string; openedAt: number; endedAt: number } | null {
-  const start = rows.find((row) => row.ok && row.tool === 'record_start')
+  const start = rows.find((row) => row.ok && row.tool === TraceTool.Start)
   const title = start?.content['title']
   if (start === undefined || typeof title !== 'string') return null
-  const end = [...rows].reverse().find((row) => row.ok && row.tool === 'record_end')
+  const end = [...rows].reverse().find((row) => row.ok && row.tool === TraceTool.End)
   const last = rows[rows.length - 1]
   return { title, openedAt: start.at, endedAt: end?.at ?? last?.at ?? start.at }
 }
@@ -96,7 +97,7 @@ export class Engine {
       this.store.discardOpen()
       return
     }
-    const start = file.rows.find((row) => row.ok && row.tool === 'record_start')
+    const start = file.rows.find((row) => row.ok && row.tool === TraceTool.Start)
     const title = start?.content['title']
     const id = start?.content['record']
     if (start === undefined || typeof title !== 'string' || typeof id !== 'string') {
@@ -107,8 +108,8 @@ export class Engine {
     for (const row of file.rows) {
       if (!row.ok) continue
       try {
-        if (row.tool === 'set') this.replaySet(row)
-        if (row.tool === 'eval') this.replayEval(row)
+        if (row.tool === TraceTool.Set) this.replaySet(row)
+        if (row.tool === TraceTool.Eval) this.replayEval(row)
       } catch {
         // A row that no longer parses is skipped: recovery must never keep the plugin from mounting.
       }
@@ -181,30 +182,30 @@ export class Engine {
   }
 
   opSet(name: unknown, value: unknown): Receipt {
-    return this.run('set', () => {
+    return this.run(TraceTool.Set, () => {
       this.requireOpenRecord()
       const slotName = requireIdentifier(name, 'the set name')
       if (value === null) {
         this.slots.delete(slotName)
-        this.appendRow('set', true, { name: slotName, value: null })
+        this.appendRow(TraceTool.Set, true, { name: slotName, value: null })
         return { ok: true, name: slotName, rev: null, value: null }
       }
       const parsed = parseSetValue(value)
       const rev = this.write(slotName, parsed)
       const stored = renderValue(parsed, { spellDim: storedDimSpelling })
-      this.appendRow('set', true, { name: slotName, value: stored })
+      this.appendRow(TraceTool.Set, true, { name: slotName, value: stored })
       return { ok: true, name: slotName, rev, value: stored }
     })
   }
 
   opGet(name: unknown, options: GetOptions = {}): Receipt {
-    return this.run('get', () => {
+    return this.run(TraceTool.Get, () => {
       this.requireOpenRecord()
       const slotName = requireIdentifier(name, 'the get name')
       const entry = this.slots.get(slotName)
       if (entry === undefined) {
         fail(
-          'ENGINE_SLOT_NOT_FOUND',
+          EngineErrorCode.SlotNotFound,
           `the slot "${slotName}" does not exist yet; declare it with set {name:"${slotName}", value:{num:..., dim:...}} before reading it.`,
         )
       }
@@ -219,20 +220,20 @@ export class Engine {
         ...(spec === undefined || spec.name === undefined ? {} : { scale: spec }),
         spellDim: (dim) => (spec === undefined ? mentionDim(dim) : (spec.name ?? spec.vector)),
       })
-      this.appendRow('get', true, { name: slotName, value: rendered })
+      this.appendRow(TraceTool.Get, true, { name: slotName, value: rendered })
       return { ok: true, name: slotName, value: rendered }
     })
   }
 
   opEval(formula: unknown, target: unknown): Receipt {
-    return this.run('eval', () => {
+    return this.run(TraceTool.Eval, () => {
       this.requireOpenRecord()
       if (typeof formula !== 'string') {
-        fail('ENGINE_INVALID_ARGS', `eval takes the formula as a string; got ${describe(formula)}.`)
+        fail(EngineErrorCode.InvalidArgs, `eval takes the formula as a string; got ${describe(formula)}.`)
       }
       if (target === undefined || target === null) {
         fail(
-          'ENGINE_INVALID_ARGS',
+          EngineErrorCode.InvalidArgs,
           'eval needs target: the slot name the result is written into. Read the value back with get - eval does not return it.',
         )
       }
@@ -249,7 +250,7 @@ export class Engine {
       const value = evaluateFormula(parseFormula(formula), slots)
       assertIntegralValue(value, `the slot "${targetName}"`)
       const rev = this.write(targetName, value)
-      this.appendRow('eval', true, {
+      this.appendRow(TraceTool.Eval, true, {
         formula,
         target: targetName,
         rev,
@@ -261,18 +262,18 @@ export class Engine {
   }
 
   markerStart(title: unknown): Receipt {
-    return this.run('record_start', () => {
-      const recordTitle = readText(title, 'record_start', 'title')
+    return this.run(TraceTool.Start, () => {
+      const recordTitle = readText(title, TraceTool.Start, 'title')
       if (this.open !== null) {
         fail(
-          'ENGINE_OPEN_RECORD_FOUND',
+          EngineErrorCode.OpenRecordFound,
           `the record "${this.open.id}" is not closed yet; call record_end for it first - a record carries exactly one title.`,
         )
       }
       const id = this.allocateRecordId()
       this.store.beginOpen()
       this.open = { id, title: recordTitle, openedAt: this.now(), seq: 0 }
-      const row = this.appendRow('record_start', true, { title: recordTitle, record: id })
+      const row = this.appendRow(TraceTool.Start, true, { title: recordTitle, record: id })
       // The written row is the record's authoritative start, so the in-memory span matches it.
       if (row !== null) this.open = { id, title: recordTitle, openedAt: row.at, seq: row.seq }
       return { ok: true }
@@ -280,31 +281,31 @@ export class Engine {
   }
 
   markerMessage(text: unknown, hide?: unknown): Receipt {
-    return this.run('record_message', () => {
+    return this.run(TraceTool.Message, () => {
       this.requireOpenRecord()
-      const message = readText(text, 'record_message', 'text')
+      const message = readText(text, TraceTool.Message, 'text')
       if (hide !== undefined && hide !== null && typeof hide !== 'boolean') {
-        fail('ENGINE_INVALID_ARGS', `record_message takes hide as a boolean; got ${describe(hide)}.`)
+        fail(EngineErrorCode.InvalidArgs, `record_message takes hide as a boolean; got ${describe(hide)}.`)
       }
-      this.appendRow('record_message', true, hide === true ? { text: message, hide: true } : { text: message })
+      this.appendRow(TraceTool.Message, true, hide === true ? { text: message, hide: true } : { text: message })
       return { ok: true }
     })
   }
 
   markerEnd(text?: unknown): Receipt {
-    return this.run('record_end', () => {
+    return this.run(TraceTool.End, () => {
       if (this.open === null) {
         fail(
-          'ENGINE_OPEN_RECORD_NOT_FOUND',
+          EngineErrorCode.OpenRecordNotFound,
           'no record is open, so there is nothing to close; call record_start first.',
         )
       }
       if (text !== undefined && text !== null && typeof text !== 'string') {
-        fail('ENGINE_INVALID_ARGS', `record_end takes the closing text as a string; got ${describe(text)}.`)
+        fail(EngineErrorCode.InvalidArgs, `record_end takes the closing text as a string; got ${describe(text)}.`)
       }
       const current = this.open
       const closing = typeof text === 'string' && text.trim().length > 0 ? text : undefined
-      this.appendRow('record_end', true, closing === undefined ? { record: current.id } : { text: closing, record: current.id })
+      this.appendRow(TraceTool.End, true, closing === undefined ? { record: current.id } : { text: closing, record: current.id })
       this.store.closeOpen(current.id)
       this.slots.clear()
       this.open = null
@@ -335,7 +336,7 @@ export class Engine {
   private requireOpenRecord(): void {
     if (this.open !== null) return
     fail(
-      'ENGINE_OPEN_RECORD_NOT_FOUND',
+      EngineErrorCode.OpenRecordNotFound,
       'no record is open: call record_start first. It opens a record, and set / get / eval are refused until a record is open.',
     )
   }
@@ -344,7 +345,7 @@ export class Engine {
     try {
       return body()
     } catch (error) {
-      const code = isEngineError(error) ? error.code : 'ENGINE_UNKNOWN_ERROR'
+      const code = isEngineError(error) ? error.code : EngineErrorCode.UnknownError
       const message = isEngineError(error)
         ? error.message
         : `internal error: ${error instanceof Error ? error.message : String(error)}`
@@ -371,7 +372,7 @@ export class Engine {
 /** A non-empty text argument; `record_start`'s title and `record_message`'s text share the rule. */
 function readText(input: unknown, tool: string, field: string): string {
   if (typeof input !== 'string' || input.trim().length === 0) {
-    fail('ENGINE_INVALID_ARGS', `${tool} takes a non-empty ${field} string; got ${describe(input)}.`)
+    fail(EngineErrorCode.InvalidArgs, `${tool} takes a non-empty ${field} string; got ${describe(input)}.`)
   }
   return input
 }
@@ -379,13 +380,13 @@ function readText(input: unknown, tool: string, field: string): string {
 function readForm(input: unknown): 'rect' | 'polar' | undefined {
   if (input === undefined || input === null) return undefined
   if (input === 'rect' || input === 'polar') return input
-  fail('ENGINE_INVALID_ARGS', `form must be "rect" or "polar"; got ${describe(input)}.`)
+  fail(EngineErrorCode.InvalidArgs, `form must be "rect" or "polar"; got ${describe(input)}.`)
 }
 
 function readDigits(input: unknown): number | undefined {
   if (input === undefined || input === null) return undefined
   if (typeof input !== 'number' || !Number.isInteger(input) || input < 1) {
-    fail('ENGINE_INVALID_ARGS', `digits must be a positive integer (the number of significant digits to keep); got ${describe(input)}.`)
+    fail(EngineErrorCode.InvalidArgs, `digits must be a positive integer (the number of significant digits to keep); got ${describe(input)}.`)
   }
   return input
 }

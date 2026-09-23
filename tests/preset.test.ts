@@ -1,3 +1,4 @@
+import { EngineErrorCode } from '../src/errors.ts'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { parseSkillFile } from '../src/skill.ts'
@@ -81,25 +82,25 @@ describe('the packaged skills', () => {
   it('names every error code in the manual', () => {
     const skill = parseSkillFile(read('skills/reckoner-interface.md'))
     for (const code of [
-      'ENGINE_INVALID_FORMULA',
-      'ENGINE_INVALID_NUMBER',
-      'ENGINE_INVALID_IDENTIFIER',
-      'ENGINE_INVALID_DIMENSION',
-      'ENGINE_INVALID_NOTATION',
-      'ENGINE_INVALID_ARITY',
-      'ENGINE_SLOT_NOT_FOUND',
-      'ENGINE_NAME_NOT_BOUND',
-      'ENGINE_INCOMPATIBLE_DIMENSION',
-      'ENGINE_UNSUPPORTED_OPERATION',
-      'ENGINE_INVALID_INDEX',
-      'ENGINE_UNDEFINED_RESULT',
-      'ENGINE_UNSUPPORTED_INDEX',
-      'ENGINE_FIELD_NOT_FOUND',
-      'ENGINE_UNSUPPORTED_SYMBOL',
-      'ENGINE_INVALID_ARGS',
-      'ENGINE_OPEN_RECORD_NOT_FOUND',
-      'ENGINE_OPEN_RECORD_FOUND',
-      'ENGINE_UNKNOWN_ERROR',
+      EngineErrorCode.InvalidFormula,
+      EngineErrorCode.InvalidNumber,
+      EngineErrorCode.InvalidIdentifier,
+      EngineErrorCode.InvalidDimension,
+      EngineErrorCode.InvalidNotation,
+      EngineErrorCode.InvalidArity,
+      EngineErrorCode.SlotNotFound,
+      EngineErrorCode.NameNotBound,
+      EngineErrorCode.IncompatibleDimension,
+      EngineErrorCode.UnsupportedOperation,
+      EngineErrorCode.InvalidIndex,
+      EngineErrorCode.UndefinedResult,
+      EngineErrorCode.UnsupportedIndex,
+      EngineErrorCode.FieldNotFound,
+      EngineErrorCode.UnsupportedSymbol,
+      EngineErrorCode.InvalidArgs,
+      EngineErrorCode.OpenRecordNotFound,
+      EngineErrorCode.OpenRecordFound,
+      EngineErrorCode.UnknownError,
     ]) {
       expect(skill.content).toContain(code)
     }

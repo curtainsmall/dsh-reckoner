@@ -12,8 +12,10 @@ import { join } from 'node:path'
 /** The record design version this build writes and accepts. */
 export const RECORD_VERSION = 1
 
-/** One tool's row in a record. */
-export type TraceTool = 'eval' | 'set' | 'get' | 'record_start' | 'record_message' | 'record_end'
+/** The tool names, imported here and re-exported so callers import trace types from one place. */
+import { isTraceTool, TraceTool } from './trace-tools.ts'
+
+export { TraceTool }
 
 /** A trace row: what was called, whether it worked, and the content that tool stores. */
 export interface TraceRow {
@@ -85,9 +87,10 @@ function toRow(value: unknown): TraceRow | null {
   const ok = bag['ok']
   const content = bag['content']
   if (typeof seq !== 'number' || seq <= 0) return null
-  if (typeof tool !== 'string' || typeof at !== 'number' || typeof ok !== 'boolean') return null
+  if (!isTraceTool(tool)) return null
+  if (typeof at !== 'number' || typeof ok !== 'boolean') return null
   if (typeof content !== 'object' || content === null || Array.isArray(content)) return null
-  return { seq, at, tool: tool as TraceTool, ok, content: content as Record<string, unknown> }
+  return { seq, at, tool, ok, content: content as Record<string, unknown> }
 }
 
 /** Split a record file's text into its header and its rows. */

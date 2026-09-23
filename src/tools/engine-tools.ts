@@ -8,6 +8,7 @@ import { defineJsonTool } from '../tool.ts'
 import { notationVocabulary } from '../engine/notation.ts'
 import { allSiNames, SI_COMPONENT_ORDER } from '../engine/si-vector.ts'
 import type { Engine } from '../engine/engine.ts'
+import { TraceTool } from '../engine/trace-tools.ts'
 
 declare module 'cordis' {
   interface Context {
@@ -49,7 +50,7 @@ const RECORD_DESCRIPTION = 'set, get and eval are refused while no record is ope
 export function createEngineTools(engine: Engine): Array<ReturnType<typeof defineJsonTool>> {
   return [
     defineJsonTool({
-      name: 'set',
+      name: TraceTool.Set,
       description:
         'Write one slot: each quantity the user gave, transcribed. The engine converts nothing by itself - write ' +
         `the value in SI and let dim name the quantity. The accepted names are ${allSiNames().join(', ')}. ` +
@@ -61,7 +62,7 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
       execute: (args) => engine.opSet(args.name as string, args.value) as never,
     }),
     defineJsonTool({
-      name: 'get',
+      name: TraceTool.Get,
       description:
         `Read one slot: the only way to read a value, because eval does not return one. ${DIM_DESCRIPTION} ` +
         `${FORM_DESCRIPTION} ${DIGITS_DESCRIPTION}. The receipt is the value in the tagged shape, so it can be fed straight back to set.`,
@@ -74,7 +75,7 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
       execute: (args) => engine.opGet(args.name as string, { form: args.form, digits: args.digits, dim: args.dim }) as never,
     }),
     defineJsonTool({
-      name: 'eval',
+      name: TraceTool.Eval,
       description:
         'Evaluate ONE formula and write the result into the target slot. The formula is a single expression: there ' +
         'is no assignment inside it, no statement sequence and no comparison - @name READS a slot, and target is ' +
@@ -90,7 +91,7 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
       execute: (args) => engine.opEval(args.formula as string, args.target as string) as never,
     }),
     defineJsonTool({
-      name: 'record_start',
+      name: TraceTool.Start,
       description:
         'Open a record: it carries this calculation from here on and is written to disk when it closes. Pass a short ' +
         'title - about the length of an article title, not a paragraph; the record is listed and the article is ' +
@@ -101,7 +102,7 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
       execute: (args) => engine.markerStart(args.title as string) as never,
     }),
     defineJsonTool({
-      name: 'record_message',
+      name: TraceTool.Message,
       description:
         'Write one piece of explanation into the open record: what happens, what was found, why a step is taken. ' +
         'Call it as often as the work needs - one message per thought, several in a row when the record is long. ' +
@@ -114,7 +115,7 @@ export function createEngineTools(engine: Engine): Array<ReturnType<typeof defin
       execute: (args) => engine.markerMessage(args.text as string, args.hide) as never,
     }),
     defineJsonTool({
-      name: 'record_end',
+      name: TraceTool.End,
       description:
         'Close the open record, optionally with a closing text (the conclusion the user should read). The record ' +
         'becomes readable and can be written up as an article. It fails when no record is open - the receipt is the ' +

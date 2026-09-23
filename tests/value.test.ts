@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EngineError } from '../src/errors.ts'
+import { EngineError, EngineErrorCode } from '../src/errors.ts'
 import {
   assertIntegralValue,
   assertValueDim,
@@ -87,22 +87,22 @@ describe('the set value structure', () => {
   })
 
   it('refuses a tag combination that is not exactly one complete tag', () => {
-    expect(failureCode(() => parseSetValue({ num: 1, re: 2, im: 3 }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue({ num: 1, array: [1] }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue({ re: 2 }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue({ mag: 2 }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue({}))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue([1, 2]))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue(null))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => parseSetValue({ num: 1, re: 2, im: 3 }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue({ num: 1, array: [1] }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue({ re: 2 }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue({ mag: 2 }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue({}))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue([1, 2]))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue(null))).toBe(EngineErrorCode.InvalidArgs)
   })
 
   it('refuses a dim on an object, an unknown key, a tagged array element and a non-number', () => {
-    expect(failureCode(() => parseSetValue({ object: { a: { num: 1 } }, dim: 'ohm' }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue({ num: 1, kind: 'ohm' }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue({ array: [{ num: 1 }] }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue({ num: '1' }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => parseSetValue({ num: 1, dim: 'bogus' }))).toBe('ENGINE_INVALID_DIMENSION')
-    expect(failureCode(() => parseSetValue({ object: { '1x': { num: 1 } } }))).toBe('ENGINE_INVALID_IDENTIFIER')
+    expect(failureCode(() => parseSetValue({ object: { a: { num: 1 } }, dim: 'ohm' }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue({ num: 1, kind: 'ohm' }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue({ array: [{ num: 1 }] }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue({ num: '1' }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => parseSetValue({ num: 1, dim: 'bogus' }))).toBe(EngineErrorCode.InvalidDimension)
+    expect(failureCode(() => parseSetValue({ object: { '1x': { num: 1 } } }))).toBe(EngineErrorCode.InvalidIdentifier)
   })
 })
 
@@ -180,7 +180,7 @@ describe('claims about a stored value', () => {
 
   it('accepts the vector it holds and refuses another one', () => {
     expect(() => assertValueDim(value, parseDim('ohm', 'dim'), 'the slot "R1"')).not.toThrow()
-    expect(failureCode(() => assertValueDim(value, parseDim('volt', 'dim'), 'the slot "R1"'))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
+    expect(failureCode(() => assertValueDim(value, parseDim('volt', 'dim'), 'the slot "R1"'))).toBe(EngineErrorCode.IncompatibleDimension)
     expect(failureMessage(() => assertValueDim(value, parseDim('volt', 'dim'), 'the slot "R1"'))).toContain('ohm')
   })
 
@@ -192,7 +192,7 @@ describe('claims about a stored value', () => {
 
   it('refuses a fractional SI vector on the way into a slot', () => {
     const fractional: Value = { kind: 'number', num: 2, dim: [0.5, 0, 0, 0, 0, 0, 0] }
-    expect(failureCode(() => assertIntegralValue(fractional, 'the slot "x"'))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
+    expect(failureCode(() => assertIntegralValue(fractional, 'the slot "x"'))).toBe(EngineErrorCode.IncompatibleDimension)
     expect(() => assertIntegralValue(value, 'the slot "R1"')).not.toThrow()
   })
 })

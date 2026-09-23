@@ -1,3 +1,4 @@
+import { EngineErrorCode } from '../src/errors.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -148,7 +149,7 @@ describe('file sink', () => {
     cleanup(() => { run.close() })
     expect(run.file.startsWith(join(home, 'logs'))).toBe(true)
     expect(basename(run.file)).toMatch(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.\d{3}\.log$/)
-    log.warn('engine call failed', { code: 'ENGINE_INCOMPATIBLE_DIMENSION', took_ms: 30001 })
+    log.warn('engine call failed', { code: EngineErrorCode.IncompatibleDimension, took_ms: 30001 })
     // the run's own record is the file: the name is the start instant, the last line is the end
     expect(readFileSync(run.file, 'utf8'))
       .toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} WARN {2}engine call failed code=ENGINE_INCOMPATIBLE_DIMENSION took_ms=30001\n$/)

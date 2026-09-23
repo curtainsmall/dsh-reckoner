@@ -6,7 +6,7 @@
  * spellings of the same vector are the same quantity, and the table holds SI
  * names only - any other unit is converted by the caller before `set`.
  */
-import { fail } from '../errors.ts'
+import { EngineErrorCode, fail } from '../errors.ts'
 import { describe } from './describe.ts'
 
 /** 7 exponents, ISO 80000-1 order: m, kg, s, A, K, mol, cd. */
@@ -138,7 +138,7 @@ export function parseDim(input: unknown, where: string): DimSpec {
     const found = siNameLookup(input)
     if (found === undefined) {
       fail(
-        'ENGINE_INVALID_DIMENSION',
+        EngineErrorCode.InvalidDimension,
         `${where}: "${input}" is not an SI name. Write one of ${allSiNames().join(', ')}, or 7 integers in the order ${SI_COMPONENT_ORDER}, for example [1,0,-1,0,0,0,0] for m/s.`,
       )
     }
@@ -147,14 +147,14 @@ export function parseDim(input: unknown, where: string): DimSpec {
   if (Array.isArray(input)) {
     if (input.length !== 7) {
       fail(
-        'ENGINE_INVALID_DIMENSION',
+        EngineErrorCode.InvalidDimension,
         `${where}: an SI vector needs exactly 7 exponents in the order ${SI_COMPONENT_ORDER}; got ${input.length}.`,
       )
     }
     for (const component of input) {
       if (typeof component !== 'number' || !Number.isInteger(component)) {
         fail(
-          'ENGINE_INVALID_DIMENSION',
+          EngineErrorCode.InvalidDimension,
           `${where}: every exponent of an SI vector must be an integer; got ${describe(input)}.`,
         )
       }
@@ -162,7 +162,7 @@ export function parseDim(input: unknown, where: string): DimSpec {
     return { vector: toSiVector(input as number[]), factor: 1, offset: 0 }
   }
   fail(
-    'ENGINE_INVALID_DIMENSION',
+    EngineErrorCode.InvalidDimension,
     `${where}: expected an SI name or 7 integers in the order ${SI_COMPONENT_ORDER}; got ${describe(input)}.`,
   )
 }

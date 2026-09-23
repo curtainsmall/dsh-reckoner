@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { t, useAppLocale } from './locales.ts'
 import { IconChevronLeft, IconMarkdown, IconTex } from './icons.tsx'
 import { displayValue } from './ui.tsx'
+import { TraceTool } from '../engine/trace-tools.ts'
 import { ArticleFormat } from '../generate.ts'
 import { useGenState } from './generation.ts'
 import { GenerationSetupDialog } from './generation-ui.tsx'
@@ -31,6 +32,16 @@ const backButtonBase: React.CSSProperties = {
   alignItems: 'center',
   gap: 6,
   padding: '4px 8px',
+}
+
+/** The marker flavours the panel draws: one per record tool, plus the refused-call flavour. */
+enum MarkerKind {
+  Start = 'start',
+  Message = 'message',
+  End = 'end',
+  DuplicateStart = 'duplicate-start',
+  DuplicateEnd = 'duplicate-end',
+  None = '',
 }
 
 /** One trace row as the view reads it: the tool's own fields are lifted onto the row. */
@@ -82,11 +93,11 @@ function readSlotNames(vars: unknown): string[] {
  * The marker kind of a row, '' for a non-marker: the tool names the kind, and
  * a failed marker is the duplicate/failure flavour of the same marker.
  */
-function markerKind(tool: string, ok: boolean): string {
-  if (tool === 'record_start') return ok ? 'start' : 'duplicate-start'
-  if (tool === 'record_message') return 'message'
-  if (tool === 'record_end') return ok ? 'end' : 'duplicate-end'
-  return ''
+function markerKind(tool: string, ok: boolean): MarkerKind {
+  if (tool === TraceTool.Start) return ok ? MarkerKind.Start : MarkerKind.DuplicateStart
+  if (tool === TraceTool.Message) return MarkerKind.Message
+  if (tool === TraceTool.End) return ok ? MarkerKind.End : MarkerKind.DuplicateEnd
+  return MarkerKind.None
 }
 
 /**
@@ -94,7 +105,7 @@ function markerKind(tool: string, ok: boolean): string {
  * hides it by default and "Display all" reveals it.
  */
 function isHiddenMessage(row: TraceRow): boolean {
-  return row.tool === 'record_message' && row.hide === true
+  return row.tool === TraceTool.Message && row.hide === true
 }
 
 /**
@@ -262,7 +273,7 @@ type Item =
  * The three marker tools: their rows are the record's own narrative, so each
  * one stands alone instead of joining a writes/reads/failures run.
  */
-const MARKER_TOOLS = ['record_start', 'record_message', 'record_end']
+const MARKER_TOOLS: readonly string[] = [TraceTool.Start, TraceTool.Message, TraceTool.End]
 
 /**
  * Fold consecutive ok set rows into a "writes" card, consecutive ok get rows
@@ -287,13 +298,13 @@ function groupRows(rows: TraceRow[]): Item[] {
       items.push({ kind: 'marker', row })
       continue
     }
-    const runKey = (row.ok && (row.tool === 'set' || row.tool === 'get')) ? row.tool : !row.ok ? 'fail' : null
+    const runKey = (row.ok && (row.tool === TraceTool.Set || row.tool === TraceTool.Get)) ? row.tool : !row.ok ? 'fail' : null
     const currentKey = run.length > 0 ? (run[0]!.ok ? run[0]!.tool : 'fail') : null
     if (runKey !== null && runKey === currentKey) run.push(row)
     else {
       flush()
       if (runKey !== null) run.push(row)
-      else if (row.tool === 'eval' && row.ok) items.push({ kind: 'eval', row })
+      else if (row.tool === TraceTool.Eval && row.ok) items.push({ kind: 'eval', row })
       else items.push({ kind: 'event', row })
     }
   }
@@ -537,11 +548,11 @@ function TimelineItem({ item }: { item: Item }): React.JSX.Element {
 /** Marker label for a row's derived `kind` (see markerKind): start/message/end, or a duplicate flavour. */
 function markerLabel(kind: string): string {
   switch (kind) {
-    case 'start': return t('markerStart')
-    case 'message': return t('markerMessage')
-    case 'end': return t('markerEnd')
-    case 'duplicate-start': return t('markerDuplicateStart')
-    case 'duplicate-end': return t('markerDuplicateEnd')
+    case MarkerKind.Start: return t('markerStart')
+    case MarkerKind.Message: return t('markerMessage')
+    case MarkerKind.End: return t('markerEnd')
+    case MarkerKind.DuplicateStart: return t('markerDuplicateStart')
+    case MarkerKind.DuplicateEnd: return t('markerDuplicateEnd')
     default: return kind
   }
 }

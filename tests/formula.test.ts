@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EngineError } from '../src/errors.ts'
+import { EngineError, EngineErrorCode } from '../src/errors.ts'
 import { evaluateFormula } from '../src/engine/formula-eval.ts'
 import { parseFormula } from '../src/engine/formula-parser.ts'
 import { parseSetValue, type Value } from '../src/engine/value.ts'
@@ -71,17 +71,17 @@ describe('scalar literals', () => {
   })
 
   it('refuses a broken number, a trailing letter and an uppercase exponent', () => {
-    expect(failureCode(() => run('2e'))).toBe('ENGINE_INVALID_NUMBER')
-    expect(failureCode(() => run('1E5'))).toBe('ENGINE_INVALID_IDENTIFIER')
+    expect(failureCode(() => run('2e'))).toBe(EngineErrorCode.InvalidNumber)
+    expect(failureCode(() => run('1E5'))).toBe(EngineErrorCode.InvalidIdentifier)
     expect(failureMessage(() => run('2x'))).toContain('2*x')
-    expect(failureCode(() => run('2jx'))).toBe('ENGINE_INVALID_IDENTIFIER')
+    expect(failureCode(() => run('2jx'))).toBe(EngineErrorCode.InvalidIdentifier)
   })
 
   it('refuses anything outside the charset', () => {
-    expect(failureCode(() => run('"1"'))).toBe('ENGINE_INVALID_FORMULA')
-    expect(failureCode(() => run('1+2;'))).toBe('ENGINE_INVALID_FORMULA')
-    expect(failureCode(() => run('2\u00d73'))).toBe('ENGINE_INVALID_FORMULA')
-    expect(failureCode(() => run('1 + 2 3'))).toBe('ENGINE_INVALID_FORMULA')
+    expect(failureCode(() => run('"1"'))).toBe(EngineErrorCode.InvalidFormula)
+    expect(failureCode(() => run('1+2;'))).toBe(EngineErrorCode.InvalidFormula)
+    expect(failureCode(() => run('2\u00d73'))).toBe(EngineErrorCode.InvalidFormula)
+    expect(failureCode(() => run('1 + 2 3'))).toBe(EngineErrorCode.InvalidFormula)
   })
 })
 
@@ -96,27 +96,27 @@ describe('operators and precedence', () => {
   })
 
   it('needs multiplication written', () => {
-    expect(failureCode(() => run('2@R', { R: OHM }))).toBe('ENGINE_INVALID_FORMULA')
+    expect(failureCode(() => run('2@R', { R: OHM }))).toBe(EngineErrorCode.InvalidFormula)
     expect(number('2*@R', { R: OHM })).toBe(9400)
   })
 
   it('divides by zero only in the domain code', () => {
-    expect(failureCode(() => run('1/0'))).toBe('ENGINE_UNDEFINED_RESULT')
+    expect(failureCode(() => run('1/0'))).toBe(EngineErrorCode.UndefinedResult)
     expect(number('0^0')).toBe(1)
-    expect(failureCode(() => run('0^-1'))).toBe('ENGINE_UNDEFINED_RESULT')
+    expect(failureCode(() => run('0^-1'))).toBe(EngineErrorCode.UndefinedResult)
   })
 })
 
 describe('slots and bound variables', () => {
   it('reads a declared slot and refuses an undeclared one', () => {
     expect(number('@R', { R: OHM })).toBe(4700)
-    expect(failureCode(() => run('@nope'))).toBe('ENGINE_SLOT_NOT_FOUND')
+    expect(failureCode(() => run('@nope'))).toBe(EngineErrorCode.SlotNotFound)
   })
 
   it('treats a bare name as a bound variable only', () => {
-    expect(failureCode(() => run('R', { R: OHM }))).toBe('ENGINE_NAME_NOT_BOUND')
+    expect(failureCode(() => run('R', { R: OHM }))).toBe(EngineErrorCode.NameNotBound)
     expect(failureMessage(() => run('R', { R: OHM }))).toContain('@R')
-    expect(failureCode(() => run('$sum_{k=1}^{N-1}(k)', { N: parseSetValue({ num: 3 }) }))).toBe('ENGINE_NAME_NOT_BOUND')
+    expect(failureCode(() => run('$sum_{k=1}^{N-1}(k)', { N: parseSetValue({ num: 3 }) }))).toBe(EngineErrorCode.NameNotBound)
   })
 
   it('evaluates $sum, $prod and $seq over the inclusive bounds', () => {
@@ -136,9 +136,9 @@ describe('slots and bound variables', () => {
   })
 
   it('refuses a bound that is not an integer with the zero vector, or is inverted', () => {
-    expect(failureCode(() => run('$sum_{k=3}^{1}(k)'))).toBe('ENGINE_INVALID_INDEX')
-    expect(failureCode(() => run('$sum_{k=1}^{2.5}(k)'))).toBe('ENGINE_INVALID_INDEX')
-    expect(failureCode(() => run('$sum_{k=1}^{@R}(k)', { R: OHM }))).toBe('ENGINE_INVALID_INDEX')
+    expect(failureCode(() => run('$sum_{k=3}^{1}(k)'))).toBe(EngineErrorCode.InvalidIndex)
+    expect(failureCode(() => run('$sum_{k=1}^{2.5}(k)'))).toBe(EngineErrorCode.InvalidIndex)
+    expect(failureCode(() => run('$sum_{k=1}^{@R}(k)', { R: OHM }))).toBe(EngineErrorCode.InvalidIndex)
   })
 
   it('builds a row-major two-dimensional array from nested $seq', () => {
@@ -156,17 +156,17 @@ describe('slots and bound variables', () => {
   })
 
   it('refuses a sequence whose elements do not share one SI vector', () => {
-    expect(failureCode(() => run('$seq_{k=1}^{2}(@Z^k)', { Z: OHM }))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
+    expect(failureCode(() => run('$seq_{k=1}^{2}(@Z^k)', { Z: OHM }))).toBe(EngineErrorCode.IncompatibleDimension)
   })
 })
 
 describe('the notation table', () => {
   it('refuses an unknown notation, a missing parenthesis and a position on a constant', () => {
-    expect(failureCode(() => run('$nope(1)'))).toBe('ENGINE_INVALID_NOTATION')
+    expect(failureCode(() => run('$nope(1)'))).toBe(EngineErrorCode.InvalidNotation)
     expect(failureMessage(() => run('$nope(1)'))).toContain('$sum')
-    expect(failureCode(() => run('$abs'))).toBe('ENGINE_INVALID_NOTATION')
-    expect(failureCode(() => run('$pi(2)'))).toBe('ENGINE_INVALID_NOTATION')
-    expect(failureCode(() => run('$pi^{2}'))).toBe('ENGINE_INVALID_FORMULA')
+    expect(failureCode(() => run('$abs'))).toBe(EngineErrorCode.InvalidNotation)
+    expect(failureCode(() => run('$pi(2)'))).toBe(EngineErrorCode.InvalidNotation)
+    expect(failureCode(() => run('$pi^{2}'))).toBe(EngineErrorCode.InvalidFormula)
   })
 
   it('takes a position directly after the name, so $e^(2) is a power', () => {
@@ -175,15 +175,15 @@ describe('the notation table', () => {
   })
 
   it('checks the arity of a function and the bounds of a binding symbol', () => {
-    expect(failureCode(() => run('$min(1)'))).toBe('ENGINE_INVALID_ARITY')
-    expect(failureCode(() => run('$abs(1,2)'))).toBe('ENGINE_INVALID_ARITY')
-    expect(failureCode(() => run('$sum(@R)', { R: OHM }))).toBe('ENGINE_INVALID_ARITY')
-    expect(failureCode(() => run('$limit(x)'))).toBe('ENGINE_INVALID_ARITY')
+    expect(failureCode(() => run('$min(1)'))).toBe(EngineErrorCode.InvalidArity)
+    expect(failureCode(() => run('$abs(1,2)'))).toBe(EngineErrorCode.InvalidArity)
+    expect(failureCode(() => run('$sum(@R)', { R: OHM }))).toBe(EngineErrorCode.InvalidArity)
+    expect(failureCode(() => run('$limit(x)'))).toBe(EngineErrorCode.InvalidArity)
   })
 
   it('writes but does not evaluate $integral, $limit and $diff', () => {
     for (const formula of ['$integral_{0}^{1}(x*x, x)', '$integral(x*x, x)', '$limit_{x->0}(x)', '$diff(x*x, x)', '$diff(x*x, x, 2)']) {
-      expect(failureCode(() => run(formula))).toBe('ENGINE_UNSUPPORTED_SYMBOL')
+      expect(failureCode(() => run(formula))).toBe(EngineErrorCode.UnsupportedSymbol)
     }
   })
 
@@ -207,10 +207,10 @@ describe('the notation table', () => {
   })
 
   it('refuses the documented domain violations', () => {
-    expect(failureCode(() => run('$ln(-1)'))).toBe('ENGINE_UNDEFINED_RESULT')
-    expect(failureCode(() => run('$asin(2)'))).toBe('ENGINE_UNDEFINED_RESULT')
-    expect(failureCode(() => run('$mod(5,0)'))).toBe('ENGINE_UNDEFINED_RESULT')
-    expect(failureCode(() => run('$sqrt(-1)'))).toBe('ENGINE_UNDEFINED_RESULT')
+    expect(failureCode(() => run('$ln(-1)'))).toBe(EngineErrorCode.UndefinedResult)
+    expect(failureCode(() => run('$asin(2)'))).toBe(EngineErrorCode.UndefinedResult)
+    expect(failureCode(() => run('$mod(5,0)'))).toBe(EngineErrorCode.UndefinedResult)
+    expect(failureCode(() => run('$sqrt(-1)'))).toBe(EngineErrorCode.UndefinedResult)
   })
 
   it('computes a complex exponent over a dimensionless base', () => {
@@ -241,20 +241,20 @@ describe('data access', () => {
   })
 
   it('refuses an out-of-range index, a fractional index and an index on a scalar', () => {
-    expect(failureCode(() => run('@a[3]', slots))).toBe('ENGINE_INVALID_INDEX')
+    expect(failureCode(() => run('@a[3]', slots))).toBe(EngineErrorCode.InvalidIndex)
     expect(failureMessage(() => run('@a[3]', slots))).toContain('3 element')
-    expect(failureCode(() => run('@a[1.5]', slots))).toBe('ENGINE_INVALID_INDEX')
-    expect(failureCode(() => run('@n[0]', slots))).toBe('ENGINE_UNSUPPORTED_INDEX')
+    expect(failureCode(() => run('@a[1.5]', slots))).toBe(EngineErrorCode.InvalidIndex)
+    expect(failureCode(() => run('@n[0]', slots))).toBe(EngineErrorCode.UnsupportedIndex)
   })
 
   it('reads an object field and chains', () => {
     expect(number('@o.v', slots)).toBe(12)
-    expect(failureCode(() => run('@o.missing', slots))).toBe('ENGINE_FIELD_NOT_FOUND')
+    expect(failureCode(() => run('@o.missing', slots))).toBe(EngineErrorCode.FieldNotFound)
     expect(failureMessage(() => run('@o.missing', slots))).toContain('v, r')
     expect(number('@M[1][0]', slots)).toBe(3)
     expect(number('$transpose(@M)[0][1]', slots)).toBe(3)
-    expect(failureCode(() => run('$transpose(@a)', slots))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => run('$len(@n)', slots))).toBe('ENGINE_INVALID_ARGS')
+    expect(failureCode(() => run('$transpose(@a)', slots))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => run('$len(@n)', slots))).toBe(EngineErrorCode.InvalidArgs)
   })
 
   it('does arithmetic element by element and broadcasts a scalar', () => {
@@ -265,9 +265,9 @@ describe('data access', () => {
     const scaled = run('2*@a', slots)
     if (scaled.kind !== 'array') throw new Error('expected an array')
     expect(scaled.items.map((item) => (item.kind === 'number' ? item.num : NaN))).toEqual([2, 4, 6])
-    expect(failureCode(() => run('@a+@short', { ...slots, short: parseSetValue({ array: [1, 2] }) }))).toBe('ENGINE_INVALID_ARGS')
-    expect(failureCode(() => run('@a+@v', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
-    expect(failureCode(() => run('@o+1', slots))).toBe('ENGINE_UNSUPPORTED_OPERATION')
+    expect(failureCode(() => run('@a+@short', { ...slots, short: parseSetValue({ array: [1, 2] }) }))).toBe(EngineErrorCode.InvalidArgs)
+    expect(failureCode(() => run('@a+@v', slots))).toBe(EngineErrorCode.IncompatibleDimension)
+    expect(failureCode(() => run('@o+1', slots))).toBe(EngineErrorCode.UnsupportedOperation)
   })
 })
 
@@ -285,8 +285,8 @@ describe('dimension rules', () => {
 
   it('adds and subtracts only equal vectors', () => {
     expect(dim('@R+@R2', slots)).toEqual([2, 1, -3, -2, 0, 0, 0])
-    expect(failureCode(() => run('@V+@R', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
-    expect(failureCode(() => run('5+@V', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
+    expect(failureCode(() => run('@V+@R', slots))).toBe(EngineErrorCode.IncompatibleDimension)
+    expect(failureCode(() => run('5+@V', slots))).toBe(EngineErrorCode.IncompatibleDimension)
     expect(dim('5+5')).toEqual([0, 0, 0, 0, 0, 0, 0])
     expect(number('5*@R', slots)).toBe(23500)
     expect(dim('5*@R', slots)).toEqual([2, 1, -3, -2, 0, 0, 0])
@@ -303,16 +303,16 @@ describe('dimension rules', () => {
   })
 
   it('refuses an exponent with a dimension and a complex exponent on a quantity', () => {
-    expect(failureCode(() => run('2^@R', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
-    expect(failureCode(() => run('@R^$j', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
+    expect(failureCode(() => run('2^@R', slots))).toBe(EngineErrorCode.IncompatibleDimension)
+    expect(failureCode(() => run('@R^$j', slots))).toBe(EngineErrorCode.IncompatibleDimension)
     expect(dim('@r*$e^($j*@theta)', slots)).toEqual([2, 1, -3, -2, 0, 0, 0])
   })
 
   it('checks the argument vector of every function class', () => {
-    expect(failureCode(() => run('$sin(@V)', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
-    expect(failureCode(() => run('$ln(@R)', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
-    expect(failureCode(() => run('$atan2(@V,@R)', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
-    expect(failureCode(() => run('$min(@V,@R)', slots))).toBe('ENGINE_INCOMPATIBLE_DIMENSION')
+    expect(failureCode(() => run('$sin(@V)', slots))).toBe(EngineErrorCode.IncompatibleDimension)
+    expect(failureCode(() => run('$ln(@R)', slots))).toBe(EngineErrorCode.IncompatibleDimension)
+    expect(failureCode(() => run('$atan2(@V,@R)', slots))).toBe(EngineErrorCode.IncompatibleDimension)
+    expect(failureCode(() => run('$min(@V,@R)', slots))).toBe(EngineErrorCode.IncompatibleDimension)
     expect(number('$arg(@Z)', slots)).toBeCloseTo(Math.atan2(4, 3), 12)
     expect(number('$arg(0)')).toBe(0)
     expect(number('$atan2(0,0)')).toBe(0)

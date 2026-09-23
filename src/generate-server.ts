@@ -64,6 +64,24 @@ function recordProse(facts: GenerationFacts): string {
 }
 
 /** Optional host LLM runtime shape (dsh-llm; absent → generation refuses with a clear error). */
+/** The stream chunk types this module reads; every other type falls through untouched. */
+enum StreamChunkKind {
+  TextDelta = 'text-delta',
+  ToolCallDelta = 'tool-call-delta',
+  Finish = 'finish',
+}
+/**
+ * The finish reasons the shell reports. The wire union is merge-extensible, so an
+ * unknown kind still falls through - this enum names only the kinds we act on.
+ */
+enum FinishReasonKind {
+  Stop = 'stop',
+  ToolCalls = 'tool-calls',
+  MaxTokens = 'max-tokens',
+  Aborted = 'aborted',
+  Error = 'error',
+}
+
 interface LlmLike {
   stream(options: {
     provider: string
@@ -300,11 +318,11 @@ async function generateArticle(
       text?: string
       reason?: string | { kind?: string; failure?: { message?: string } }
     }
-    if (chunk.type === 'text-delta') {
+    if (chunk.type === StreamChunkKind.TextDelta) {
       text += chunk.text ?? ''
-    } else if (chunk.type === 'tool-call-delta') {
+    } else if (chunk.type === StreamChunkKind.ToolCallDelta) {
       throw new Error('the generation model unexpectedly requested a tool')
-    } else if (chunk.type === 'finish') {
+    } else if (chunk.type === StreamChunkKind.Finish) {
       // The finish chunk carries the provider's reason as an object (`{kind, failure}`);
       // a bare string is tolerated too. Without this the reason is silently lost and any
       // failed call surfaces as "no article text", which is what the first attempt of a
@@ -313,14 +331,14 @@ async function generateArticle(
       const kind = typeof reason === 'string' ? reason : reason?.kind
       const detail = typeof reason === 'string' ? '' : (reason?.failure?.message ?? '')
       seenFinish = kind ?? seenFinish
-      if (kind === 'aborted') throw new Error('article generation was aborted')
-      if (kind === 'error') {
+      if (kind === FinishReasonKind.Aborted) throw new Error('article generation was aborted')
+      if (kind === FinishReasonKind.Error) {
         if (text.trim().length === 0) {
           throw new Error(`the model call failed: ${detail.length > 0 ? detail : 'the provider reported an error without a message'}`)
         }
         log.warn('article generation finished with an error after some text', { detail })
       }
-      if (kind === 'max-tokens') {
+      if (kind === FinishReasonKind.MaxTokens) {
         if (text.trim().length === 0) throw new Error('the model hit its token limit before producing any article text')
         log.warn('article generation was cut off by the token limit', { chars: text.length })
       }

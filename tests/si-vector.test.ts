@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EngineError } from '../src/errors.ts'
+import { EngineError, EngineErrorCode } from '../src/errors.ts'
 import {
   SI_TABLE,
   ZERO_SI_VECTOR,
@@ -85,10 +85,10 @@ describe('dim parsing', () => {
   })
 
   it('refuses anything else with ENGINE_INVALID_DIMENSION and lists the names', () => {
-    expect(failureCode(() => parseDim('bogus', 'dim'))).toBe('ENGINE_INVALID_DIMENSION')
-    expect(failureCode(() => parseDim([1, 0, -1], 'dim'))).toBe('ENGINE_INVALID_DIMENSION')
-    expect(failureCode(() => parseDim([1.5, 0, 0, 0, 0, 0, 0], 'dim'))).toBe('ENGINE_INVALID_DIMENSION')
-    expect(failureCode(() => parseDim(5, 'dim'))).toBe('ENGINE_INVALID_DIMENSION')
+    expect(failureCode(() => parseDim('bogus', 'dim'))).toBe(EngineErrorCode.InvalidDimension)
+    expect(failureCode(() => parseDim([1, 0, -1], 'dim'))).toBe(EngineErrorCode.InvalidDimension)
+    expect(failureCode(() => parseDim([1.5, 0, 0, 0, 0, 0, 0], 'dim'))).toBe(EngineErrorCode.InvalidDimension)
+    expect(failureCode(() => parseDim(5, 'dim'))).toBe(EngineErrorCode.InvalidDimension)
     try {
       parseDim('bogus', 'dim')
     } catch (error) {

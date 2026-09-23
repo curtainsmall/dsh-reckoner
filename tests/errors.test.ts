@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ENGINE_ERROR_CODES, EngineError, fail, isEngineError } from '../src/errors.ts'
+import { ENGINE_ERROR_CODES, EngineError, EngineErrorCode, fail, isEngineError } from '../src/errors.ts'
 
 const DEAD_CODES = ['ENGINE_SLOT_KIND', 'ENGINE_TYPE_MIXED_KIND', 'ENGINE_UNSUPPORTED_VARIANT', 'ENGINE_NO_RECORD']
 
@@ -46,8 +46,8 @@ describe('the error code table', () => {
 
 describe('EngineError', () => {
   it('carries the code and the message', () => {
-    const error = new EngineError('ENGINE_OPEN_RECORD_NOT_FOUND', 'no record is open')
-    expect(error.code).toBe('ENGINE_OPEN_RECORD_NOT_FOUND')
+    const error = new EngineError(EngineErrorCode.OpenRecordNotFound, 'no record is open')
+    expect(error.code).toBe(EngineErrorCode.OpenRecordNotFound)
     expect(error.message).toBe('no record is open')
     expect(error).toBeInstanceOf(Error)
     expect(isEngineError(error)).toBe(true)
@@ -55,11 +55,11 @@ describe('EngineError', () => {
   })
 
   it('is what fail throws', () => {
-    expect(() => fail('ENGINE_UNKNOWN_ERROR', 'internal')).toThrowError(EngineError)
+    expect(() => fail(EngineErrorCode.UnknownError, 'internal')).toThrowError(EngineError)
     try {
-      fail('ENGINE_UNKNOWN_ERROR', 'internal')
+      fail(EngineErrorCode.UnknownError, 'internal')
     } catch (error) {
-      expect(isEngineError(error) && error.code).toBe('ENGINE_UNKNOWN_ERROR')
+      expect(isEngineError(error) && error.code).toBe(EngineErrorCode.UnknownError)
     }
   })
 })

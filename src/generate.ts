@@ -12,6 +12,7 @@
  */
 
 import type { TraceRow } from './engine/record.ts'
+import { TraceTool } from './engine/trace-tools.ts'
 
 /** One stored condition: the slot name and the value `set` stored (SI numbers with a 7-integer dim). */
 export interface GenerationCondition {
@@ -58,22 +59,22 @@ export function recordFacts(rows: readonly TraceRow[]): GenerationFacts {
 
   for (const row of rows) {
     if (!row.ok) continue
-    if (row.tool === 'record_start') {
+    if (row.tool === TraceTool.Start) {
       const text = row.content['title']
       if (typeof text === 'string' && title.length === 0) title = text
       continue
     }
-    if (row.tool === 'record_end') {
+    if (row.tool === TraceTool.End) {
       const text = row.content['text']
       closing = typeof text === 'string' ? text : null
       continue
     }
-    if (row.tool === 'record_message') {
+    if (row.tool === TraceTool.Message) {
       const text = row.content['text']
       if (typeof text === 'string') messages.push({ seq: row.seq, text, hide: row.content['hide'] === true })
       continue
     }
-    if (row.tool === 'set') {
+    if (row.tool === TraceTool.Set) {
       const name = row.content['name']
       if (typeof name !== 'string') continue
       const value = row.content['value'] ?? null
@@ -81,7 +82,7 @@ export function recordFacts(rows: readonly TraceRow[]): GenerationFacts {
       else conditions.set(name, value)
       continue
     }
-    if (row.tool === 'eval') {
+    if (row.tool === TraceTool.Eval) {
       const formula = row.content['formula']
       if (typeof formula !== 'string') continue
       const vars = row.content['vars']

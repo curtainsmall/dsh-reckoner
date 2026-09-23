@@ -3,7 +3,7 @@
  * is two rules at once - what the numbers do, and what their SI vectors do.
  * An intermediate may carry a fractional vector; only a slot refuses one.
  */
-import { fail } from '../errors.ts'
+import { EngineErrorCode, fail } from '../errors.ts'
 import type { AccessExpression, CallExpression, Expression } from './formula-parser.ts'
 import { notationLookup, type NotationEntry } from './notation.ts'
 import {
@@ -54,7 +54,7 @@ function multiplyScalars(left: Scalar, right: Scalar): Scalar {
 
 function divideScalars(left: Scalar, right: Scalar): Scalar {
   if (right.re === 0 && right.im === 0) {
-    fail('ENGINE_UNDEFINED_RESULT', 'division by zero: the divisor is 0. Check the denominator of this step, and remember that a denominator may be zero for one value of a bound variable.')
+    fail(EngineErrorCode.UndefinedResult, 'division by zero: the divisor is 0. Check the denominator of this step, and remember that a denominator may be zero for one value of a bound variable.')
   }
   const denominator = right.re * right.re + right.im * right.im
   return { re: (left.re * right.re + left.im * right.im) / denominator, im: (left.im * right.re - left.re * right.im) / denominator }
@@ -67,7 +67,7 @@ function magnitude(scalar: Scalar): number {
 /** The principal logarithm: ln|z| + i*arg(z). */
 function complexLog(scalar: Scalar): Scalar {
   if (scalar.re === 0 && scalar.im === 0) {
-    fail('ENGINE_UNDEFINED_RESULT', '$ln of 0 is not defined; the logarithm needs a value greater than 0.')
+    fail(EngineErrorCode.UndefinedResult, '$ln of 0 is not defined; the logarithm needs a value greater than 0.')
   }
   return { re: Math.log(magnitude(scalar)), im: Math.atan2(scalar.im, scalar.re) }
 }
@@ -100,7 +100,7 @@ class Evaluator {
         if (found !== undefined) return found
       }
       return fail(
-        'ENGINE_NAME_NOT_BOUND',
+        EngineErrorCode.NameNotBound,
         `the name "${expression.name}" is not bound here: a bare name is a bound variable only ($sum_{k=a}^{b}(body) binds k). To read a slot write @${expression.name}.`,
       )
     }
@@ -108,7 +108,7 @@ class Evaluator {
       const value = this.slots.read(expression.name)
       if (value === undefined) {
         return fail(
-          'ENGINE_SLOT_NOT_FOUND',
+          EngineErrorCode.SlotNotFound,
           `the slot "${expression.name}" does not exist yet. Declare it first with set {name:"${expression.name}", value:{num:..., dim:...}}.`,
         )
       }
@@ -131,25 +131,25 @@ class Evaluator {
     const base = this.evaluate(expression.base)
     if (expression.member.kind === 'field') {
       if (base.kind !== 'object') {
-        fail('ENGINE_UNSUPPORTED_INDEX', `"." reads a field of an object, but this value is ${summary(base)}. Object fields are read as @name.field.`)
+        fail(EngineErrorCode.UnsupportedIndex, `"." reads a field of an object, but this value is ${summary(base)}. Object fields are read as @name.field.`)
       }
       const field = base.fields[expression.member.name]
       if (field === undefined) {
         const fields = Object.keys(base.fields)
         fail(
-          'ENGINE_FIELD_NOT_FOUND',
+          EngineErrorCode.FieldNotFound,
           `the object has no field "${expression.member.name}"; its fields are ${fields.length === 0 ? '(none)' : fields.join(', ')}.`,
         )
       }
       return field
     }
     if (base.kind !== 'array') {
-      fail('ENGINE_UNSUPPORTED_INDEX', `"[ ]" takes an element of an array, but this value is ${summary(base)}. Only arrays are indexed.`)
+      fail(EngineErrorCode.UnsupportedIndex, `"[ ]" takes an element of an array, but this value is ${summary(base)}. Only arrays are indexed.`)
     }
     const index = this.integerValue(this.evaluate(expression.member.index), 'an array index')
     if (index < 0 || index >= base.items.length) {
       fail(
-        'ENGINE_INVALID_INDEX',
+        EngineErrorCode.InvalidIndex,
         `the index ${index} is outside the array, which has ${base.items.length} element(s); the valid indices are 0..${base.items.length - 1}.`,
       )
     }
@@ -160,14 +160,14 @@ class Evaluator {
     if (value.kind === 'number' && isZeroSiVector(value.dim) && Number.isInteger(value.num)) return value.num
     if (value.kind === 'complex' && isZeroSiVector(value.dim) && value.im === 0 && Number.isInteger(value.re)) return value.re
     fail(
-      'ENGINE_INVALID_INDEX',
+      EngineErrorCode.InvalidIndex,
       `${what} must be an integer with the zero SI vector; got ${summary(value)}. Use an integer expression such as 0, $len(@a)-1, or a dimensionless slot.`,
     )
   }
 
   private mapUnary(what: string, value: Value, apply: (scalar: Scalar, dim: SiVector, like: ScalarValue) => Value): Value {
     if (value.kind === 'object') {
-      fail('ENGINE_UNSUPPORTED_OPERATION', `${what} is not defined on an object, which has one dimension per field; read a field first, as in @name.field.`)
+      fail(EngineErrorCode.UnsupportedOperation, `${what} is not defined on an object, which has one dimension per field; read a field first, as in @name.field.`)
     }
     if (value.kind === 'array') {
       return collectArray(value.items.map((item) => this.mapUnary(what, item, apply)), what)
@@ -183,14 +183,14 @@ class Evaluator {
   private binary(operator: '+' | '-' | '*' | '/' | '^', left: Value, right: Value): Value {
     if (left.kind === 'object' || right.kind === 'object') {
       fail(
-        'ENGINE_UNSUPPORTED_OPERATION',
+        EngineErrorCode.UnsupportedOperation,
         `"${operator}" is not defined on an object, which has one dimension per field; read the field you need first, as in @name.field.`,
       )
     }
     if (left.kind === 'array' && right.kind === 'array') {
       if (left.items.length !== right.items.length) {
         fail(
-          'ENGINE_INVALID_ARGS',
+          EngineErrorCode.InvalidArgs,
           `"${operator}" needs two arrays of the same length, but they have ${left.items.length} and ${right.items.length} element(s). Build them with the same bounds, or index one explicitly.`,
         )
       }
@@ -204,7 +204,7 @@ class Evaluator {
     if (operator === '+' || operator === '-') {
       if (!siVectorsEqual(left.dim, right.dim)) {
         fail(
-          'ENGINE_INCOMPATIBLE_DIMENSION',
+          EngineErrorCode.IncompatibleDimension,
           `"${operator}" needs both sides to carry the same SI vector, but the left is ${formatSiVector(left.dim)} (${kindOfSiVector(left.dim)}) and the right is ${formatSiVector(right.dim)} (${kindOfSiVector(right.dim)}). A plain count is not a quantity: if one side is a bare number, give it the other side's dimension, or multiply instead of adding.`,
         )
       }
@@ -220,7 +220,7 @@ class Evaluator {
   private power(base: ScalarValue, exponent: ScalarValue): ScalarValue {
     if (!isZeroSiVector(exponent.dim)) {
       fail(
-        'ENGINE_INCOMPATIBLE_DIMENSION',
+        EngineErrorCode.IncompatibleDimension,
         `an exponent must be dimensionless (the zero SI vector), but it is ${formatSiVector(exponent.dim)} (${kindOfSiVector(exponent.dim)}).`,
       )
     }
@@ -230,12 +230,12 @@ class Evaluator {
     if (e.im !== 0) {
       if (!isZeroSiVector(base.dim)) {
         fail(
-          'ENGINE_INCOMPATIBLE_DIMENSION',
+          EngineErrorCode.IncompatibleDimension,
           `a complex exponent needs a dimensionless base, because a^z is exp(z*Log a); the base is ${formatSiVector(base.dim)} (${kindOfSiVector(base.dim)}).`,
         )
       }
       if (b.re === 0 && b.im === 0) {
-        fail('ENGINE_UNDEFINED_RESULT', '0 raised to a complex power is not defined; the base of a complex power must be non-zero.')
+        fail(EngineErrorCode.UndefinedResult, '0 raised to a complex power is not defined; the base of a complex power must be non-zero.')
       }
       return complexValue(...asTuple(complexExp(multiplyScalars(e, complexLog(b)))), ZERO_SI_VECTOR)
     }
@@ -246,7 +246,7 @@ class Evaluator {
     if (b.im !== 0) {
       if (b.re === 0 && exponentValue === 0) return complexValue(1, 0, dim)
       if (b.re === 0) {
-        fail('ENGINE_UNDEFINED_RESULT', `0 raised to the negative power ${exponentValue} is not defined; a denominator must not be zero.`)
+        fail(EngineErrorCode.UndefinedResult, `0 raised to the negative power ${exponentValue} is not defined; a denominator must not be zero.`)
       }
       const radius = magnitude(b) ** exponentValue
       const angle = Math.atan2(b.im, b.re) * exponentValue
@@ -256,14 +256,14 @@ class Evaluator {
     if (b.re === 0) {
       if (exponentValue === 0) return realValue(1, dim)
       if (exponentValue < 0) {
-        fail('ENGINE_UNDEFINED_RESULT', `0 raised to the negative power ${exponentValue} is not defined; a denominator must not be zero.`)
+        fail(EngineErrorCode.UndefinedResult, `0 raised to the negative power ${exponentValue} is not defined; a denominator must not be zero.`)
       }
       return realValue(0, dim)
     }
 
     if (b.re < 0 && !Number.isInteger(exponentValue)) {
       fail(
-        'ENGINE_UNDEFINED_RESULT',
+        EngineErrorCode.UndefinedResult,
         `the negative base ${b.re} with the fractional exponent ${exponentValue} has no real value. Use an integer exponent, or write the principal complex value with $j.`,
       )
     }
@@ -276,12 +276,12 @@ class Evaluator {
   private call(expression: CallExpression): Value {
     const entry = notationLookup(expression.symbol)
     if (entry === undefined) {
-      fail('ENGINE_UNKNOWN_ERROR', `internal: the parser accepted the unknown notation "${expression.symbol}".`)
+      fail(EngineErrorCode.UnknownError, `internal: the parser accepted the unknown notation "${expression.symbol}".`)
     }
     if (entry.notationClass === 'binding') return this.bindingCall(expression, entry)
     if (entry.notationClass === 'constant') return this.constant(expression.symbol)
     const first = expression.args[0]
-    if (first === undefined) fail('ENGINE_UNKNOWN_ERROR', `internal: "${expression.symbol}" was parsed without arguments.`)
+    if (first === undefined) fail(EngineErrorCode.UnknownError, `internal: "${expression.symbol}" was parsed without arguments.`)
     const left = this.evaluate(first)
     if (expression.args.length === 1) return this.unaryFunction(expression.symbol, left)
     const second = expression.args[1]!
@@ -298,19 +298,19 @@ class Evaluator {
   private requireZeroDim(symbol: string, dim: SiVector): void {
     if (isZeroSiVector(dim)) return
     fail(
-      'ENGINE_INCOMPATIBLE_DIMENSION',
+      EngineErrorCode.IncompatibleDimension,
       `"${symbol}" takes a dimensionless argument (the zero SI vector, as radian is), but it got ${formatSiVector(dim)} (${kindOfSiVector(dim)}). Divide the quantity by its unit first - for degrees use @x*$pi/180.`,
     )
   }
 
   private requireReal(symbol: string, scalar: Scalar): void {
     if (scalar.im === 0) return
-    fail('ENGINE_UNDEFINED_RESULT', `"${symbol}" is defined for real numbers, but it got the complex number ${scalar.re}+${scalar.im}j.`)
+    fail(EngineErrorCode.UndefinedResult, `"${symbol}" is defined for real numbers, but it got the complex number ${scalar.re}+${scalar.im}j.`)
   }
 
   private unaryFunction(symbol: string, value: Value): Value {
     if (value.kind === 'object') {
-      fail('ENGINE_UNSUPPORTED_OPERATION', `"${symbol}" is not defined on an object, which has one dimension per field; read a field first, as in @name.field.`)
+      fail(EngineErrorCode.UnsupportedOperation, `"${symbol}" is not defined on an object, which has one dimension per field; read a field first, as in @name.field.`)
     }
     if (value.kind === 'array') {
       if (symbol === '$transpose') return this.transpose(value)
@@ -335,7 +335,7 @@ class Evaluator {
         const half = scaleSiVector(dim, 0.5)
         if (scalar.im === 0) {
           if (scalar.re < 0) {
-            fail('ENGINE_UNDEFINED_RESULT', `$sqrt of the negative number ${scalar.re} has no real value; write $j*$sqrt(${-scalar.re}) for the imaginary root.`)
+            fail(EngineErrorCode.UndefinedResult, `$sqrt of the negative number ${scalar.re} has no real value; write $j*$sqrt(${-scalar.re}) for the imaginary root.`)
           }
           return realValue(Math.sqrt(scalar.re), half)
         }
@@ -347,7 +347,7 @@ class Evaluator {
       case '$ln': {
         this.requireZeroDim(symbol, dim)
         if (scalar.im === 0 && scalar.re <= 0) {
-          fail('ENGINE_UNDEFINED_RESULT', `$ln of ${scalar.re} is not defined: the logarithm needs a value greater than 0.`)
+          fail(EngineErrorCode.UndefinedResult, `$ln of ${scalar.re} is not defined: the logarithm needs a value greater than 0.`)
         }
         const result = complexLog(scalar)
         return scalar.im === 0 ? realValue(result.re) : complexValue(result.re, result.im, ZERO_SI_VECTOR)
@@ -355,7 +355,7 @@ class Evaluator {
       case '$log': {
         this.requireZeroDim(symbol, dim)
         if (scalar.im === 0 && scalar.re <= 0) {
-          fail('ENGINE_UNDEFINED_RESULT', `$log of ${scalar.re} is not defined: the base-10 logarithm needs a value greater than 0.`)
+          fail(EngineErrorCode.UndefinedResult, `$log of ${scalar.re} is not defined: the base-10 logarithm needs a value greater than 0.`)
         }
         const result = complexLog(scalar)
         return scalar.im === 0 ? realValue(result.re / Math.LN10) : complexValue(result.re / Math.LN10, result.im / Math.LN10, ZERO_SI_VECTOR)
@@ -384,24 +384,24 @@ class Evaluator {
         return realValue(Math.sign(scalar.re))
       }
       case '$len':
-        fail('ENGINE_INVALID_ARGS', `$len takes an array and counts its elements; got ${summary(value)}.`)
+        fail(EngineErrorCode.InvalidArgs, `$len takes an array and counts its elements; got ${summary(value)}.`)
       case '$transpose':
-        fail('ENGINE_INVALID_ARGS', `$transpose takes a two-dimensional array; got ${summary(value)}.`)
+        fail(EngineErrorCode.InvalidArgs, `$transpose takes a two-dimensional array; got ${summary(value)}.`)
       default:
-        return fail('ENGINE_UNKNOWN_ERROR', `internal: "${symbol}" has no implementation.`)
+        return fail(EngineErrorCode.UnknownError, `internal: "${symbol}" has no implementation.`)
     }
   }
 
   private transpose(value: ArrayValue): Value {
     const first = value.items[0]
     if (first === undefined || first.kind !== 'array') {
-      fail('ENGINE_INVALID_ARGS', `$transpose takes a two-dimensional array; this array's element is ${first === undefined ? 'missing' : summary(first)}.`)
+      fail(EngineErrorCode.InvalidArgs, `$transpose takes a two-dimensional array; this array's element is ${first === undefined ? 'missing' : summary(first)}.`)
     }
     const width = first.items.length
     for (const row of value.items) {
       if (row.kind !== 'array' || row.items.length !== width) {
         fail(
-          'ENGINE_INVALID_ARGS',
+          EngineErrorCode.InvalidArgs,
           `$transpose needs a rectangular two-dimensional array, but its rows have different lengths (${width} and ${row.kind === 'array' ? row.items.length : 'not an array'}).`,
         )
       }
@@ -416,12 +416,12 @@ class Evaluator {
 
   private binaryFunction(symbol: string, left: Value, right: Value): Value {
     if (left.kind === 'object' || right.kind === 'object') {
-      fail('ENGINE_UNSUPPORTED_OPERATION', `"${symbol}" is not defined on an object, which has one dimension per field; read a field first, as in @name.field.`)
+      fail(EngineErrorCode.UnsupportedOperation, `"${symbol}" is not defined on an object, which has one dimension per field; read a field first, as in @name.field.`)
     }
     if (left.kind === 'array' && right.kind === 'array') {
       if (left.items.length !== right.items.length) {
         fail(
-          'ENGINE_INVALID_ARGS',
+          EngineErrorCode.InvalidArgs,
           `"${symbol}" needs two arrays of the same length, but they have ${left.items.length} and ${right.items.length} element(s).`,
         )
       }
@@ -432,7 +432,7 @@ class Evaluator {
 
     if (!siVectorsEqual(left.dim, right.dim)) {
       fail(
-        'ENGINE_INCOMPATIBLE_DIMENSION',
+        EngineErrorCode.IncompatibleDimension,
         `"${symbol}" needs both arguments to carry the same SI vector, but they are ${formatSiVector(left.dim)} (${kindOfSiVector(left.dim)}) and ${formatSiVector(right.dim)} (${kindOfSiVector(right.dim)}).`,
       )
     }
@@ -445,7 +445,7 @@ class Evaluator {
     if (symbol === '$min') return realValue(Math.min(a.re, b.re), left.dim)
     if (symbol === '$max') return realValue(Math.max(a.re, b.re), left.dim)
     if (b.re === 0) {
-      fail('ENGINE_UNDEFINED_RESULT', `$mod by zero is not defined; the divisor is 0.`)
+      fail(EngineErrorCode.UndefinedResult, `$mod by zero is not defined; the divisor is 0.`)
     }
     return realValue(a.re % b.re, left.dim)
   }
@@ -453,7 +453,7 @@ class Evaluator {
   private bindingCall(expression: CallExpression, entry: NotationEntry): Value {
     if (!entry.evaluable) {
       fail(
-        'ENGINE_UNSUPPORTED_SYMBOL',
+        EngineErrorCode.UnsupportedSymbol,
         `"${entry.symbol}" cannot be evaluated; write ${entry.form} and evaluate a closed form instead.`,
       )
     }
@@ -461,13 +461,13 @@ class Evaluator {
     const body = expression.args[0]
     const until = expression.until
     if (binder === undefined || body === undefined || until === undefined) {
-      fail('ENGINE_UNKNOWN_ERROR', `internal: "${entry.symbol}" was parsed without its bounds.`)
+      fail(EngineErrorCode.UnknownError, `internal: "${entry.symbol}" was parsed without its bounds.`)
     }
     const from = this.integerValue(this.evaluate(binder.from), `the lower bound of "${entry.symbol}"`)
     const to = this.integerValue(this.evaluate(until), `the upper bound of "${entry.symbol}"`)
     if (from > to) {
       fail(
-        'ENGINE_INVALID_INDEX',
+        EngineErrorCode.InvalidIndex,
         `the bounds of "${entry.symbol}" are ${from} (lower) and ${to} (upper); the lower bound must not be greater than the upper one.`,
       )
     }
@@ -510,13 +510,13 @@ function inverseTrigonometric(symbol: string, scalar: Scalar): Scalar {
   if (scalar.im === 0) {
     if (symbol === '$asin') {
       if (scalar.re < -1 || scalar.re > 1) {
-        fail('ENGINE_UNDEFINED_RESULT', `$asin of ${scalar.re} is not defined: the arcsine needs a value between -1 and 1.`)
+        fail(EngineErrorCode.UndefinedResult, `$asin of ${scalar.re} is not defined: the arcsine needs a value between -1 and 1.`)
       }
       return { re: Math.asin(scalar.re), im: 0 }
     }
     if (symbol === '$acos') {
       if (scalar.re < -1 || scalar.re > 1) {
-        fail('ENGINE_UNDEFINED_RESULT', `$acos of ${scalar.re} is not defined: the arccosine needs a value between -1 and 1.`)
+        fail(EngineErrorCode.UndefinedResult, `$acos of ${scalar.re} is not defined: the arccosine needs a value between -1 and 1.`)
       }
       return { re: Math.acos(scalar.re), im: 0 }
     }

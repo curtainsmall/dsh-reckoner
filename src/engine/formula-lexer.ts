@@ -3,7 +3,7 @@
  * `$notation`, `@slot` and punctuation tokens. Everything outside that
  * charset is refused here, with the position in the message.
  */
-import { fail } from '../errors.ts'
+import { EngineErrorCode, fail } from '../errors.ts'
 
 /** A scalar literal: `1e5`, `2j` or `4i` - always a plain number, never a quantity. */
 export interface ScalarLiteral {
@@ -80,7 +80,7 @@ export function tokenize(formula: string): Token[] {
         if (formula[scan] === '+' || formula[scan] === '-') scan += 1
         if (!isDigit(formula[scan])) {
           fail(
-            'ENGINE_INVALID_NUMBER',
+            EngineErrorCode.InvalidNumber,
             `${formulaPosition(formula, index)}: "${formula.slice(start, index + 1)}" has no exponent digits - the scientific form is digits, a lowercase "e", then the exponent, as in 1e5. Write "1*$e" to multiply by Euler's number.`,
           )
         }
@@ -95,7 +95,7 @@ export function tokenize(formula: string): Token[] {
       }
       if (isNameStart(formula[index])) {
         fail(
-          'ENGINE_INVALID_IDENTIFIER',
+          EngineErrorCode.InvalidIdentifier,
           `${formulaPosition(formula, start)}: "${formula.slice(start, index + 1)}" is not a valid number - a letter may follow a number only as the imaginary suffix i or j. Write "${magnitudeText}*${formula.slice(index)}" to multiply.`,
         )
       }
@@ -123,7 +123,7 @@ export function tokenize(formula: string): Token[] {
       index += 1
       if (!isNameStart(formula[index])) {
         fail(
-          'ENGINE_INVALID_FORMULA',
+          EngineErrorCode.InvalidFormula,
           char === '$'
             ? `${formulaPosition(formula, start)}: "$" must be followed by a notation name such as $pi, $abs or $sum.`
             : `${formulaPosition(formula, start)}: "@" must be followed by a slot name (a letter or underscore first, then letters, digits or underscores).`,
@@ -156,7 +156,7 @@ export function tokenize(formula: string): Token[] {
 
     const code = formula.codePointAt(index) ?? 0
     fail(
-      'ENGINE_INVALID_FORMULA',
+      EngineErrorCode.InvalidFormula,
       `${formulaPosition(formula, index)}: the character ${JSON.stringify(char)} (code point ${code}) is not in the formula charset. A formula is ASCII: digits, names, $notation, @slot, whitespace, and the punctuation + - * / ^ ( ) [ ] { } , . _ = -> .`,
     )
   }
