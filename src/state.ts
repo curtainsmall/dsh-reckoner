@@ -10,8 +10,8 @@
  * The file is replaced atomically (write a temporary file, then rename it over the target), so a
  * crash mid-write leaves the previous file intact rather than a truncated one. A missing, corrupt
  * or non-object file reads as {} — every reader tolerates that. Records are not state and live
- * elsewhere: record-index.jsonl indexes them (it is what the client's record list previews) and
- * records/<id>.jsonl holds their traces.
+ * elsewhere: records/<id>.jsonl holds each closed record's trace (the list is derived by
+ * scanning that directory) and open-record.jsonl holds the one unclosed record.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

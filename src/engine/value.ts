@@ -136,10 +136,11 @@ function forwardScalar(scalar: Scalar, spec: DimSpec): Scalar {
 }
 
 /** One array element: a bare scalar or a nested array, sharing the array's vector. */
-function parseBareElement(input: unknown, dim: SiVector, where: string): Value {
-  if (typeof input === 'number') return realValue(requireJsonNumber(input, where), dim)
+function parseBareElement(input: unknown, spec: DimSpec, where: string): Value {
+  const dim = spec.vector
+  if (typeof input === 'number') return realValue(affineForward(requireJsonNumber(input, where), spec), dim)
   if (Array.isArray(input)) {
-    return { kind: 'array', items: input.map((item, index) => parseBareElement(item, dim, `${where}[${index}]`)), dim }
+    return { kind: 'array', items: input.map((item, index) => parseBareElement(item, spec, `${where}[${index}]`)), dim }
   }
   if (typeof input === 'object' && input !== null) {
     const bag = input as Record<string, unknown>
@@ -147,12 +148,17 @@ function parseBareElement(input: unknown, dim: SiVector, where: string): Value {
     const rectangular = keys.length === 2 && hasKey(bag, ValueTag.Re) && hasKey(bag, ValueTag.Im)
     const polar = keys.length === 2 && hasKey(bag, ValueTag.Mag) && hasKey(bag, ValueTag.Ang)
     if (rectangular) {
-      return complexValue(requireJsonNumber(bag[ValueTag.Re], `${where}.re`), requireJsonNumber(bag[ValueTag.Im], `${where}.im`), dim)
+      const scaled = forwardScalar(
+        { re: requireJsonNumber(bag[ValueTag.Re], `${where}.re`), im: requireJsonNumber(bag[ValueTag.Im], `${where}.im`) },
+        spec,
+      )
+      return complexValue(scaled.re, scaled.im, dim)
     }
     if (polar) {
       const mag = requireJsonNumber(bag[ValueTag.Mag], `${where}.mag`)
       const ang = requireJsonNumber(bag[ValueTag.Ang], `${where}.ang`)
-      return complexValue(mag * Math.cos(ang), mag * Math.sin(ang), dim)
+      const scaled = forwardScalar({ re: mag * Math.cos(ang), im: mag * Math.sin(ang) }, spec)
+      return complexValue(scaled.re, scaled.im, dim)
     }
   }
   fail(
@@ -212,7 +218,7 @@ export function parseSetValue(input: unknown, where = 'value'): Value {
     if (!Array.isArray(list)) {
       fail(EngineErrorCode.InvalidArgs, `${where}.array: expected an array; got ${describe(list)}.`)
     }
-    return { kind: 'array', items: list.map((item, index) => parseBareElement(item, spec.vector, `${where}.array[${index}]`)), dim: spec.vector }
+    return { kind: 'array', items: list.map((item, index) => parseBareElement(item, spec, `${where}.array[${index}]`)), dim: spec.vector }
   }
   const fields = bag[ValueTag.Object]
   if (typeof fields !== 'object' || fields === null || Array.isArray(fields)) {

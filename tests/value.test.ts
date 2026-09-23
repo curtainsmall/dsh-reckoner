@@ -53,6 +53,23 @@ describe('the set value structure', () => {
     expect(complex.im).toBe(2)
   })
 
+  it('applies the same affine map to an array element, which carries the array dim', () => {
+    const value = parseSetValue({ array: [25, { re: 30, im: 1 }, [40]], dim: 'degC' })
+    expect(value.kind).toBe('array')
+    if (value.kind !== 'array') return
+    expect(value.dim).toEqual([0, 0, 0, 0, 1, 0, 0])
+    expect(value.items[0]).toEqual({ kind: 'number', num: 298.15, dim: [0, 0, 0, 0, 1, 0, 0] })
+    const complex = value.items[1]
+    expect(complex?.kind).toBe('complex')
+    if (complex?.kind !== 'complex') return
+    expect(complex.re).toBeCloseTo(303.15, 10)
+    expect(complex.im).toBe(1)
+    const nested = value.items[2]
+    expect(nested?.kind).toBe('array')
+    if (nested?.kind !== 'array') return
+    expect(nested.items[0]).toEqual({ kind: 'number', num: 313.15, dim: [0, 0, 0, 0, 1, 0, 0] })
+  })
+
   it('converts a polar complex to rectangular on the way in', () => {
     const value = parseSetValue({ mag: 5, ang: Math.atan2(4, 3), dim: 'ohm' })
     expect(value.kind).toBe('complex')
