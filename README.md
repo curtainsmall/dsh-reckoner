@@ -4,12 +4,6 @@ A deterministic calculation engine for the DeepSeek Harness: the model writes ev
 
 [简体中文](README.zh-CN.md)
 
-- **Origin**: [dsh-electro-lab](https://github.com/curtainsmall/dsh-electro-lab) v0.13.0, MIT, Copyright (c) curtainsmall
-- **Relation**: this project continues that engine work under a new name
-- **Inherited**: the engine, the value model, the record, the panel, article generation, logging
-- **Abandoned**: the built-in solver catalog; the mathematics now comes from the model
-- **Version line**: restarted at 0.1.0; the two projects are not API-continuous
-
 ## Contents
 
 - [Install](#install)
@@ -65,7 +59,7 @@ Each plugin mount copies both preset directories into `$DSH_HOME/.agent-presets/
 
 ## The engine
 
-One engine runs per host process, and every session's calls act on it. It is a calculator with no domain knowledge: no solver, no registry, no named formula. It parses the value it is given, checks dimensions while it evaluates the model's formula, and records each call.
+One engine runs per host process, and every session's calls act on it. It is a calculator with no domain knowledge: no solver, no registry, no named formula. The model writes a formula that says how the units combine, and the engine checks those units while it evaluates, so a dimension that does not add up is refused rather than answered.
 
 | tool | effect |
 |---|---|
@@ -74,36 +68,11 @@ One engine runs per host process, and every session's calls act on it. It is a c
 | `eval` | writes one formula's result into the `target` slot |
 | `record_start` / `record_message` / `record_end` | open, annotate and close a record |
 
-### Values
+- **Values**: a number, a complex, an array or an object, each with an SI vector of 7 integer exponents; `dim` names it, as a table name such as `ohm` or as the 7 integers.
+- **Formulas**: one expression over the slots, with `+ - * / ^`, a set of `$` functions and sums; no comparison, no logic, no assignment.
+- **Receipts**: a call answers `{ok: true, ...}` or `{ok: false, code, error}`. A refusal changes nothing.
 
-A value is a number, a complex number (stored rectangular), an array or an object, plus an SI vector of 7 integer exponents in ISO 80000-1 order (m, kg, s, A, K, mol, cd). `dim` is a table name or those 7 integers; omitted, it is the zero vector. The table holds SI names only, so any other unit is converted by the model before the call, and `degC` is the one affine name, stored as kelvin.
-
-`set` takes a tagged value:
-
-- `{"num": 4500, "dim": "ohm"}` - a real
-- `{re, im}` or `{mag, ang}` - a complex, stored rectangular
-- `{array: [...]}` - an array, one vector for the whole array
-- `{object: {...}}` - one vector per field
-
-### Formulas
-
-A formula is one expression. It reads `@name` for a slot, `@name[i]` for an element and `@name.field` for a field. The `$` notation supplies 5 constants, 20 unary functions, 4 binary functions and 6 bounded forms; `$sum`, `$prod` and `$seq` evaluate, while `$integral`, `$limit` and `$diff` can be written but not evaluated.
-
-- **Operators**: `+ - * / ^`
-- **Multiplication**: must be written, as `*`
-- **Absent**: comparison, logic, conditional, assignment
-
-### Dimensions
-
-Dimensions are derived during evaluation.
-
-- An exponent must be dimensionless; a real exponent scales the base's vector, and a complex exponent needs a dimensionless base.
-- `+` and `-` need one vector on both sides; `*` and `/` add and subtract vectors.
-- A fractional vector is refused at the slot.
-
-### Receipts
-
-A call answers `{ok: true, ...}` or `{ok: false, code, error}`. A refusal changes nothing and names one of the 19 stable codes.
+The whole reference - the value types, the notation, the dimension rules, the record on disk and the HTTP paths - is in the [engine manual](docs/engine.md) ([简体中文](docs/engine.zh-CN.md)).
 
 ## Records
 
@@ -117,18 +86,15 @@ A record is the process of one calculation: its title, conditions, explanations,
 
 `hide: true` keeps a message out of the record view while the article writer still receives it. `set`, `get` and `eval` are refused while no record is open, and closing a record clears the slot table, so the table is non-empty exactly while a record is open.
 
-- The open record: `<home>/open-record.jsonl`
-- Closing: renames that file into `<home>/records/<id>.jsonl`, so closing is atomic and a closed record is always complete
-- The first line: `{seq: 0, version: 1}`; a file without it, or with an older version, is counted as unknown, and an unknown record is never listed, served or used for generation
-- An index file: none; the list is derived by scanning `records/`
+- An unclosed record lives in `<home>/open-record.jsonl`; closing renames that file into `<home>/records/<id>.jsonl`, so a closed record is always complete.
+- There is no index file: the list is the directory. The format of a record file is in the [engine manual](docs/engine.md#7-records-and-the-trace).
 
 ### The panel
 
-The **Reckoner** panel is the sidebar entry of the same name, a pen-ruler glyph. It reads eleven HTTP paths under `/api/dsh-reckoner/` and refreshes them every 5 s. It has two tabs.
+The **Reckoner** panel is the sidebar entry of the same name. It has two tabs.
 
-**Records** holds the closed records, the unclosed record pinned above them, and a red `X unknown records` line that offers to delete those files. Selection is marked by the row's border; there are no checkboxes. A record opens as its timeline: the markers, one card per `eval` step with its formula and the slots it substituted. Hidden messages appear only under **Display all**, whose default is the preference **Settings** keeps.
-
-**Settings** holds the generation defaults of each article format, the search policy and that display-all preference, and shows a line while a change is waiting for a host restart.
+- **Records**: the closed records, the unclosed record pinned above them, and a well-formed but unreadable file offered for deletion. Opening a record shows its timeline, one card per step; **Display all** also reveals the refused steps and the hidden messages, and remembers that choice.
+- **Settings**: the generation defaults of each article format, the search policy, and the display preference above. A line appears while a change waits for a host restart.
 
 ## Article generation
 
