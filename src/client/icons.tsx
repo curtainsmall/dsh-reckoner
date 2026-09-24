@@ -1,0 +1,67 @@
+/**
+ * UI icons — Font Awesome free tier (SVG/JS core, no font files shipped).
+ * Per-icon deep imports keep the bundle tiny: the set root exports are not
+ * side-effect-free, so importing from it would pull in every icon.
+ * Icons by Font Awesome — https://fontawesome.com (CC BY 4.0).
+ *
+ * Sizing note: react-fontawesome v3 ignores width/height props, so the size
+ * is forced through inline style (CSS beats the default 1em sizing).
+ */
+import { FontAwesomeIcon, type CSSVariables } from '@fortawesome/react-fontawesome'
+import { faChevronLeft } from '@fortawesome/free-solid-svg-icons/faChevronLeft'
+import { faDownload } from '@fortawesome/free-solid-svg-icons/faDownload'
+import { faArrowUp } from '@fortawesome/free-solid-svg-icons/faArrowUp'
+import { faFolder } from '@fortawesome/free-solid-svg-icons/faFolder'
+import { faFile } from '@fortawesome/free-solid-svg-icons/faFile'
+import { faMinus } from '@fortawesome/free-solid-svg-icons/faMinus'
+import { faMarkdown } from '@fortawesome/free-brands-svg-icons/faMarkdown'
+import { faTex } from '@fortawesome/free-brands-svg-icons/faTex'
+
+interface IconProps {
+  size?: number
+}
+
+/** Shared inline sizing: react-fontawesome v3 does not honor width/height props. */
+function sized(size: number): React.CSSProperties & CSSVariables {
+  return { width: size, height: size, display: 'block', flex: 'none' }
+}
+
+/** ‹ back / collapse. */
+export function IconChevronLeft({ size = 16 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faChevronLeft} style={sized(size)} />
+}
+
+/** ↓ download / export. */
+export function IconDownload({ size = 16 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faDownload} style={sized(size)} />
+}
+
+/** ↑ up one level. */
+export function IconArrowUp({ size = 14 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faArrowUp} style={sized(size)} />
+}
+
+/** folder glyph (directory tree). */
+export function IconFolder({ size = 14 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faFolder} style={sized(size)} />
+}
+
+/** file glyph (directory tree). */
+export function IconFile({ size = 14 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faFile} style={sized(size)} />
+}
+
+/** — minimize / collapse. */
+export function IconMinus({ size = 14 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faMinus} style={sized(size)} />
+}
+
+/** Markdown brand glyph. */
+export function IconMarkdown({ size = 16 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faMarkdown} style={sized(size)} />
+}
+
+/** TeX brand glyph; optically smaller, so it defaults larger than normal. */
+export function IconTex({ size = 18 }: IconProps): React.JSX.Element {
+  return <FontAwesomeIcon icon={faTex} style={sized(size)} />
+}

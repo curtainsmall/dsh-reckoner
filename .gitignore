@@ -8,6 +8,10 @@ dist/
 registry/
 *.tsbuildinfo
 
+# --- session recovery artifacts (agent session, not project content) ---
+session-recovered.jsonl
+assistant-summary.txt
+
 # --- local env / secrets ---
 .env
 .env.*

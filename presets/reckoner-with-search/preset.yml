@@ -1,0 +1,2 @@
+name: Reckoner with search
+description: 计算沙箱 + 外部事实检索——多一个 search 工具，答案连同出处自动写进记录；仍无 Shell、无文件系统、无通用抓取。

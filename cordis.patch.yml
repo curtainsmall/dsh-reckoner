@@ -1,0 +1,13 @@
+# dsh-reckoner bundle patch
+#
+# This file is the `dsh.bundle.patch` layer of the published npm package:
+# when the plugin is installed through the official CLI —
+#
+#   dsh plugin --profile <name> add dsh-reckoner@<version>
+#
+# — the command reconciles `dsh.profile.bundles` against installed packages
+# and appends `dsh-reckoner` to the bundle stack. The profile boot then
+# merges THIS patch (a single `insert` of the plugin row).
+- insert:
+    - id: reckoner
+      name: 'dsh-reckoner'

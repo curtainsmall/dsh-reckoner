@@ -1,0 +1,2 @@
+name: Reckoner
+description: 计算沙箱——只提供 Reckoner 插件工具，无 Shell、无文件系统、无网络；每个数都必须来自工具调用，条件不足即停止。

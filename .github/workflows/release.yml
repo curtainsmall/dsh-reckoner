@@ -1,0 +1,158 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write # npm trusted publishing (OIDC)
+
+jobs:
+  # ── Guard: a release tag must be on main and self-consistent. ──
+  # A v* tag on develop/feature (accidental trigger), or one whose version
+  # disagrees with package.json, dsh.plugin.json or the latest CHANGELOG.md
+  # entry, fails fast here and nothing downstream ever runs. The normalized
+  # version (v prefix stripped) is exposed as a job output so the whole
+  # workflow has a single source of truth for it.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.normalize_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so ancestry can be verified
+      - name: Verify tag is on main
+        run: |
+          if git merge-base --is-ancestor HEAD origin/main; then
+            echo "✓ tag $GITHUB_REF_NAME ($(git rev-parse --short HEAD)) is reachable from main"
+          else
+            echo "::error::tag $GITHUB_REF_NAME is NOT on main — release aborted (accidental tag?)"
+            exit 1
+          fi
+      # Single normalization point: GITHUB_REF_NAME "v0.1.0-beta.1" → "0.1.0-beta.1".
+      # package.json, the manifest and changelog entries carry no v prefix, so
+      # every comparison below (and the publish job) uses this one value.
+      - name: Normalize version (strip v prefix)
+        id: normalize_version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Verify package.json and dsh.plugin.json versions match the tag
+        run: |
+          pkg="$(node -p "require('./package.json').version")"
+          manifest="$(node -p "require('./dsh.plugin.json').version")"
+          if [ "$pkg" != "${{ steps.normalize_version.outputs.version }}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version v$pkg — bump package.json first"
+            exit 1
+          fi
+          if [ "$manifest" != "${{ steps.normalize_version.outputs.version }}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match dsh.plugin.json version v$manifest — bump the manifest first"
+            exit 1
+          fi
+          echo "✓ tag $GITHUB_REF_NAME matches package.json and dsh.plugin.json versions"
+      - name: Verify changelog entry exists for the tag
+        uses: mindsers/changelog-reader-action@v2
+        with:
+          version: ${{ steps.normalize_version.outputs.version }}
+          path: ./CHANGELOG.md
+      - name: Verify the latest changelog entry matches the tag
+        run: |
+          # The topmost versioned entry (## [x.y.z], with optional -prerelease
+          # or +build suffix) must describe exactly this release.
+          latest="$(awk '
+            /^## \[[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?\]/ {
+              v = $0
+              sub(/^## \[/, "", v)
+              sub(/\].*$/, "", v)
+              print v
+              exit
+            }' CHANGELOG.md)"
+          if [ -z "$latest" ]; then
+            echo "::error::no versioned entry (## [x.y.z]) found in CHANGELOG.md — add one before releasing"
+            exit 1
+          fi
+          if [ "$latest" != "${{ steps.normalize_version.outputs.version }}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the latest CHANGELOG.md entry v$latest — the newest entry must describe this release"
+            exit 1
+          fi
+          echo "✓ tag $GITHUB_REF_NAME matches the latest CHANGELOG.md entry"
+
+  # ── Publish: npm release + GitHub Release. Runs only after the guard passes. ──
+  # Consistency is enforced by the guard; here we only build, test and publish.
+  # prepublishOnly runs the build (tsc declarations + tsdown bundles) before
+  # the package is packed. Publishing is OIDC trusted publishing only: the
+  # npmjs.com publisher authorizes this repository and workflow, so no token is
+  # stored anywhere and a workspace without that authorization cannot publish.
+  # An already-published version is skipped (safe tag replay), and prerelease
+  # versions publish under the `beta` dist-tag.
+  # A GitHub Release named after the tag (no artifacts) is created only when
+  # npm actually published a new version — tag replay skips both. The release
+  # body is the matching CHANGELOG.md entry, read with the guard-verified
+  # version (no duplicate normalization, no duplicate validation).
+  publish:
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # matches ci.yml (pnpm 11 requires Node >= 22.13)
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Publish to npm (OIDC trusted publishing)
+        id: publish_npm
+        run: |
+          # Version comes from the guard, which already verified it against
+          # package.json, dsh.plugin.json and the changelog.
+          VER="${{ needs.guard.outputs.version }}"
+          TAG=latest
+          [[ "$VER" == *-* ]] && TAG=beta
+
+          # An interrupted publish can leave a staged version behind: npm view
+          # does not see it, republishing it is a 409, and clearing it is the
+          # only way forward.
+          publish() {
+            local out
+            if out="$(pnpm publish --no-git-checks --access public --provenance --tag "$TAG" 2>&1)"; then
+              echo "$out"
+              return 0
+            fi
+            echo "$out"
+            case "$out" in
+              *"previously staged"*)
+                echo "unstaging $VER from an interrupted publish"
+                npm unpublish "dsh-reckoner@$VER" --force
+                pnpm publish --no-git-checks --access public --provenance --tag "$TAG" ;;
+              *) return 1 ;;
+            esac
+          }
+
+          if npm view "dsh-reckoner@$VER" version >/dev/null 2>&1; then
+            echo "dsh-reckoner@$VER already published — skipping (tag replay)"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          elif publish; then
+            echo "published dsh-reckoner@$VER via OIDC trusted publishing"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::the OIDC publish of dsh-reckoner@$VER failed — check the Trusted Publisher on npmjs.com (repository curtainsmall/dsh-reckoner, workflow release.yml)"
+            exit 1
+          fi
+      - name: Read changelog entry
+        id: changelog
+        uses: mindsers/changelog-reader-action@v2
+        with:
+          version: ${{ needs.guard.outputs.version }}
+          path: ./CHANGELOG.md
+      - name: Publish GitHub Release
+        if: steps.publish_npm.outputs.published == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: ${{ steps.changelog.outputs.changes }}
