@@ -25,6 +25,11 @@ import {
   templateLanguageToArticleLanguage,
   type GenerationFacts,
 } from './generate.ts'
+import {
+  streamLlmText,
+  type AgentDefaultModelLike,
+  type LlmLike,
+} from './llm-call.ts'
 
 /** Minimal structural shape of the web-server route registry. */
 export interface WebServerLike {
@@ -61,55 +66,6 @@ export interface GenerateDeps {
 /** The record's own prose, used as the language probe when the article language is automatic. */
 function recordProse(facts: GenerationFacts): string {
   return [facts.title, ...facts.messages.map((message) => message.text), facts.closing ?? ''].join('\n')
-}
-
-/** Optional host LLM runtime shape (dsh-llm; absent → generation refuses with a clear error). */
-/** The stream chunk types this module reads; every other type falls through untouched. */
-enum StreamChunkKind {
-  TextDelta = 'text-delta',
-  ToolCallDelta = 'tool-call-delta',
-  Finish = 'finish',
-}
-/**
- * The finish reasons the shell reports. The wire union is merge-extensible, so an
- * unknown kind still falls through - this enum names only the kinds we act on.
- */
-enum FinishReasonKind {
-  Stop = 'stop',
-  ToolCalls = 'tool-calls',
-  MaxTokens = 'max-tokens',
-  Aborted = 'aborted',
-  Error = 'error',
-}
-
-/** Whether a string read off the stream is a chunk kind this module acts on. */
-function toStreamChunkKind(value: unknown): StreamChunkKind | undefined {
-  return typeof value === 'string' && (Object.values(StreamChunkKind) as readonly string[]).includes(value)
-    ? (value as StreamChunkKind)
-    : undefined
-}
-
-/** Whether a string read off the stream is a finish reason this module acts on. */
-function toFinishReasonKind(value: unknown): FinishReasonKind | undefined {
-  return typeof value === 'string' && (Object.values(FinishReasonKind) as readonly string[]).includes(value)
-    ? (value as FinishReasonKind)
-    : undefined
-}
-
-interface LlmLike {
-  stream(options: {
-    provider: string
-    model: string
-    messages: Array<{ role: string; content: Array<{ type: string; text: string }> }>
-    system?: string
-    maxTokens?: number
-    signal?: AbortSignal
-  }): AsyncIterable<unknown>
-}
-
-/** Optional deployment default-model selection (dsh-agent-default-model). */
-interface AgentDefaultModelLike {
-  currentSelection(): { provider: string; model: string; reasoningEffort?: string }
 }
 
 /** The web paths of the generation subsystem (shared wire contract host ↔ client). */
@@ -316,56 +272,21 @@ async function generateArticle(
     : templateLanguageToArticleLanguage(templateLanguage)
   const { system, user } = buildArticlePrompt(facts, promptLanguage, format)
   const startedAt = Date.now()
-  let text = ''
-  /** The provider's own finish reason, kept so an empty result can name it instead of guessing. */
-  let seenFinish: FinishReasonKind | undefined
-  for await (const raw of llm.stream({
-    provider: route.provider,
-    model: route.model,
-    messages: [{ role: 'user', content: [{ type: 'text', text: user }] }],
+  const trimmed = await streamLlmText({
+    llm,
+    route: { provider: route.provider, model: route.model },
     system,
+    user,
     maxTokens: 4096,
+    what: 'article text',
+    activity: 'article generation',
     signal,
-  })) {
-    const chunk = raw as {
-      type?: string
-      text?: string
-      reason?: string | { kind?: string; failure?: { message?: string } }
-    }
-    const chunkKind = toStreamChunkKind(chunk.type)
-    if (chunkKind === StreamChunkKind.TextDelta) {
-      text += chunk.text ?? ''
-    } else if (chunkKind === StreamChunkKind.ToolCallDelta) {
-      throw new Error('the generation model unexpectedly requested a tool')
-    } else if (chunkKind === StreamChunkKind.Finish) {
-      // The finish chunk carries the provider's reason as an object (`{kind, failure}`);
-      // a bare string is tolerated too. Without this the reason is silently lost and any
-      // failed call surfaces as "no article text", which is what the first attempt of a
-      // cold provider looks like.
-      const reason = chunk.reason
-      const kind = toFinishReasonKind(typeof reason === 'string' ? reason : reason?.kind)
-      const detail = typeof reason === 'string' ? '' : (reason?.failure?.message ?? '')
-      seenFinish = kind ?? seenFinish
-      if (kind === FinishReasonKind.Aborted) throw new Error('article generation was aborted')
-      if (kind === FinishReasonKind.Error) {
-        if (text.trim().length === 0) {
-          throw new Error(`the model call failed: ${detail.length > 0 ? detail : 'the provider reported an error without a message'}`)
-        }
-        log.warn('article generation finished with an error after some text', { detail })
+    onTick: () => {
+      if (onProgress !== undefined) {
+        onProgress(Math.min(90, 10 + ((Date.now() - startedAt) / 30_000) * 80))
       }
-      if (kind === FinishReasonKind.MaxTokens) {
-        if (text.trim().length === 0) throw new Error('the model hit its token limit before producing any article text')
-        log.warn('article generation was cut off by the token limit', { chars: text.length })
-      }
-    }
-    if (onProgress !== undefined) {
-      onProgress(Math.min(90, 10 + ((Date.now() - startedAt) / 30_000) * 80))
-    }
-  }
-  const trimmed = text.trim()
-  if (trimmed.length === 0) {
-    throw new Error(`the model produced no article text (finish: ${seenFinish ?? 'none'})`)
-  }
+    },
+  })
   if (templateLanguage === undefined) return trimmed
   const document = buildLatexDocument(trimmed, templateLanguage)
   if (!document.ok) throw new Error(`LaTeX validation failed: ${document.error}`)

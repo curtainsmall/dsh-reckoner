@@ -15,6 +15,10 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./search": {
+      "types": "./lib/types/search-tool.d.ts",
+      "default": "./lib/search.js"
+    },
     "./client": {
       "default": "./lib/client.js"
     },

@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Engine } from '../src/engine/engine.ts'
 import { RECORD_VERSION, type TraceRow } from '../src/engine/record.ts'
+import { readSearchFact, SearchOutcome, SearchTier } from '../src/engine/search.ts'
+import { TraceTool } from '../src/engine/trace-tools.ts'
 
 let home: string
 let engine: Engine
@@ -489,6 +491,69 @@ describe('the roster', () => {
     engine.deleteRecord(id)
     expect(engine.listRecords().rows).toEqual([])
     expect(existsSync(join(home, 'records', `${id}.jsonl`))).toBe(false)
+  })
+})
+
+describe('the search row', () => {
+  const FACT = {
+    question: 'thermal conductivity of copper at 300 K',
+    tier: SearchTier.Strict,
+    outcome: SearchOutcome.Answered,
+    candidates: [{ url: 'https://example.test/a' }],
+    used: [{ url: 'https://en.wikipedia.org/wiki/Thermal_conductivity' }],
+    synthesis: {
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      promptVersion: 'search-extract/1',
+      answer: 'Copper conducts 401 W/(m*K) at room temperature.',
+      used: [0],
+    },
+    durationMs: 1234,
+  }
+
+  it('records one lookup and counts it for the budget', () => {
+    engine.markerStart('Copper')
+    expect(engine.countSearchRows()).toBe(0)
+    expect(engine.recordSearch(FACT)).toEqual({ ok: true, outcome: SearchOutcome.Answered })
+    expect(engine.countSearchRows()).toBe(1)
+
+    const row = rowsOf(engine, engine.openRecordId()!).at(-1)
+    expect(row?.tool).toBe(TraceTool.Search)
+    expect(row?.ok).toBe(true)
+    expect(readSearchFact(row?.content)).toMatchObject({ question: FACT.question, outcome: SearchOutcome.Answered })
+  })
+
+  it('refuses a lookup while no record is open, and writes nothing', () => {
+    expect(engine.recordSearch(FACT)).toMatchObject({ ok: false, code: EngineErrorCode.OpenRecordNotFound })
+    expect(engine.countSearchRows()).toBe(0)
+    expect(existsSync(join(home, 'open-record.jsonl'))).toBe(false)
+  })
+
+  it('records a malformed fact as a failed row instead of accepting it', () => {
+    engine.markerStart('Copper')
+    const receipt = engine.recordSearch({ question: 'q', tier: SearchTier.Strict, outcome: SearchOutcome.Answered, durationMs: 1 })
+    expect(receipt).toMatchObject({ ok: false, code: EngineErrorCode.InvalidArgs })
+    expect(String(receipt['error'])).toContain('synthesis')
+    expect(engine.countSearchRows()).toBe(0)
+    expect(rowsOf(engine, engine.openRecordId()!).at(-1)?.ok).toBe(false)
+  })
+
+  it('counts the lookups of a resumed record so the budget survives a restart', () => {
+    const id = openRecordWithConditions()
+    engine.recordSearch(FACT)
+
+    const revived = new Engine(home, { now: () => clock })
+    revived.start()
+    expect(revived.openRecordId()).toBe(id)
+    expect(revived.countSearchRows()).toBe(1)
+    // A lookup is a fact, not a write: recovery leaves the slot table alone.
+    expect(revived.opGet('V_in')).toMatchObject({ ok: true, name: 'V_in' })
+
+    revived.markerEnd('done')
+    const next = new Engine(home, { now: () => clock })
+    next.start()
+    next.markerStart('another')
+    expect(next.countSearchRows()).toBe(0)
   })
 })
 

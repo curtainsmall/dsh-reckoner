@@ -79,7 +79,10 @@ function clientBundle(pluginId: string, entryFile: string): UserConfig {
 
 export default [
   {
-    entry: { index: 'src/index.ts' },
+    // Two host entries: the plugin itself, and the `search` row the
+    // `reckoner-with-search` preset mounts (a separate subpath export, so a
+    // preset can name it without mounting the whole plugin a second time).
+    entry: { index: 'src/index.ts', search: 'src/search-tool.ts' },
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',

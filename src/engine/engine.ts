@@ -1,9 +1,14 @@
 /**
- * The engine shell: the slot table, the unclosed record and the six
- * operations the tools call. Every operation returns a receipt - success
- * carries the stored fact, failure carries `{ ok: false, code, error }` - and
- * nothing is written to a slot when an operation fails. The engine holds no
- * domain knowledge: the formula comes from the caller.
+ * The engine shell: the slot table, the unclosed record and the operations the
+ * tools call. Every operation returns a receipt - success carries the stored
+ * fact, failure carries `{ ok: false, code, error }` - and nothing is written to
+ * a slot when an operation fails. The engine holds no domain knowledge: the
+ * formula comes from the caller.
+ *
+ * Six of the operations are the model-facing tools (`set`, `get`, `eval` and the
+ * three markers); `recordSearch` is the seventh, reached only through the host
+ * service by the `search` tool of the `reckoner-with-search` preset, because a
+ * lookup is done outside the engine and merely recorded here.
  *
  * The slot table lives exactly as long as the record is open: `record_end`
  * clears it, so a non-empty table means an unclosed record exists.
@@ -14,6 +19,7 @@ import { evaluateFormula, type SlotAccess } from './formula-eval.ts'
 import { parseFormula } from './formula-parser.ts'
 import { requireIdentifier } from './identifier.ts'
 import { RECORD_VERSION, RecordStore, type RecordSummary, type TraceRow } from './record.ts'
+import { parseSearchFact, searchFactContent, type SearchFact } from './search.ts'
 import { TraceTool } from './trace-tools.ts'
 import { type DimSpec, parseDim } from './si-vector.ts'
 import {
@@ -76,6 +82,7 @@ export class Engine {
   private readonly now: () => number
   private readonly slots = new Map<string, SlotEntry>()
   private open: OpenRecord | null = null
+  private searchRows = 0
   private roster: { mtime: number; rows: RecordSummary[]; unknownIds: string[] } | null = null
 
   constructor(readonly home: string, options: EngineOptions = {}) {
@@ -91,6 +98,7 @@ export class Engine {
   start(): void {
     this.slots.clear()
     this.open = null
+    this.searchRows = 0
     const file = this.store.readOpen()
     if (file === null) return
     if (file.header === null || file.header.version < RECORD_VERSION) {
@@ -105,6 +113,7 @@ export class Engine {
       return
     }
     this.open = { id, title, openedAt: start.at, seq: file.rows[file.rows.length - 1]?.seq ?? start.seq }
+    this.searchRows = file.rows.filter((row) => row.tool === TraceTool.Search).length
     for (const row of file.rows) {
       if (!row.ok) continue
       try {
@@ -261,6 +270,27 @@ export class Engine {
     })
   }
 
+  /**
+   * Record one outside lookup. The caller owns the network and the synthesis -
+   * the engine only validates the fact and appends the row, so the calculator
+   * itself still reaches nothing. Unknown to the model-facing tool surface: the
+   * `search` tool of the search preset calls it through the host service.
+   */
+  recordSearch(fact: SearchFact | unknown): Receipt {
+    return this.run(TraceTool.Search, () => {
+      this.requireOpenRecord()
+      const parsed = parseSearchFact(fact)
+      this.searchRows += 1
+      this.appendRow(TraceTool.Search, true, searchFactContent(parsed))
+      return { ok: true, outcome: parsed.outcome }
+    })
+  }
+
+  /** How many lookups the open record already carries: the per-record budget reads this. */
+  countSearchRows(): number {
+    return this.searchRows
+  }
+
   markerStart(title: unknown): Receipt {
     return this.run(TraceTool.Start, () => {
       const recordTitle = readText(title, TraceTool.Start, 'title')
@@ -273,6 +303,7 @@ export class Engine {
       const id = this.allocateRecordId()
       this.store.beginOpen()
       this.open = { id, title: recordTitle, openedAt: this.now(), seq: 0 }
+      this.searchRows = 0
       const row = this.appendRow(TraceTool.Start, true, { title: recordTitle, record: id })
       // The written row is the record's authoritative start, so the in-memory span matches it.
       if (row !== null) this.open = { id, title: recordTitle, openedAt: row.at, seq: row.seq }
@@ -308,6 +339,7 @@ export class Engine {
       this.appendRow(TraceTool.End, true, closing === undefined ? { record: current.id } : { text: closing, record: current.id })
       this.store.closeOpen(current.id)
       this.slots.clear()
+      this.searchRows = 0
       this.open = null
       this.roster = null
       return { ok: true }

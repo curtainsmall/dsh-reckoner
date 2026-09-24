@@ -21,6 +21,7 @@ The same material in model-facing form is carried by the `reckoner-interface` an
 - [9. Storage and logs](#9-storage-and-logs)
 - [10. Article generation](#10-article-generation)
 - [11. The panel](#11-the-panel)
+- [12. The outside lookup](#12-the-outside-lookup)
 
 ## 1. What the engine is
 
@@ -420,7 +421,7 @@ Every call appends at most one row to the open record, inputs and outputs alike.
 |---|---|
 | `seq` | the row's position in the record, from 1, incremented per appended row |
 | `at` | the clock reading of the call, in milliseconds |
-| `tool` | `set`, `get`, `eval`, `record_start`, `record_message` or `record_end` |
+| `tool` | `set`, `get`, `eval`, `record_start`, `record_message`, `record_end` or `search` |
 | `ok` | `true`, or `false` for a refused call |
 | `content` | what that tool stores |
 
@@ -432,10 +433,12 @@ Every call appends at most one row to the open record, inputs and outputs alike.
 | `record_start` | `{ title, record }`: the title and the allocated identifier |
 | `record_message` | `{ text }`, or `{ text, hide: true }` |
 | `record_end` | `{ record }`, or `{ text, record }` when a closing text was given |
+| `search` | `{ question, tier, outcome, candidates, used, synthesis?, error?, durationMs }`: the lookup's own fact (Section 12.5) |
 | a refused call | `{ code, error }` |
 
 - `vars` holds exactly the slots the formula read, in first-use order, each with the value the slot held at that moment. A bound variable never enters the trace.
 - The record keeps facts, not formatted strings: a `get` row stores the value, not the options that produced its rendering.
+- A `search` row is written by the tool that ran the lookup, never by the model: the row is the record's account of the retrieval, and the model receives the answer alone (Section 12). It is a fact like a `get` row, so recovery does not recompute it.
 - A trace that cannot be written does not turn a successful call into a failure: the append failure is dropped.
 
 ### 7.3 The record file
@@ -453,9 +456,9 @@ At start the engine clears the slot table and then reads the unclosed file. A fi
 |---|---|
 | `set`, ok | writes the stored value, or deletes the slot when its value is `null` |
 | `eval`, ok | writes the stored result into its target, without recomputing anything |
-| any other row | skipped |
+| `search`, `get` and any other row | skipped |
 
-- The stored results are taken as facts: nothing is recomputed, nothing is fetched and nothing is random.
+- The stored results are taken as facts: nothing is recomputed, nothing is fetched, nothing is looked up again and nothing is random.
 - A row that no longer parses is skipped, so recovery can never keep the plugin from mounting.
 - The trace then continues in the same file, the next row following the last one's `seq`.
 
@@ -539,12 +542,14 @@ A closed record can be written up as a standalone solution article. The host red
 | the conditions | the accepted `set` rows, accumulated per slot name; a deletion removes the name |
 | the messages | the accepted `record_message` rows, each with its `seq` and its `hide` flag |
 | the steps | the accepted `eval` rows carrying a formula: `seq`, `formula`, the slots it read and its result |
+| the lookups | the `search` rows that answered: `seq`, the question, the answer and the sources it relied on |
 | the closing text | the last accepted `record_end` row's `text` |
 
 - Refused rows and `get` rows carry nothing to write, so they are skipped: the article is built from the derivation that succeeded and the numbers it produced.
 - The messages and the steps are interleaved by `seq`, so an explanation sits next to the steps it covers.
 - A message with `hide: true` becomes an author's note in the facts: the writer is told it is guidance that must not be copied, quoted, or allowed to change a recorded number. A message without `hide` becomes the record's own explanation.
 - Every number in the facts is cut before it reaches the model: a non-zero number below `1e-3` or at least `1e6` is written in exponential form with four decimals, and any other number is rounded to four decimal places. A field named `dim` keeps its 7 integers unchanged. The cut applies to the prompt only; the record keeps the stored numbers.
+- A lookup is handed over as its own entry in the timeline: the question the model asked, the answer as it was recorded, and one line per source. The answer stays verbatim, because the number it carries was stored as the source wrote it, so the four-decimal cut does not apply to it (Section 12.7). An answer of the open tier is marked as looked up on the open web and not verified, and the writer is told that a looked-up value must keep its number and unit as quoted and must credit the source where it is used.
 - **Formats.** Markdown (`.md`) and LaTeX (`.tex`). For LaTeX the model writes the body only: the host refuses a body carrying document-restructuring commands, unbalanced braces or an odd number of `$`, and wraps the rest in a XeLaTeX document shell, `ctexart` for zh-CN and `article` with `fontspec` for en, with amsmath, siunitx and unicode-math, and with the fixed title and author.
 - **Language.** `auto`, `zh-CN` or `en`. The shell language is resolved before generation, so an auto job probes the record's own prose (title, messages and closing text) for CJK ideographs.
 - **Job phases.** prepare, generate, write, compile. A LaTeX article is written into a folder named after the file, which also receives the PDF and the compiler's artifacts; a Markdown article is written flat and is never compiled.
@@ -571,6 +576,7 @@ The records panel is a **Reckoner** entry in the sidebar that opens over the con
 - Rows are grouped into the narrative: consecutive accepted `set` rows collapse into one **Writes ({n})** card (one line per slot, with its revision), consecutive accepted `get` rows into a **Reads ({n})** card, and consecutive failures into a red **Failed attempts ({n})** card showing the sequence number, the tool, the formula when there is one, the `code` and the `error` text.
 - Every accepted `eval` gets its own card: the formula, the written slot with its revision, one row per slot the formula read with the value it held, chips that jump to the `set` row of each of those slots, and the result as a tree.
 - Marker rows render as accent-striped cards: the record start, a message, the record end, a refused `record_start` and a refused `record_end`.
+- A lookup gets its own card: the question, the answer it received, and, behind a collapsible **Sources ({n})** header, the sources the record kept. A refused or unanswered lookup shows its one sentence in the warning or error accent instead.
 - The right-hand column holds the two article buttons, **Generate Markdown** and **Generate LaTeX**, which open the generation setup dialog.
 
 ### 11.3 Host endpoints
@@ -588,3 +594,107 @@ The records panel is a **Reckoner** entry in the sidebar that opens over the con
 | `GET /api/dsh-reckoner/directory-tree.css` | the vendored stylesheet the panel injects |
 | `GET` / `PUT /api/dsh-reckoner/generate-dir` | the remembered generation directory, language, format and compile toggle |
 | `POST /api/dsh-reckoner/reveal` | opens a generated file or its folder in the host's file manager |
+
+## 12. The outside lookup
+
+The pure `reckoner` preset reaches nothing: it has six tools, no shell, no file system and no network. One outside fact at a time arrives through the `reckoner-with-search` preset, which carries one row more and nothing else. That row, `dsh-reckoner/search`, registers the `search` tool for the session and forwards every call to the host half of the plugin through the `reckonerSearch` service; the row alone registers nothing else, so a session without it has no `search` tool at all. The generic `web_search` and `web_fetch` tools are mounted by neither preset, so the model can never search or fetch on its own. The engine plays no part in the retrieval: it validates the fact and appends the row, exactly as it does for `set`.
+
+### 12.1 The tool contract
+
+| argument | meaning |
+|---|---|
+| `question` | the fact the caller needs, asked as a question in one sentence. It is required and is forwarded verbatim |
+
+```
+success: { ok: true, answer, origin }
+failure: { ok: false, code, error }
+```
+
+- `answer` is the extractive answer as the model receives it, already cut to the policy's `answerMaxChars`; `origin` names the class of source it came from: `github` when every source is a GitHub host, `allowlist` when the strict tier answered, `web` when the open tier did. `origin` is for the caller's own calibration; it is not stored in the fact.
+- The failure codes are the four of Section 12.6, and `error` is one sentence in the voice of the engine's own failures.
+- The answer is an input, never a result: the persona tells the model to store it with `set`, copying the number with its unit as written and letting the engine convert. Nothing about a lookup is computed by the engine, and the answer never flows into a formula by itself.
+
+### 12.2 What the model does and does not see
+
+| the model receives | the record keeps |
+|---|---|
+| the answer, and whether it came from the allow-list, the open web or GitHub | the question, the tier, the outcome, every candidate source, the sources the policy allowed, the synthesis route and prompt version, and the answer |
+
+- The provider's own search is not visible to us at all. We send the question verbatim and never plan a query ourselves; what the provider's server-side model searched, and which pages it read, are its own turn and are not reported back. The record therefore holds the question and the sources the provider cited, not the queries.
+- The policy runs after the retrieval: it decides what the extractive step may read, not what was already read. That is why the fact keeps the candidates beside the allowed set.
+- The model never receives a URL, a query or a snippet. Sources reach the reader through the record and the panel, and the article writer through the facts of Section 10.
+
+### 12.3 The pipeline of one lookup
+
+1. The question is sent verbatim to the host `web` service (`ctx.web.search`), which resolves the deployment's search provider. The shipped provider is `deepseek-official`: it performs an auxiliary model turn carrying the server-side `web_search_20250305` tool, and returns the sources that turn cited, up to the policy's `maxResults`.
+2. The policy keeps the sources the tier allows (Section 12.4).
+3. When `enrich.pages` is greater than zero, the first that many allowed pages are fetched for their text and each is cut to `enrich.charsPerPage`. A page that will not load is simply not enriched; the call continues on the snippets.
+4. The extractive step runs as a bare model call with no tools and no memory of the session, on `synthesis.provider` and `synthesis.model`, or on the deployment's default model when they are unset. Its prompt, version `search-extract/1`, allows the material alone, forbids outside knowledge, forbids converting a unit or computing a derived value, and asks for one JSON object: the answer, the material items relied on, and whether the material was insufficient.
+5. The outcome and the whole fact are written into the open record, and the model receives the answer alone.
+
+- The strict tier does not narrow the provider's search: the provider searches the open web either way, and the allow-list decides what the extractive step may read.
+- One lookup costs two model calls at least: the provider's server-side turn plus the extractive call. `enrich` adds one fetch per page.
+- A reply that is not the agreed JSON object is a technical failure, never an answer: the raw text stays in the record and never reaches the model, because an unreadable reply is exactly where a plausible sentence could smuggle in an unchecked number.
+
+### 12.4 The policy of the row
+
+Every key is optional and every key has a default, so a preset names only what it wants to change. An unusable value is reported and replaced rather than refusing the row: a wrong number must not cost a session its calculator.
+
+| key | default | meaning |
+|---|---|---|
+| `tier` | `strict` | `strict` keeps only hosts on the allow-list; `open` keeps every source the provider returned |
+| `allowedHosts` | the 12 reference hosts | host suffixes a strict lookup accepts. A host matches when it is the pattern or a subdomain of it, never when it merely ends with the same letters. An explicitly empty list is a decision: a strict lookup then answers nothing |
+| `maxResults` | `12` | upper bound on the sources one provider call returns |
+| `maxSearchesPerRecord` | `4` | how many lookups one record may carry |
+| `answerMaxChars` | `1200` | upper bound on the answer handed to the model; only the answer the model receives and the copy in the synthesis are cut |
+| `enrich.pages` | `0` | how many allowed pages are fetched for their text. `0` keeps the extractive step on the provider's citation snippets |
+| `enrich.charsPerPage` | `4000` | how much text of each fetched page reaches the extractive step |
+| `synthesis.provider`, `synthesis.model` | unset | the route the extractive step runs on; unset means the deployment's default model |
+| `synthesis.maxTokens` | `800` | the token ceiling of the extractive call |
+
+The default allow-list is reference material a calculation may cite: `wikipedia.org`, `github.com`, `githubusercontent.com`, `stackoverflow.com`, `stackexchange.com`, `developer.mozilla.org`, `docs.python.org`, `nist.gov`, `iso.org`, `ietf.org`, `rfc-editor.org` and `arxiv.org`.
+
+### 12.5 The recorded fact
+
+Every call writes exactly one row, whatever it answered, and the row's tool is `search`.
+
+| field | content |
+|---|---|
+| `question` | the question exactly as it was given |
+| `tier` | `strict` or `open`, the tier this call ran under |
+| `outcome` | `answered`, `insufficient`, `refused` or `failed` |
+| `candidates` | every source the provider returned, in its order, each with its `url` and, when the provider supplied them, its `title`, `snippet` and `publishedAt` |
+| `used` | the sources the policy allowed: a subset of `candidates` in the same order, and an empty list when nothing was allowed |
+| `synthesis` | absent when the call ended before any synthesis ran; otherwise the provider, the model, the prompt version, the answer and the material items the answer relied on |
+| `error` | one self-sufficient sentence, present when the call answered nothing |
+| `durationMs` | how long the call took |
+
+- The row is written by the tool, never by the model, and it is a fact like a `get` row: recovery does not recompute it (Section 7.4).
+- `synthesis.used` holds indices into the row's own `used` list, which is the material the extractive step was given, so an answer can be traced to the sources it relied on.
+- The three outcomes that answer nothing are recorded too: `refused` when the record had spent its budget, `insufficient` when no allowed source held the fact, and `failed` when the provider, the network or the extractive step could not run. A record is the account of what happened, so a lookup that produced nothing is part of it.
+- `candidates` is kept because the policy runs after the retrieval: the record shows what the provider found and which part of it the answer was allowed to use.
+
+### 12.6 The failure codes the caller sees
+
+| code | raised when |
+|---|---|
+| `SEARCH_INSUFFICIENT` | no source the policy allowed holds the fact, or the extractive step answered `insufficient` |
+| `SEARCH_BUDGET_EXCEEDED` | the record has spent its `maxSearchesPerRecord` lookups. The call never reaches the provider |
+| `SEARCH_UNAVAILABLE` | the provider, the network, the extractive model or a required service failed, or no default model is configured |
+| `ENGINE_OPEN_RECORD_NOT_FOUND` | no record is open. A lookup is recorded, so it requires an open record |
+
+### 12.7 The caller's side of it
+
+- The persona's rules for the search preset say the answer is an input: store it with `set`, copying the number with the unit exactly as written, and let the engine convert. The tool's own description says the same thing, because a model reads the tool before it reads the persona.
+- Never ask the tool to compute, convert, round or derive anything, and never ask it for something the record already holds.
+- `SEARCH_INSUFFICIENT` means the quantity is missing: say which relation cannot be evaluated and stop, instead of estimating the value.
+- `SEARCH_BUDGET_EXCEEDED` means the record has no lookup left: continue with what the record holds, or say what is missing.
+- The record's `search` rows feed the article: the facts render the question, the answer verbatim - not cut to four decimal places, because it carries the number as its source wrote it - and the sources, so the article can credit them, and an open-tier lookup is marked as web-derived and unverified (Section 10).
+- The panel draws a lookup as its own card: the question, the answer, and a collapsible source list; a refused or unanswered lookup shows its one sentence in the warning or error accent (Section 11.2).
+
+### 12.8 The limits, as measured
+
+- What the provider's server-side model searched is invisible. The record holds the question and the sources the answer cited; the queries that produced them are not among them.
+- The allow-list filters the retrieval after it happened. It guarantees what the model is shown, never what was read.
+- A direct fetch reaches only the hosts the machine's network can reach, and that is not every allowed host: on the machine this feature was measured on, `wikipedia.org` and `stackoverflow.com` could not be fetched while `github.com`, `raw.githubusercontent.com` and `example.com` could. `enrich` therefore only ever helps for a reachable host; every other allowed source arrives as the provider's citation snippet.
+- One lookup costs two model calls: the provider's server-side turn and the extractive call.

@@ -12,6 +12,7 @@
  */
 
 import type { TraceRow } from './engine/record.ts'
+import { readSearchFact, SearchOutcome, SearchTier, type SearchSource } from './engine/search.ts'
 import { TraceTool } from './engine/trace-tools.ts'
 
 /** One stored condition: the slot name and the value `set` stored (SI numbers with a 7-integer `dim`). */
@@ -36,16 +37,34 @@ export interface GenerationMessage {
 }
 
 /**
+ * One answered `search` row: the question the model asked, the answer it was
+ * given, and the sources the record kept. The article needs the sources - a
+ * looked-up value must be credited - while the model that stored the value
+ * never saw them.
+ */
+export interface GenerationSearch {
+  readonly seq: number
+  readonly question: string
+  readonly answer: string
+  readonly tier: SearchTier
+  /** The sources the extractive step relied on, or every allowed source when it named none. */
+  readonly sources: readonly SearchSource[]
+}
+
+/**
  * The article facts of one record: its title, the conditions still standing,
- * the model's messages, the successful evaluation steps and the closing text.
- * Failed rows and `get` rows carry nothing to write, so they are skipped; a
- * `set` row that deletes a quantity removes it from the conditions.
+ * the model's messages, the successful evaluation steps, the answered lookups
+ * and the closing text. Failed rows and `get` rows carry nothing to write, so
+ * they are skipped; a `set` row that deletes a quantity removes it from the
+ * conditions, and a lookup that answered nothing carries no number into the
+ * article.
  */
 export interface GenerationFacts {
   readonly title: string
   readonly conditions: readonly GenerationCondition[]
   readonly messages: readonly GenerationMessage[]
   readonly steps: readonly GenerationStep[]
+  readonly searches: readonly GenerationSearch[]
   readonly closing: string | null
 }
 
@@ -54,11 +73,27 @@ export function recordFacts(rows: readonly TraceRow[]): GenerationFacts {
   const conditions = new Map<string, unknown>()
   const messages: GenerationMessage[] = []
   const steps: GenerationStep[] = []
+  const searches: GenerationSearch[] = []
   let title = ''
   let closing: string | null = null
 
   for (const row of rows) {
     if (!row.ok) continue
+    if (row.tool === TraceTool.Search) {
+      const fact = readSearchFact(row.content)
+      if (fact === null || fact.outcome !== SearchOutcome.Answered || fact.synthesis === undefined) continue
+      const relied = fact.synthesis.used
+        .map((index) => fact.used[index])
+        .filter((source): source is SearchSource => source !== undefined)
+      searches.push({
+        seq: row.seq,
+        question: fact.question,
+        answer: fact.synthesis.answer,
+        tier: fact.tier,
+        sources: relied.length > 0 ? relied : fact.used,
+      })
+      continue
+    }
     if (row.tool === TraceTool.Start) {
       const text = row.content['title']
       if (typeof text === 'string' && title.length === 0) title = text
@@ -101,6 +136,7 @@ export function recordFacts(rows: readonly TraceRow[]): GenerationFacts {
     conditions: [...conditions].map(([name, value]) => ({ name, value })),
     messages,
     steps,
+    searches,
     closing,
   }
 }
@@ -218,11 +254,28 @@ function renderStepVars(vars: Record<string, unknown>): string {
   return entries.map(([name, value]) => `${name} = ${JSON.stringify(cutNumbers(value))}`).join(', ')
 }
 
+/** One looked-up value as the facts state it: the question, the answer verbatim, and where it came from. */
+function renderSearchEntry(search: GenerationSearch, seq: number): string[] {
+  const lines: string[] = []
+  const marker = search.tier === SearchTier.Open ? ' (looked up on the open web; not verified)' : ''
+  // The answer is quoted as the source wrote it, so only its line breaks are
+  // re-indented: a continuation must not read as a new fact of its own.
+  const answer = search.answer.trim().replace(/\n/g, '\n  ')
+  lines.push(`- A value looked up at step ${seq}${marker}, in answer to the question "${search.question.trim()}": ${answer}`)
+  for (const source of search.sources) {
+    const label = source.title ?? source.url
+    const published = source.publishedAt === undefined ? '' : ` (${source.publishedAt})`
+    lines.push(`  source: ${label} - ${source.url}${published}`)
+  }
+  return lines
+}
+
 /**
  * The record rendered as neutral facts for the model: title and conditions first,
- * then the record's own timeline - messages and evaluation steps interleaved by
- * their `seq`, so an explanation sits next to the steps it covers - and the
- * closing text last. Numbers are cut to four decimal places; `dim` fields stay 7-tuples.
+ * then the record's own timeline - messages, evaluation steps and looked-up
+ * values interleaved by their `seq`, so an explanation sits next to the steps it
+ * covers - and the closing text last. Numbers are cut to four decimal places;
+ * `dim` fields stay 7-tuples, and a looked-up answer is quoted verbatim.
  */
 export function renderRecordFacts(facts: GenerationFacts): string {
   const lines: string[] = ['Record information to base the article on:', '']
@@ -231,8 +284,9 @@ export function renderRecordFacts(facts: GenerationFacts): string {
     lines.push(`- A condition recorded under the name ${condition.name}: ${JSON.stringify(cutNumbers(condition.value))}`)
   }
   const timeline = [
-    ...facts.messages.map((message) => ({ seq: message.seq, message, step: undefined })),
-    ...facts.steps.map((step) => ({ seq: step.seq, message: undefined, step })),
+    ...facts.messages.map((message) => ({ seq: message.seq, message, step: undefined, search: undefined })),
+    ...facts.steps.map((step) => ({ seq: step.seq, message: undefined, step, search: undefined })),
+    ...facts.searches.map((search) => ({ seq: search.seq, message: undefined, step: undefined, search })),
   ].sort((left, right) => left.seq - right.seq)
   for (const entry of timeline) {
     if (entry.message !== undefined) {
@@ -243,6 +297,10 @@ export function renderRecordFacts(facts: GenerationFacts): string {
           ? `- The author's note at step ${entry.seq} (guidance for you: never copy it, never quote it, and never let it change a recorded number): ${text}`
           : `- The record's own explanation: ${text}`,
       )
+      continue
+    }
+    if (entry.search !== undefined) {
+      lines.push(...renderSearchEntry(entry.search, entry.seq))
       continue
     }
     const step = entry.step
@@ -256,7 +314,7 @@ export function renderRecordFacts(facts: GenerationFacts): string {
   }
   if (facts.closing !== null && facts.closing.trim().length > 0) lines.push(`- The record's closing text: ${facts.closing.trim()}`)
   lines.push('')
-  lines.push('A recorded value is a number plus a "dim": 7 integer exponents in the order m, kg, s, A, K, mol, cd. Write it in the unit the question used (the exponents name the quantity). Every number above is already cut to four decimal places: copy them as they stand, never add digits and never recompute.')
+  lines.push('A recorded value is a number plus a "dim": 7 integer exponents in the order m, kg, s, A, K, mol, cd. Write it in the unit the question used (the exponents name the quantity). Every number above is already cut to four decimal places: copy them as they stand, never add digits and never recompute. A value that was looked up is quoted exactly as its source wrote it: keep its unit as written and credit that source where you use it.')
   return lines.join('\n')
 }
 
@@ -265,6 +323,7 @@ const MARKDOWN_SHARED_RULES = [
   'Every number must come from the provided derivation steps and the closing text — never invent or recompute values.',
   'Write every number with at most four decimal places: the facts are already cut that way, so copy them as they stand and never append digits the fact does not have.',
   'Never include record identifiers, timestamps or the author\'s notes in the article.',
+  'A value that was looked up from an outside source is not your own measurement: keep its number and unit exactly as the facts quote them, and credit that source where you use the value.',
   "Never mention Reckoner, DeepSeek Harness, the harness, formulae, derivation steps, records or the generation process in the article — present the work as if you carried out the calculation yourself, from the problem statement to the final result. The only allowed occurrences of the name are the document's fixed title 'DeepSeek Harness Reckoner Solution' and the author line 'DeepSeek Harness Reckoner'.",
 ]
 

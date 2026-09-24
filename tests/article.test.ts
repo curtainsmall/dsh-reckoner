@@ -3,6 +3,9 @@
  * facts, and the LaTeX shell around a model-written body.
  */
 import { describe, expect, it } from 'vitest'
+import { SearchOutcome, SearchTier, searchFactContent, type SearchFact } from '../src/engine/search.ts'
+import { TraceTool } from '../src/engine/trace-tools.ts'
+import type { TraceRow } from '../src/engine/record.ts'
 import {
   ArticleFormat,
   ArticleLanguage,
@@ -10,6 +13,7 @@ import {
   buildArticlePrompt,
   buildLatexDocument,
   normalizeFileName,
+  recordFacts,
   renderRecordFacts,
   resolveTemplateLanguage,
   sanitizeLatexBody,
@@ -34,6 +38,7 @@ const FACTS: GenerationFacts = {
       result: { num: 0.05454545454545454, dim: [0, 0, 0, 1, 0, 0, 0] },
     },
   ],
+  searches: [],
   closing: 'I = 54.5 mA',
 }
 
@@ -74,7 +79,7 @@ describe('the facts text', () => {
   })
 
   it('omits what the record does not have', () => {
-    const text = renderRecordFacts({ title: 'q', conditions: [], messages: [], steps: [], closing: null })
+    const text = renderRecordFacts({ title: 'q', conditions: [], messages: [], steps: [], searches: [], closing: null })
     expect(text).toContain('q')
     expect(text).not.toContain('Step ')
     expect(text).not.toContain('closing text')
@@ -82,6 +87,73 @@ describe('the facts text', () => {
   })
 })
 
+/** One search row as the engine writes it, for the facts that read it back. */
+function searchRow(seq: number, overrides: Partial<SearchFact> = {}): TraceRow {
+  const fact: SearchFact = {
+    question: 'thermal conductivity of copper at 300 K',
+    tier: SearchTier.Strict,
+    outcome: SearchOutcome.Answered,
+    candidates: [{ url: 'https://example.test/blog' }, { url: 'https://en.wikipedia.org/wiki/Thermal_conductivity' }],
+    used: [{ url: 'https://en.wikipedia.org/wiki/Thermal_conductivity', title: 'Thermal conductivity', publishedAt: '2024-01-02' }],
+    synthesis: {
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      promptVersion: 'search-extract/1',
+      answer: 'Copper conducts 401.0000 W/(m*K) at 300 K.',
+      used: [0],
+    },
+    durationMs: 900,
+    ...overrides,
+  }
+  return { seq, at: 1, tool: TraceTool.Search, ok: true, content: searchFactContent(fact) }
+}
+
+describe('the looked-up values in the facts', () => {
+  it('states the question, the answer verbatim and the source it came from', () => {
+    const facts = recordFacts([
+      { seq: 1, at: 1, tool: TraceTool.Start, ok: true, content: { title: 'Copper', record: '1' } },
+      searchRow(2),
+    ])
+    expect(facts.searches).toHaveLength(1)
+    const text = renderRecordFacts(facts)
+    expect(text).toContain('A value looked up at step 2')
+    expect(text).toContain('thermal conductivity of copper at 300 K')
+    // The answer is quoted as the source wrote it: four decimals are NOT cut away.
+    expect(text).toContain('401.0000 W/(m*K)')
+    expect(text).toContain('source: Thermal conductivity - https://en.wikipedia.org/wiki/Thermal_conductivity (2024-01-02)')
+    // Only the source that was relied on is credited, not every candidate.
+    expect(text).not.toContain('example.test/blog')
+  })
+
+  it('marks an open-tier lookup as unverified and credits every allowed source', () => {
+    const facts = recordFacts([
+      searchRow(3, {
+        tier: SearchTier.Open,
+        used: [{ url: 'https://example.test/a', title: 'A' }, { url: 'https://example.test/b' }],
+        synthesis: { provider: 'deepseek', model: 'm', promptVersion: 'search-extract/1', answer: 'A value.', used: [] },
+      }),
+    ])
+    const text = renderRecordFacts(facts)
+    expect(text).toContain('looked up on the open web; not verified')
+    expect(text).toContain('source: A - https://example.test/a')
+    expect(text).toContain('source: https://example.test/b')
+  })
+
+  it('carries only the lookups that answered something', () => {
+    const facts = recordFacts([
+      searchRow(2),
+      searchRow(3, { outcome: SearchOutcome.Insufficient, synthesis: undefined, error: 'nothing found' }),
+      searchRow(4, { outcome: SearchOutcome.Refused, synthesis: undefined, error: 'budget spent' }),
+    ])
+    expect(facts.searches.map((search) => search.seq)).toEqual([2])
+  })
+
+  it('tells the writer to credit a looked-up source and never to re-derive it', () => {
+    const prompt = buildArticlePrompt(recordFacts([searchRow(2)]), ArticleLanguage.Auto, ArticleFormat.Markdown)
+    expect(prompt.system).toContain('credit that source where you use the value')
+    expect(prompt.user).toContain('credit that source where you use it')
+  })
+})
 describe('the article prompt', () => {
   it('carries the facts and the format-specific rules', () => {
     const markdown = buildArticlePrompt(FACTS, ArticleLanguage.Auto, ArticleFormat.Markdown)

@@ -15,6 +15,8 @@ import { recordFacts, type GenerationFacts } from './generate.ts'
 import { registerGenerateEndpoints } from './generate-server.ts'
 import { registerSkills } from './skill.ts'
 import { installPresets } from './preset.ts'
+import { lookup } from './search/lookup.ts'
+import type { ReckonerSearchService } from './search/service.ts'
 import { attachConsoleSink, attachFileSink, log, resolveLevel, setLevel } from './log.ts'
 
 /** Plugin identity for cordis.yml rows. */
@@ -125,6 +127,26 @@ export function apply(ctx: Context): void {
   }, 'dsh-reckoner: engine')
 
   ctx.effect(() => registerSkills(ctx), 'dsh-reckoner: skills')
+
+  // The lookup seam: the `search` row of the `reckoner-with-search` preset owns
+  // the model-facing tool and the policy; everything the call actually does -
+  // provider, extractive step, record - happens here, against this engine, so a
+  // lookup lands in the same record as the calculation it belongs to.
+  ctx.effect(() => {
+    const service: ReckonerSearchService = {
+      lookup: (request, config) =>
+        lookup(
+          {
+            engine,
+            get: (serviceName) => ctx.get(serviceName) as unknown,
+            warn: (message, fields) => log.warn(message, fields),
+          },
+          config,
+          request,
+        ),
+    }
+    return ctx.provide('reckonerSearch', service)
+  }, 'dsh-reckoner: search service')
 
   ctx.effect(() => {
     const disposers: Array<() => void> = []

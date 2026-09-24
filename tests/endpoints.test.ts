@@ -44,6 +44,7 @@ const BODY = '/api/dsh-reckoner/records'
 let home: string
 let routes: Route[]
 let tools: Array<{ name?: string }>
+let published: Record<string, unknown>
 let web: typeof import('../src/index.ts')
 
 function call(route: Route, method: string, url: string): { status: number; json: unknown; text: string } {
@@ -89,6 +90,7 @@ beforeAll(async () => {
   process.env['DSH_RECKONER_LOG_LEVEL'] = 'off'
   routes = []
   tools = []
+  published = {}
   const dispose = () => {}
   const ctx = {
     effect: (fn: () => (() => void) | void) => {
@@ -97,7 +99,11 @@ beforeAll(async () => {
     },
     tools: { register: (tool: { name?: string }) => { tools.push(tool); return dispose } },
     webServer: { register: (route: Route) => { routes.push(route); return dispose } },
-    get: () => undefined,
+    get: (name: string) => published[name],
+    provide: (name: string, value: unknown) => {
+      published[name] = value
+      return dispose
+    },
   }
   web = await import('../src/index.ts')
   web.apply(ctx as never)
@@ -126,6 +132,15 @@ describe('the records endpoints', () => {
     expect(routes.some((route) => route.path === INDEX)).toBe(true)
     expect(routes.some((route) => route.path === BODY)).toBe(true)
     expect(routes.some((route) => route.path === '/api/dsh-reckoner/generate')).toBe(true)
+  })
+
+  it('publishes the lookup seam the search row resolves, and keeps search out of the tool surface', () => {
+    // The host half owns the lookup; the `dsh-reckoner/search` row of the
+    // `reckoner-with-search` preset owns the model-facing tool. Mounting the
+    // plugin alone must therefore publish the service and register no `search`
+    // tool of its own.
+    expect(typeof (published['reckonerSearch'] as { lookup?: unknown } | undefined)?.lookup).toBe('function')
+    expect(tools.map((tool) => tool.name)).not.toContain('search')
   })
 
   it('lists the closed records with the open one apart and the unknown count', () => {

@@ -18,6 +18,12 @@ export enum TraceTool {
   Start = 'record_start',
   Message = 'record_message',
   End = 'record_end',
+  /**
+   * The outside lookup of the `reckoner-with-search` preset. It writes its own
+   * row through the host service, so a lookup needs no extra model call, and it
+   * is absent from every other preset's tool surface.
+   */
+  Search = 'search',
 }
 
 /** The same values as a list: registration order, iteration and validation. */

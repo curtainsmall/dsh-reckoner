@@ -271,6 +271,7 @@ type Item =
   | { kind: 'reads'; rows: TraceRow[] }
   | { kind: 'failures'; rows: TraceRow[] }
   | { kind: 'eval'; row: TraceRow }
+  | { kind: 'search'; row: TraceRow }
   | { kind: 'event'; row: TraceRow }
 
 /**
@@ -300,6 +301,13 @@ function groupRows(rows: TraceRow[]): Item[] {
     if (MARKER_TOOLS.includes(row.tool)) {
       flush()
       items.push({ kind: 'marker', row })
+      continue
+    }
+    // A lookup stands alone: it is neither a write nor a failure run, and a
+    // refused or unanswered lookup still tells its own story.
+    if (row.tool === TraceTool.Search) {
+      flush()
+      items.push({ kind: 'search', row })
       continue
     }
     const runKey = (row.ok && (row.tool === TraceTool.Set || row.tool === TraceTool.Get)) ? row.tool : !row.ok ? 'fail' : null
@@ -525,7 +533,6 @@ function itemKey(item: Item): string {
   if (item.kind === 'writes' || item.kind === 'reads' || item.kind === 'failures') return `${item.kind}-${item.rows[0]?.seq ?? 0}`
   return `${item.row.tool}-${item.row.seq}`
 }
-
 function formatTime(time: number): string {
   return new Date(time).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
@@ -542,6 +549,8 @@ function TimelineItem({ item }: { item: Item }): React.JSX.Element {
       return <FailuresGroup rows={item.rows} />
     case 'eval':
       return <EvalRow row={item.row} />
+    case 'search':
+      return <SearchRow row={item.row} />
     case 'event':
       return <EventRow row={item.row} />
   }
@@ -747,6 +756,106 @@ function EvalRow({ row }: { row: TraceRow }): React.JSX.Element {
           </div>
         )}
       </details>
+    </div>
+  )
+}
+
+/* ── Search rows (the reckoner-with-search lookup) ────────────────────────── */
+
+/** One source as the record kept it. */
+interface SearchSourceView {
+  url: string
+  title?: string
+  publishedAt?: string
+}
+
+/** One lookup row's fields, read defensively: a row written by another build may carry anything. */
+function searchView(row: TraceRow): {
+  question: string
+  answer: string
+  outcome: string
+  tier: string
+  error: string
+  sources: SearchSourceView[]
+} {
+  const synthesis =
+    typeof row.synthesis === 'object' && row.synthesis !== null ? (row.synthesis as Record<string, unknown>) : {}
+  const sources: SearchSourceView[] = []
+  for (const entry of Array.isArray(row.used) ? row.used : []) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const bag = entry as Record<string, unknown>
+    if (typeof bag['url'] !== 'string') continue
+    sources.push({
+      url: bag['url'],
+      ...(typeof bag['title'] === 'string' ? { title: bag['title'] } : {}),
+      ...(typeof bag['publishedAt'] === 'string' ? { publishedAt: bag['publishedAt'] } : {}),
+    })
+  }
+  return {
+    question: typeof row.question === 'string' ? row.question : '',
+    answer: typeof synthesis['answer'] === 'string' ? synthesis['answer'] : '',
+    outcome: typeof row.outcome === 'string' ? row.outcome : '',
+    tier: typeof row.tier === 'string' ? row.tier : '',
+    error: typeof row.error === 'string' ? row.error : '',
+    sources,
+  }
+}
+
+/**
+ * One lookup: the question the model asked, the answer it received, and - behind
+ * a fold, because the reader is the one who needs them - the sources the record
+ * kept. A refused or unanswered lookup shows its one sentence in the warn/error
+ * accent instead.
+ */
+function SearchRow({ row }: { row: TraceRow }): React.JSX.Element {
+  const view = searchView(row)
+  const answered = view.outcome === 'answered' && view.answer.length > 0
+  const accent = answered
+    ? 'var(--dsw-alias-state-business-primary)'
+    : row.ok
+      ? 'var(--dsw-alias-state-warn-primary)'
+      : 'var(--dsw-alias-state-error-primary)'
+  return (
+    <div style={{ ...rowStyle, borderLeft: `3px solid ${accent}`, paddingLeft: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+        <span>{t('searchLabel')}</span>
+        {view.tier === 'open' && <span style={{ color: 'var(--dsw-alias-state-warn-primary)' }}>{t('searchOpenTier')}</span>}
+      </div>
+      {view.question.length > 0 && (
+        <div style={{ marginTop: 6, fontSize: 14.5, color: 'var(--dsw-alias-label-secondary)', fontStyle: 'italic', lineHeight: 1.5 }}>{view.question}</div>
+      )}
+      {answered && (
+        <div style={{ marginTop: 4, fontSize: 14.5, color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{view.answer}</div>
+      )}
+      {!answered && view.error.length > 0 && (
+        <div style={{ marginTop: 6, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5, wordBreak: 'break-word' }}>{view.error}</div>
+      )}
+      {view.sources.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <CollapseHeader label={t('searchSources', { n: view.sources.length })}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {view.sources.map((source) => (
+                <div key={source.url} style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ ...codeFont, fontSize: 13, color: 'var(--dsw-alias-state-business-primary)', wordBreak: 'break-all' }}
+                  >
+                    {source.title ?? source.url}
+                  </a>
+                  {source.title !== undefined && (
+                    <span style={{ ...codeFont, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', wordBreak: 'break-all' }}>{source.url}</span>
+                  )}
+                  {source.publishedAt !== undefined && (
+                    <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>{source.publishedAt}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CollapseHeader>
+        </div>
+      )}
     </div>
   )
 }

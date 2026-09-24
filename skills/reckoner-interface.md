@@ -31,6 +31,11 @@ A slot holds one of four value types: `number` (a JSON number), `complex` (store
   - `dim`: convert into that spelling, or - given 7 integers - check the vector without converting. A mismatch is refused.
   - The `value` of a `get` receipt can be fed straight back into `set`.
 - `eval {formula, target}` - evaluate ONE expression and write the result into `target` (a required slot name). The receipt is `{ok, target, rev}`; `eval` does not return the value, so read it with `get`.
+- `search {question}` - look one fact up outside the calculation. It exists only in the `reckoner-with-search` preset; in the pure preset it is not part of the surface, so never call it there. Ask for the fact the way you would ask a colleague ("thermal conductivity of copper at 300 K"). The receipt is `{ok, answer, origin}` or `{ok: false, code, error}`: you get the answer as words, never the pages, the queries or the sources - those go into the record, with the route and the prompt version that produced them. Four rules:
+  - The answer is an INPUT, not a result: transcribe it with `set`, copying the number with the unit exactly as written, and let the engine convert.
+  - Never ask it to compute, convert, round or derive anything, and never ask for something the record already holds.
+  - `SEARCH_INSUFFICIENT` means no allowed source holds the fact: that quantity is missing, so say which relation cannot be evaluated and stop.
+  - `SEARCH_BUDGET_EXCEEDED` means the record has spent its lookups: continue with what the record holds, or state what is missing. `SEARCH_UNAVAILABLE` is a technical failure and changes nothing.
 
 ## Receipts and errors
 
@@ -74,6 +79,7 @@ A decibel value and an angle are both dimensionless numbers: `{"num": 3}` is `3`
 
 - The gate comes first: store each quantity the user gave, one `set` per quantity, and stop if one is missing.
 - Never hard-code a measurement in a formula; reference the slot as `@name`. Constants you derive yourself (unit conversions, 273.15, 10 or 20) are written into the formula.
-- `set` is transcription into SI: convert the user's unit yourself and let `dim` name the result.
+- A quantity you cannot know and cannot write yourself goes through `search`; everything else still comes from the user. Its answer is not a result, and its sources are the record's business, not yours.
+- `set` is transcription into SI: convert the user's unit yourself and let `dim` name the result. A looked-up value keeps the unit its source wrote; `set` it that way and let the engine convert.
 - Check every receipt; read values only through `get`.
 - Split a long derivation: one intermediate per `eval`, read back with `@name`.

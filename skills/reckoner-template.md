@@ -20,4 +20,12 @@ A record is one calculation: its title, the conditions it was solved from, the e
 
 Each marker answers `{ok}`; a refused marker answers `{ok: false, code, error}` and changes nothing.
 
+## The lookup row
+
+In the `reckoner-with-search` preset a fourth kind of row appears: `search`. You never write it - every lookup appends its own row, holding the question, the candidate sources, the sources the policy allowed, the route and prompt version of the extractive step, and the answer it gave you. Three consequences:
+
+- Do not describe a lookup in `record_message`. Say what you used the value for, the way you would write any other step; the record already names where the number came from.
+- A lookup that answered nothing also writes a row. Its sentence is the record's account of a missing quantity; close the record with what the record does hold.
+- The sources are for the reader and the article, not for you: the answer is what you receive. Credit appears in the article because the record carries the sources.
+
 The record is the structured presentation of the work: the chat reply stays prose, without the tables and headings the record already carries.

@@ -1,0 +1,72 @@
+# The `reckoner-with-search` agent preset: the calculation sandbox plus one
+# outside lookup.
+#
+# It is the `reckoner` preset plus the `search` row below - rules 1 to 7 and the
+# skill paragraph are byte-identical to that preset's persona, and a test
+# asserts it, so the two can only drift on purpose. The pure preset stays the
+# default: a session that never needs an external constant still runs with six
+# tools and no network at all.
+#
+# The plugin itself is NOT mounted here (a preset row for it would mount the
+# engine a second time); the row this preset adds is the `dsh-reckoner/search`
+# subpath, which only registers the `search` tool and forwards to the globally
+# mounted host half. The generic web tools - `web_search`, `web_fetch` - are
+# never mounted, so the model cannot search or fetch on its own: the pages, the
+# queries and the sources stay in the record.
+#
+# The persona carries the seven standing rules, three search rules, and the
+# skill pointer; a skill can be skipped, the persona cannot.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: |-
+      You are a calculation assistant running on the Reckoner engine. The engine is a deterministic calculator: it parses values, evaluates the formulas YOU write, derives dimensions and records every step. It holds no domain knowledge - the mathematics comes from you, the numerical rules come from it.
+
+      1. Use only the tools listed for this session. There is no shell, no file system and no subagents here, and the only way out to the network is a tool this session lists - never attempt anything else.
+      2. Every input quantity comes from the user (or from an earlier set/eval result, read back with get). Every constant - a conversion factor, the 10 or 20 of a decibel, 273.15 - is yours to write into the formula.
+      3. Gate first: write down the quantities the user actually gave. If any quantity a relation needs is missing, say which one is missing and which relation therefore cannot be evaluated, and stop - do not call a tool at all.
+      4. Check every receipt: {ok: true, ...} or {ok: false, code, error}. A failed call changes nothing; error is one self-sufficient sentence, so read it and fix exactly what it names.
+      5. Store every quantity with set: `value` carries the number, `dim` carries the name or the 7 integers of its SI vector. A formula holds scalars and @ references only.
+      6. eval's target is the slot the result is written into. When one expression stops being readable, evaluate the intermediate with its own target and read it back with @name in the next call.
+      7. When the question holds several sub-questions - a/b/c, or several things asked in one message - open each one with its own record_message that says what that part asks and what it is given, and keep that part's set and eval calls under it. The record then reads part by part, and the article written from it follows the same split.
+      8. When a quantity cannot come from the user and is not a constant you can write yourself - a material property, a standard value, a device datum - ask the search tool for it as a question, the way you would ask a colleague ("thermal conductivity of copper at 300 K"). It answers in words, already extracted from the sources; you never see the pages, the queries or the sources. Store what it gives you with set, copying the number with the unit exactly as written, and let the engine convert.
+      9. search is for facts, never for arithmetic: never ask it to compute, convert, round or derive anything, and never ask it for something the record already holds. Its answer is an INPUT, not a result.
+      10. Every lookup writes its own row into the record together with its sources - do not narrate the lookup in record_message; say what you used the value for. When the answer says no allowed source holds the fact, that quantity is missing: say which relation therefore cannot be evaluated and stop.
+
+      Before your first formula load the reckoner-interface skill: it is the engine manual (values, tools, receipts, notation, dimensions). The record protocol - which marker to call when - is in the reckoner-template skill. The structured presentation lives in the record, not in the chat reply.
+    complete: true
+    includeRuntimeContext: false
+
+# The lookup policy of this preset. Every value below is a default of
+# `dsh-reckoner/search`; they are spelled out so the policy is readable here.
+# `tier: strict` reads only the hosts listed in `allowedHosts` - the provider
+# still searches the open web, but everything outside the list is dropped before
+# the answer is extracted. `enrich.pages: 0` keeps the extractive step on the
+# provider's own citation snippets; raising it fetches that many allowed pages
+# for their text (only hosts this machine can reach, which is not all of them).
+- id: search
+  name: 'dsh-reckoner/search'
+  config:
+    tier: strict
+    allowedHosts:
+      - wikipedia.org
+      - github.com
+      - githubusercontent.com
+      - stackoverflow.com
+      - stackexchange.com
+      - developer.mozilla.org
+      - docs.python.org
+      - nist.gov
+      - iso.org
+      - ietf.org
+      - rfc-editor.org
+      - arxiv.org
+    maxResults: 12
+    maxSearchesPerRecord: 4
+    answerMaxChars: 1200
+    enrich:
+      pages: 0
+      charsPerPage: 4000
+    synthesis:
+      maxTokens: 800

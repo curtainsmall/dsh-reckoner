@@ -27,9 +27,18 @@ A local checkout is installed by path instead, with `add link:<path>`. The comma
 
 ## Reckoner Mode
 
-The package ships the `reckoner` agent preset, offered as **Reckoner**; each plugin mount copies it into `$DSH_HOME/.agent-presets/reckoner`. It contributes the persona only, because the plugin itself is mounted globally by the bundle patch.
+The package ships two agent presets. A session picks one when it is created: the pure `reckoner` preset is the one to pick unless the question needs a fact from outside, since a session that has produced anything cannot change its preset.
 
-A session in this preset exposes the six plugin tools and nothing else - no shell, file system, network or subagents - so every number in an answer is a value transcribed by `set` or produced by `eval`, and a missing quantity makes the persona stop and name it.
+| preset | sandbox | outside lookup |
+|---|---|---|
+| **Reckoner** (`reckoner`) | six plugin tools, no network | none |
+| **Reckoner with search** (`reckoner-with-search`) | the same six tools plus `search` | one fact at a time, written into the record with its sources |
+
+A session in the pure preset exposes the six plugin tools and nothing else - no shell, file system, network or subagents - so every number in an answer is a value transcribed by `set` or produced by `eval`, and a missing quantity makes the persona stop and name it. The search preset adds exactly one tool, `search`, and nothing else: the generic `web_search` and `web_fetch` tools are mounted by neither preset, so the model can never search or fetch on its own.
+
+Each plugin mount copies both preset directories into `$DSH_HOME/.agent-presets/`, and each preset contributes the persona only, because the plugin itself is mounted globally by the bundle patch.
+
+A lookup takes one question and gives the model one answer in words - never the queries, the pages or the sources. The record keeps what the model does not see: the question, every candidate source the provider returned, the sources the policy allowed, and the route and prompt version of the extractive step that wrote the answer. The retrieval policy is the preset row's config: the strict tier keeps only an allow-list of reference hosts, and a record carries at most four lookups by default.
 
 ## The engine
 
