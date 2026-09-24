@@ -56,14 +56,12 @@ It performs no conversion other than the affine map carried by the names of its 
 
 ### 2.1 The six operations
 
-| operation | parameters | success receipt |
-|---|---|---|
-| `set` | `name` (a slot name), `value` (a tagged value, or `null` to delete the slot) | `{ ok:true, name, rev, value }`; a deletion answers `{ ok:true, name, rev:null, value:null }` |
-| `get` | `name`, and the optional `form`, `digits` and `dim` | `{ ok:true, name, value }` |
-| `eval` | `formula` (one expression), `target` (a slot name) | `{ ok:true, target, rev }` |
-| `record_start` | `title` (a non-empty string) | `{ ok:true }` |
-| `record_message` | `text` (a non-empty string), optional `hide` (a boolean) | `{ ok:true }` |
-| `record_end` | optional `text` (a string) | `{ ok:true }` |
+- `set` takes `name`, a slot name, and `value`, a tagged value or `null` to delete the slot; it succeeds as `{ ok:true, name, rev, value }`, and a deletion as `{ ok:true, name, rev:null, value:null }`.
+- `get` takes `name`, and the optional `form`, `digits` and `dim`; it succeeds as `{ ok:true, name, value }`.
+- `eval` takes `formula`, one expression, and `target`, a slot name; it succeeds as `{ ok:true, target, rev }`.
+- `record_start` takes `title`, a non-empty string; it succeeds as `{ ok:true }`.
+- `record_message` takes `text`, a non-empty string, and the optional `hide`, a boolean; it succeeds as `{ ok:true }`.
+- `record_end` takes the optional `text`, a string; it succeeds as `{ ok:true }`.
 
 - `set`, `get` and `eval` are refused while no record is open (Section 7.1).
 - `name` and `target` are bare slot names, never `@name`: the `@` form exists only inside a formula (Section 4.3).
@@ -86,14 +84,12 @@ failure:      -> { ok:false, code, error }
 
 ### 2.3 The slot table and its rules
 
-| rule | behaviour |
-|---|---|
-| name | an identifier: a letter or underscore, then letters, digits or underscores. The same rule covers slot names, `eval` targets, object field names and bound variable names |
-| write | a write to a name that does not exist creates the slot at revision 1 |
-| overwrite | a write to an existing slot replaces the value and increments the revision by one. Nothing of the previous value is inherited, and no vector is pinned: a slot may be overwritten by a value of any vector |
-| delete | `set` with `value: null` removes the slot, idempotently: a deletion of a missing slot is still `ok`, and the slot is recreated at revision 1 |
-| failure | a failed operation writes nothing |
-| lifetime | the table lives exactly as long as the record is open. `record_end` clears it, so a non-empty table means a record is open |
+- A **name** is an identifier: a letter or underscore, then letters, digits or underscores. The same rule covers slot names, `eval` targets, object field names and bound variable names.
+- A **write** to a name that does not exist creates the slot at revision 1.
+- An **overwrite** replaces the value and increments the revision by one. Nothing of the previous value is inherited, and no vector is pinned: a slot may be overwritten by a value of any vector.
+- A **delete** is `set` with `value: null`, idempotent: deleting a missing slot is still `ok`, and the slot is recreated at revision 1.
+- A **failed** operation writes nothing.
+- The **lifetime** is the record's: `record_end` clears the table, so a non-empty table means a record is open.
 
 ## 3. Values
 
@@ -132,11 +128,9 @@ failure:      -> { ok:false, code, error }
 
 `dim` is the spelling of the value's vector:
 
-| `dim` | meaning |
-|---|---|
-| a table name (Section 6.1) | the vector of that row, together with the row's affine map |
-| exactly 7 integers in the order m,kg,s,A,K,mol,cd | that vector, with no affine map |
-| omitted or `null` | the zero vector |
+- A table **name** (Section 6.1): the vector of that row, together with the row's affine map.
+- **7 integers** in the order m,kg,s,A,K,mol,cd: that vector, with no affine map.
+- Omitted or `null`: the zero vector.
 
 - Any other value is `ENGINE_INVALID_DIMENSION`: a string that names no row (the message lists every name), an array of the wrong length, or a component that is not an integer.
 - For `num`, `re`/`im` and `mag`/`ang`, the affine map is applied before the value is stored: `SI = x*factor + offset`, with the offset on the real part and the factor alone scaling the imaginary part. An array's bare elements are stored as written against the array's vector. `degC` is the only name in the table whose map is not the identity (Section 6.1).
@@ -147,15 +141,16 @@ failure:      -> { ok:false, code, error }
 
 | option | meaning |
 |---|---|
-| `form: "rect"` | every scalar leaf is rendered `{re, im}` |
-| `form: "polar"` | every scalar leaf is rendered `{mag, ang}`, `ang` in radians |
-| `form` omitted | the stored form: a real stays `{num}`, a complex stays `{re, im}` |
-| `digits` | a positive integer: every leaf number is rounded to at most that many significant digits, never padded |
-| `dim`, a table name | the leaves are mapped out of SI through that row's affine map and the receipt's `dim` is that name |
-| `dim`, 7 integers | the stored vector is checked against them and nothing is converted; the receipt's `dim` is those 7 integers |
-| `dim` omitted | the receipt's `dim` is the vector's first table name, or the 7 integers when the vector has no row |
+| `form: "rect"` | every scalar leaf rendered `{re, im}` |
+| `form: "polar"` | every scalar leaf rendered `{mag, ang}`, radians |
+| `form` omitted | the stored form: a real stays `{num}` |
+| `digits` | round every leaf number to that many significant digits, never padded |
+| `dim`, a table name | map the leaves out of SI, and name the receipt's `dim` so |
+| `dim`, 7 integers | check the stored vector, convert nothing, echo the integers |
+| `dim` omitted | the vector's first table name, or the 7 integers |
 
 - `form`, `digits` and `dim` reach every scalar leaf alike: an object's fields and an array's elements included.
+- A table name of the wrong vector, and 7 integers that differ from the stored vector, are `ENGINE_INCOMPATIBLE_DIMENSION`; nothing is converted.
 - A `dim` that does not match the stored vector is refused with `ENGINE_INCOMPATIBLE_DIMENSION`, naming both vectors; an object is checked field by field, and nothing is converted.
 - A negative real under `polar` is `{mag: -x, ang: pi}`; a real under `rect` is `{re: x, im: 0}`.
 - `form` must be `"rect"` or `"polar"`, and `digits` must be a positive integer; anything else is `ENGINE_INVALID_ARGS`.
@@ -209,14 +204,11 @@ args           := [ additive (',' additive)* ]
 
 ### 4.3 Data access
 
-| form | reads |
-|---|---|
-| `@name` | the value of one slot |
-| `@name[index]` | one element of an array; the index is an additive expression |
-| `@name.field` | one field of an object; the field name is a literal name, not an expression |
-| chaining | `@net.ports[0].z`: indices and fields chain in one path |
-
-- `@name` only ever reads; the slot a call writes is `eval`'s `target` parameter (Section 2.1). Nothing stores a reference and no reference ever appears in a value or a receipt.
+- `@name` reads the value of one slot.
+- `@name[index]` reads one element of an array; the index is an additive expression.
+- `@name.field` reads one field of an object; the field name is a literal name, not an expression.
+- Chaining: `@net.ports[0].z` reads indices and fields in one path.
+- `@name` only ever reads; the slot a call writes is `eval`'s `target` parameter (Section 2.1). Nothing stores a reference, and no reference ever appears in a value or a receipt.
 - A slot that does not exist is `ENGINE_SLOT_NOT_FOUND`.
 - An index must evaluate to an integer with the zero vector: a number, or a complex with `im` 0. Anything else, and an index outside `0..len-1`, is `ENGINE_INVALID_INDEX`; the second names the length.
 - `[ ]` on a value that is not an array, and `.` on a value that is not an object, are `ENGINE_UNSUPPORTED_INDEX`. A field the object does not have is `ENGINE_FIELD_NOT_FOUND`, and the message lists the fields it has.
@@ -362,10 +354,10 @@ The engine's only vocabulary of dimensions is this table of 24 rows. A name maps
 
 | operation | vector of the result |
 |---|---|
-| `a + b`, `a - b` | the shared vector; different vectors are `ENGINE_INCOMPATIBLE_DIMENSION` |
-| `a * b` | the component-wise sum of the two vectors |
-| `a / b` | the component-wise difference of the two vectors |
-| `a ^ p` with a real exponent `p` | every component of `a` scaled by `p` |
+| `a + b`, `a - b` | the shared vector; different vectors are refused |
+| `a * b` | the component-wise sum |
+| `a / b` | the component-wise difference |
+| `a ^ p`, real `p` | every component of `a` scaled by `p` |
 
 - A scalar literal and every zero-vector value are dimensionless. A dimensionless factor multiplies without changing the other side's vector (`2*@R` is a resistance), while adding one to a dimensional value is refused, because a bare count does not say what it counts.
 - `$min`, `$max`, `$mod` and `$atan2` require both arguments to carry the same vector (Section 6.3).
@@ -410,9 +402,9 @@ A `dim` given to `get` is a claim about what the slot holds: 7 integers must equ
 
 | marker | argument | effect |
 |---|---|---|
-| `record_start` | `title`, a non-empty string | opens a record: allocates its identifier, writes the header line and the start row. It fails with `ENGINE_OPEN_RECORD_FOUND` while a record is open, so a record carries exactly one title |
-| `record_message` | `text`, a non-empty string, and the optional `hide` (a boolean, default false) | appends one explanation to the open record |
-| `record_end` | optional `text` | appends the closing row, renames the open file into the closed tier (Section 7.3), and clears the slot table. It fails with `ENGINE_OPEN_RECORD_NOT_FOUND` when no record is open |
+| `record_start` | `title`, a non-empty string | opens a record; fails with `ENGINE_OPEN_RECORD_FOUND` while one is open, so a record carries exactly one title |
+| `record_message` | `text`, a non-empty string; optional `hide`, a boolean | appends one explanation to the open record |
+| `record_end` | optional `text` | appends the closing row, renames the open file into the closed tier (Section 7.3), clears the slot table; fails with `ENGINE_OPEN_RECORD_NOT_FOUND` when no record is open |
 
 - `set`, `get` and `eval` require an open record, and so does `record_message`; without one the call fails with `ENGINE_OPEN_RECORD_NOT_FOUND`, and nothing is written anywhere.
 - The record identifier is the clock reading in milliseconds as a string; while that name is taken, `-2`, `-3` and so on are appended.
@@ -430,21 +422,21 @@ Every call appends at most one row to the open record, inputs and outputs alike.
 
 | field | meaning |
 |---|---|
-| `seq` | the row's position in the record, from 1, incremented per appended row |
+| `seq` | the row's position in the record, from 1 |
 | `at` | the clock reading of the call, in milliseconds |
 | `tool` | `set`, `get`, `eval`, `record_start`, `record_message`, `record_end` or `search` |
 | `ok` | `true`, or `false` for a refused call |
 | `content` | what that tool stores |
 
-| tool | `content` |
-|---|---|
-| `set` | `{ name, value }`: the stored value with its `dim` as 7 integers; a deletion is `{ name, value: null }` |
-| `get` | `{ name, value }`: the value as it was rendered for the receipt. The `form`, `digits` and `dim` that were asked for are not stored |
-| `eval` | `{ formula, target, rev, vars, result }`: the text as written, the slot written, its new revision, every slot the formula actually read mapped to its stored value, and the result |
-| `record_start` | `{ title, record }`: the title and the allocated identifier |
-| `record_message` | `{ text }`, or `{ text, hide: true }` |
-| `record_end` | `{ record }`, or `{ text, record }` when a closing text was given |
-| `search` | `{ question, tier, outcome, candidates, used, policy, synthesis?, error?, durationMs }`: the lookup's own fact (Section 12.5) |
+`content` by tool:
+
+- `set`: `{ name, value }`, the stored value with its `dim` as 7 integers; a deletion is `{ name, value: null }`.
+- `get`: `{ name, value }`, the value as rendered for the receipt. The `form`, `digits` and `dim` asked for are not stored.
+- `eval`: `{ formula, target, rev, vars, result }`, the text as written, the slot written, its new revision, every slot the formula read, and the result.
+- `record_start`: `{ title, record }`.
+- `record_message`: `{ text }`, or `{ text, hide: true }`.
+- `record_end`: `{ record }`, or `{ text, record }` with a closing text.
+- `search`: `{ question, tier, outcome, candidates, used, policy, synthesis?, error?, durationMs }` (Section 12.5).
 | a refused call | `{ code, error }` |
 
 - `vars` holds exactly the slots the formula read, in first-use order, each with the value the slot held at that moment. A bound variable never enters the trace.
@@ -463,11 +455,9 @@ Every call appends at most one row to the open record, inputs and outputs alike.
 
 At start the engine clears the slot table and then reads the unclosed file. A file that fails the version gate, or whose start row carries no title or no identifier, is discarded. Otherwise the record is resumed from its start row, with the last row's `seq`, and its rows are replayed in order:
 
-| row | what the replay does |
-|---|---|
-| `set`, ok | writes the stored value, or deletes the slot when its value is `null` |
-| `eval`, ok | writes the stored result into its target, without recomputing anything |
-| `search`, `get` and any other row | skipped |
+- A `set` row that succeeded: writes the stored value, or deletes the slot when its value is `null`.
+- An `eval` row that succeeded: writes the stored result into its target, without recomputing anything.
+- A `search` row, a `get` row and any other row: skipped.
 
 - The stored results are taken as facts: nothing is recomputed, nothing is fetched, nothing is looked up again and nothing is random.
 - A row that no longer parses is skipped, so recovery can never keep the plugin from mounting.
@@ -494,25 +484,35 @@ Every failure is one receipt, `{ ok: false, code, error }`, and it writes nothin
 
 | code | raised when |
 |---|---|
-| `ENGINE_INVALID_FORMULA` | the text is not one expression the grammar accepts: a character outside the charset, a `$` or `@` not followed by a name, a token after a complete expression, an unclosed `(` or `[` or `{`, `^` followed by `{`, `.` not followed by a field name, an argument list not closed with `,` or `)`, or a second argument of `$integral`/`$diff` that is not a plain name |
+| `ENGINE_INVALID_FORMULA` | the text is not one expression the grammar accepts |
 | `ENGINE_INVALID_NUMBER` | a number's scientific form has no exponent digits, as in `2e` |
-| `ENGINE_INVALID_IDENTIFIER` | a letter directly follows a number (`1E5`, `2x`); a name given where an identifier is required (a `set` name, a `get` name, an `eval` target, an object field name) is not a string or does not satisfy the name rule |
-| `ENGINE_INVALID_DIMENSION` | `dim` is not a table name, is not exactly 7 integers, or has a component that is not an integer |
-| `ENGINE_INVALID_NOTATION` | a `$name` outside the notation table; a constant given `(` or `_`; a function written without `(` or with `_`; a bounded form written without the bounds it requires |
-| `ENGINE_INVALID_ARITY` | the argument count is not one the table lists; a bound variable is missing from a subscript that needs one; `$limit` is written with `=` instead of `->`; an upper bound is missing; `$integral` is given a bound variable in its subscript |
+| `ENGINE_INVALID_IDENTIFIER` | a letter directly follows a number, as in `1E5`; or a name where an identifier is required is not a string, or breaks the name rule |
+| `ENGINE_INVALID_DIMENSION` | `dim` is not a table name, not exactly 7 integers, or not made of integers |
+| `ENGINE_INVALID_NOTATION` | a `$name` outside the notation table, or a notation written in a form it does not take |
+| `ENGINE_INVALID_ARITY` | the argument count is not one the table lists, or a bound or subscript is missing or misplaced |
 | `ENGINE_SLOT_NOT_FOUND` | `@name` reads a slot that does not exist, or `get` names one |
 | `ENGINE_NAME_NOT_BOUND` | a bare name is not bound by any enclosing notation |
-| `ENGINE_INCOMPATIBLE_DIMENSION` | `+` or `-` with two different vectors; an exponent that is not dimensionless; a complex exponent on a dimensional base; a dimensionless argument required and a dimensional one given; two arguments of `$min`, `$max`, `$mod` or `$atan2` with different vectors; array elements that do not share one vector; a fractional vector written into a slot; a `get` `dim` that does not match the stored value |
+| `ENGINE_INCOMPATIBLE_DIMENSION` | two vectors must match, or an argument must be dimensionless, and they do not |
 | `ENGINE_UNSUPPORTED_OPERATION` | an operator or a function applied to an object, or an object placed in an array |
-| `ENGINE_INVALID_INDEX` | an index that is not an integer with the zero vector, an index outside the array (both name the valid range), a bound that is not an integer with the zero vector, or a lower bound above the upper one |
-| `ENGINE_UNDEFINED_RESULT` | a value the engine defines none for: division by zero, `$mod` by zero, `$ln` or `$log` of a real that is not greater than 0, `$sqrt` of a negative real, `$asin` or `$acos` outside -1 to 1, a negative real base under a fractional exponent, zero under a negative or complex power, or a real-only function given a complex argument |
+| `ENGINE_INVALID_INDEX` | an index or bound that is not an integer with the zero vector, an index outside the array, or a lower bound above the upper one |
+| `ENGINE_UNDEFINED_RESULT` | a value the engine defines none for |
 | `ENGINE_UNSUPPORTED_INDEX` | `.` applied to a value that is not an object, or `[ ]` to a value that is not an array |
 | `ENGINE_FIELD_NOT_FOUND` | an object has no field of that name; the message lists the fields it has |
 | `ENGINE_UNSUPPORTED_SYMBOL` | `$integral`, `$limit` or `$diff` is evaluated |
-| `ENGINE_INVALID_ARGS` | a tool argument has the wrong shape: the `set` value is not an object, carries no tag or more than one, has an unknown key, `dim` beside `object`, half of a pair, an `array` that is not an array, an `object` that is not an object, or an element that is none of the four bare forms; two arrays combined have different lengths; `$len` or `$transpose` got the wrong value; `form` or `digits` is not what it must be; `eval`'s `formula` is not a string or `target` is missing; a marker's text is empty or not a string, or its `hide` is not a boolean |
-| `ENGINE_OPEN_RECORD_NOT_FOUND` | `set`, `get`, `eval` or `record_message` is called with no record open, or `record_end` is |
+| `ENGINE_INVALID_ARGS` | a tool argument has the wrong shape |
+| `ENGINE_OPEN_RECORD_NOT_FOUND` | `set`, `get`, `eval`, `record_message` or `record_end` is called with no record open |
 | `ENGINE_OPEN_RECORD_FOUND` | `record_start` is called while a record is open |
-| `ENGINE_UNKNOWN_ERROR` | an unexpected internal fault: anything thrown that is not an engine failure, reported as `internal error: ...` |
+| `ENGINE_UNKNOWN_ERROR` | an unexpected internal fault, reported as `internal error: ...` |
+
+Where each shape failure comes from:
+
+- **Formula**: a character outside the charset, a `$` or `@` not followed by a name, a token after a complete expression, an unclosed `(` or `[` or `{`, `^` followed by `{`, `.` not followed by a field name, an argument list not closed with `,` or `)`.
+- **Identifier**: a `set` name, a `get` name, an `eval` target or an object field name that is not a string or breaks the name rule.
+- **Notation**: a constant given `(` or `_`, a function written without `(`, or a bounded form written without the bounds it requires.
+- **Arity**: a bound variable missing from a subscript that needs one, `$limit` written with `=` instead of `->`, an upper bound missing, or `$integral` given a bound variable in its subscript.
+- **Dimension**: `+` or `-` with two different vectors, an exponent that is not dimensionless, a complex exponent on a dimensional base, a dimensionless argument required and a dimensional one given, `$min` `$max` `$mod` `$atan2` with different vectors, array elements that do not share one vector, a fractional vector written into a slot, or a `get` `dim` that does not match.
+- **Undefined result**: division by zero, `$mod` by zero, `$ln` or `$log` of a real that is not greater than 0, `$sqrt` of a negative real, `$asin` or `$acos` outside -1 to 1, a negative real base under a fractional exponent, zero under a negative or complex power, or a real-only function given a complex argument.
+- **Tool arguments**: the `set` value is not an object, carries no tag or more than one, has an unknown key, `dim` beside `object`, half of a pair, an `array` that is not an array, an `object` that is not an object, or an element that is none of the four bare forms; two arrays combined have different lengths; `$len` or `$transpose` got the wrong value; `form` or `digits` is not what it must be; `eval`'s `formula` is not a string or `target` is missing; a marker's text is empty or not a string, or its `hide` is not a boolean.
 
 ## 9. Storage and logs
 
@@ -578,19 +578,20 @@ A closed record can be written up as a standalone solution article. The host red
 | the lookups | the `search` rows that answered: `seq`, the question, the answer and the sources it relied on |
 | the closing text | the last accepted `record_end` row's `text` |
 
-- Refused rows and `get` rows carry nothing to write, so they are skipped: the article is built from the derivation that succeeded and the numbers it produced.
+- Refused rows and `get` rows carry nothing to write, so they are skipped.
 - The messages and the steps are interleaved by `seq`, so an explanation sits next to the steps it covers.
-- A message with `hide: true` becomes an author's note in the facts: the writer is told it is guidance that must not be copied, quoted, or allowed to change a recorded number. A message without `hide` becomes the record's own explanation.
-- Every number in the facts is cut before it reaches the model: a non-zero number below `1e-3` or at least `1e6` is written in exponential form with four decimals, and any other number is rounded to four decimal places. A field named `dim` keeps its 7 integers unchanged. The cut applies to the prompt only; the record keeps the stored numbers.
-- A lookup is handed over as its own entry in the timeline: the question the model asked, the answer as it was recorded, and one line per source. The answer stays verbatim, because the number it carries was stored as the source wrote it, so the four-decimal cut does not apply to it (Section 12.7). An answer of the open tier is marked as looked up on the open web and not verified, and the writer is told that a looked-up value must keep its number and unit as quoted and must credit the source where it is used.
-- **Formats.** Markdown (`.md`) and LaTeX (`.tex`). For LaTeX the model writes the body only: the host refuses a body carrying document-restructuring commands, unbalanced braces or an odd number of `$`, and wraps the rest in a XeLaTeX document shell, `ctexart` for zh-CN and `article` with `fontspec` for en, with amsmath, siunitx and unicode-math, and with the fixed title and author.
-- **Language.** `auto`, `zh-CN` or `en`. The shell language is resolved before generation, so an auto job probes the record's own prose (title, messages and closing text) for CJK ideographs.
-- **Job phases.** prepare, generate, write, compile. A LaTeX article is written into a folder named after the file, which also receives the PDF and the compiler's artifacts; a Markdown article is written flat and is never compiled.
-- PDF compilation is LaTeX-only and optional. It runs a driver, `latexmk` preferred and `texify` as the fallback, which in turn runs `xelatex`; the article is written to disk either way, and a compile failure is reported without discarding it.
+- A message with `hide: true` becomes an author's note: guidance that must not be copied, quoted, or allowed to change a recorded number. One without `hide` becomes the record's own explanation.
+- Every number is cut before it reaches the model: four decimals at most, exponential form below `1e-3` or at least `1e6`. A field named `dim` keeps its 7 integers. The record keeps the stored numbers.
+- A lookup is handed over as its own entry: the question, the answer as recorded, and one line per source. The answer stays verbatim, so the cut does not apply to it (Section 12.7).
+- An open-tier answer is marked as looked up on the open web and not verified; the writer must keep its number and unit as quoted, and credit the source.
+- **Formats.** Markdown (`.md`) and LaTeX (`.tex`). The model writes a LaTeX body only; the host refuses document-restructuring commands, unbalanced braces or an odd number of `$`, and wraps the rest in a XeLaTeX shell: `ctexart` for zh-CN, `article` with `fontspec` for en.
+- **Language.** `auto`, `zh-CN` or `en`, resolved before generation: an auto job probes the record's own prose for CJK ideographs.
+- **Job phases.** prepare, generate, write, compile. A LaTeX article goes into a folder named after the file; a Markdown article is written flat.
+- PDF compilation is LaTeX-only and optional: a driver, `latexmk` preferred and `texify` as the fallback, runs `xelatex`. A compile failure is reported without discarding the article.
 - The file name is forced to the format's extension and defaults to `reckoner-<first 8 characters of the record identifier>`.
-- The article is written as the author's own solution: the prompt forbids mentioning Reckoner, the harness, formulas, derivation steps, records or the generation process, and forbids inventing or recomputing a number.
-- **Remembered settings.** Each format remembers its own output `directory`, its `language` and - LaTeX alone - whether to `compile`, in its own subtree of the state file (Section 9.1). The setup dialog opens with what its format remembers and writes back through the settings endpoint, so nothing one format remembers reaches the other.
-- The settings endpoint serves that view and writes it: `GET /api/dsh-reckoner/settings` answers the generation defaults of both formats with the defaults applied, and `PUT` takes `{generation: {format, directory?, language?, compile?}}` and answers with the whole view (Section 11.3).
+- The prompt forbids mentioning Reckoner, the harness, formulas, derivation steps, records or the generation process, and forbids inventing or recomputing a number.
+- **Remembered settings.** Each format remembers its own output `directory`, its `language` and - LaTeX alone - whether to `compile` (Section 9.1).
+- The settings endpoint serves that view: `GET /api/dsh-reckoner/settings`, and `PUT` takes `{generation: {format, directory?, language?, compile?}}` (Section 11.3).
 
 ## 11. The panel
 
@@ -641,9 +642,7 @@ The pure `reckoner` preset reaches nothing: it has six tools, no shell, no file 
 
 ### 12.1 The tool contract
 
-| argument | meaning |
-|---|---|
-| `question` | the fact the caller needs, asked as a question in one sentence. It is required and is forwarded verbatim |
+`question` is the fact the caller needs, asked as a question in one sentence. It is required and is forwarded verbatim.
 
 ```
 success: { ok: true, answer, origin }
@@ -656,9 +655,7 @@ failure: { ok: false, code, error }
 
 ### 12.2 What the model does and does not see
 
-| the model receives | the record keeps |
-|---|---|
-| the answer, and whether it came from the allow-list, the open web or GitHub | the question, the tier, the outcome, every candidate source, the sources the policy allowed, the synthesis route and prompt version, and the answer |
+The model receives the answer, and whether it came from the allow-list, the open web or GitHub. The record keeps the question, the tier, the outcome, every candidate source, the sources the policy allowed, the synthesis route and prompt version, and the answer.
 
 - The provider's own search is not visible to us at all. We send the question verbatim and never plan a query ourselves; what the provider's server-side model searched, and which pages it read, are its own turn and are not reported back. The record therefore holds the question and the sources the provider cited, not the queries.
 - The policy runs after the retrieval: it decides what the extractive step may read, not what was already read. That is why the fact keeps the candidates beside the allowed set.
@@ -684,15 +681,17 @@ The policy is resolved per call from three layers: the code defaults of the tabl
 
 | key | code default | meaning |
 |---|---|---|
-| `tier` | `strict` | `strict` keeps only hosts on the allow-list; `open` keeps every source the provider returned |
-| `allowedHosts` | the 12 reference hosts | host suffixes a strict lookup accepts. A host matches when it is the pattern or a subdomain of it, never when it merely ends with the same letters. An explicitly empty list is a decision: a strict lookup then answers nothing |
+| `tier` | `strict` | `strict` keeps only allow-listed hosts; `open` keeps every source |
+| `allowedHosts` | the 12 reference hosts | host suffixes a strict lookup accepts, matched as the pattern or a subdomain, never as a mere suffix of letters |
 | `maxResults` | `12` | upper bound on the sources one provider call returns |
 | `maxSearchesPerRecord` | `4` | how many lookups one record may carry |
-| `answerMaxChars` | `1200` | upper bound on the answer handed to the model; only the answer the model receives and the copy in the synthesis are cut |
-| `enrich.pages` | `0` | how many allowed pages are fetched for their text. `0` keeps the extractive step on the provider's citation snippets |
-| `enrich.charsPerPage` | `4000` | how much text of each fetched page reaches the extractive step |
-| `synthesis.provider`, `synthesis.model` | unset | the route the extractive step runs on; unset means the deployment's default model |
+| `answerMaxChars` | `1200` | upper bound on the answer handed to the model |
+| `enrich.pages` | `0` | allowed pages fetched for their text; `0` keeps the citation snippets |
+| `enrich.charsPerPage` | `4000` | text of each fetched page that reaches the extractive step |
+| `synthesis.provider`, `synthesis.model` | unset | the route of the extractive step; unset means the deployment default |
 | `synthesis.maxTokens` | `800` | the token ceiling of the extractive call |
+
+An explicitly empty `allowedHosts` is a decision: a strict lookup then answers nothing. Only the answer the model receives, and its copy in the synthesis, are cut to `answerMaxChars`.
 
 The default allow-list is reference material a calculation may cite: `wikipedia.org`, `github.com`, `githubusercontent.com`, `stackoverflow.com`, `stackexchange.com`, `developer.mozilla.org`, `docs.python.org`, `nist.gov`, `iso.org`, `ietf.org`, `rfc-editor.org` and `arxiv.org`.
 
@@ -700,17 +699,15 @@ The default allow-list is reference material a calculation may cite: `wikipedia.
 
 Every call writes exactly one row, whatever it answered, and the row's tool is `search`.
 
-| field | content |
-|---|---|
-| `question` | the question exactly as it was given |
-| `tier` | `strict` or `open`, the tier this call ran under |
-| `outcome` | `answered`, `insufficient`, `refused` or `failed` |
-| `candidates` | every source the provider returned, in its order, each with its `url` and, when the provider supplied them, its `title`, `snippet` and `publishedAt` |
-| `used` | the sources the policy allowed: a subset of `candidates` in the same order, and an empty list when nothing was allowed |
-| `policy` | the policy this call ran under: `tier`, `allowedHosts`, `maxResults`, `maxSearchesPerRecord`, `answerMaxChars`, `enrichPages` and `enrichCharsPerPage` |
-| `synthesis` | absent when the call ended before any synthesis ran; otherwise the provider, the model, the prompt version, the answer and the material items the answer relied on |
-| `error` | one self-sufficient sentence, present when the call answered nothing |
-| `durationMs` | how long the call took |
+- **`question`**: the question exactly as it was given.
+- **`tier`**: `strict` or `open`, the tier this call ran under.
+- **`outcome`**: `answered`, `insufficient`, `refused` or `failed`.
+- **`candidates`**: every source the provider returned, in its order, each with its `url` and, when supplied, its `title`, `snippet` and `publishedAt`.
+- **`used`**: the sources the policy allowed, a subset of `candidates` in the same order; empty when nothing was allowed.
+- **`policy`**: the `tier`, `allowedHosts`, `maxResults`, `maxSearchesPerRecord`, `answerMaxChars`, `enrichPages` and `enrichCharsPerPage` this call ran under.
+- **`synthesis`**: absent when the call ended before any synthesis ran; otherwise the provider, the model, the prompt version, the answer, and the material items the answer relied on.
+- **`error`**: one self-sufficient sentence, present when the call answered nothing.
+- **`durationMs`**: how long the call took.
 
 - The row is written by the tool, never by the model, and it is a fact like a `get` row: recovery does not recompute it (Section 7.4).
 - `synthesis.used` holds indices into the row's own `used` list, which is the material the extractive step was given, so an answer can be traced to the sources it relied on.

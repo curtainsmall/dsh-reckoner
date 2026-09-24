@@ -56,14 +56,12 @@ Reckoner 插件的全部计算都在一台确定性的**引擎**内完成。
 
 ### 2.1 六个操作
 
-| 操作 | 参数 | 成功收据 |
-|---|---|---|
-| `set` | `name`（槽位名）、`value`（一个标签值，或用 `null` 删除该槽位） | `{ ok:true, name, rev, value }`；删除时回答 `{ ok:true, name, rev:null, value:null }` |
-| `get` | `name`，以及可选的 `form`、`digits`、`dim` | `{ ok:true, name, value }` |
-| `eval` | `formula`（一条表达式）、`target`（槽位名） | `{ ok:true, target, rev }` |
-| `record_start` | `title`（非空字符串） | `{ ok:true }` |
-| `record_message` | `text`（非空字符串）、可选的 `hide`（布尔值） | `{ ok:true }` |
-| `record_end` | 可选的 `text`（字符串） | `{ ok:true }` |
+- `set` 接受 `name`（槽位名）与 `value`（一个标签值，或用 `null` 删除该槽位）；成功收据为 `{ ok:true, name, rev, value }`，删除为 `{ ok:true, name, rev:null, value:null }`。
+- `get` 接受 `name`，以及可选的 `form`、`digits`、`dim`；成功收据为 `{ ok:true, name, value }`。
+- `eval` 接受 `formula`（一条表达式）与 `target`（槽位名）；成功收据为 `{ ok:true, target, rev }`。
+- `record_start` 接受 `title`（非空字符串）；成功收据为 `{ ok:true }`。
+- `record_message` 接受 `text`（非空字符串）与可选的 `hide`（布尔值）；成功收据为 `{ ok:true }`。
+- `record_end` 接受可选的 `text`（字符串）；成功收据为 `{ ok:true }`。
 
 - 没有记录未封闭时，`set`、`get` 与 `eval` 都会被拒（§7.1）。
 - `name` 与 `target` 都是裸槽位名，绝不带 `@`：`@` 形式只存在于公式内（§4.3）。
@@ -86,14 +84,12 @@ failure:      -> { ok:false, code, error }
 
 ### 2.3 槽位表及其规则
 
-| 规则 | 行为 |
-|---|---|
-| 名字 | 标识符：以字母或下划线开头，其后为字母、数字或下划线。同一条规则覆盖槽位名、`eval` 的 target、对象的字段名与绑定变量名 |
-| 写入 | 向不存在的名字写入即创建该槽位，版本号为 1 |
-| 覆盖 | 向已存在的槽位写入会整体替换其值并把版本号加一。旧值不被继承，也不钉死任何向量：槽位可以被任何向量的值覆盖 |
-| 删除 | 以 `value: null` 执行 `set` 即删除该槽位，且是幂等的：删除不存在的槽位同样是 `ok`，之后重新创建时版本号从 1 开始 |
-| 失败 | 失败的操作什么都不写 |
-| 生命周期 | 槽位表的存在期恰好等于记录未封闭的期间。`record_end` 会清空它，因此表非空就意味着有记录未封闭 |
+- **名字**：标识符，以字母或下划线开头，其后为字母、数字或下划线。同一条规则覆盖槽位名、`eval` 的 target、对象的字段名与绑定变量名。
+- **写入**：向不存在的名字写入即创建该槽位，版本号为 1。
+- **覆盖**：整体替换其值并把版本号加一。旧值不被继承，也不钉死任何向量：槽位可以被任何向量的值覆盖。
+- **删除**：以 `value: null` 执行 `set`，且是幂等的：删除不存在的槽位同样是 `ok`，之后重新创建时版本号从 1 开始。
+- **失败**：失败的操作什么都不写。
+- **生命周期**：槽位表的存在期恰好等于记录未封闭的期间；`record_end` 会清空它，因此表非空就意味着有记录未封闭。
 
 ## 3. 值
 
@@ -132,11 +128,9 @@ failure:      -> { ok:false, code, error }
 
 `dim` 是值的向量的书写形式：
 
-| `dim` | 含义 |
-|---|---|
-| 一个表名（§6.1） | 该行的向量，连同该行的仿射映射 |
-| 恰好 7 个整数，顺序为 m,kg,s,A,K,mol,cd | 该向量，不带仿射映射 |
-| 省略或为 `null` | 零向量 |
+- 一个**表名**（§6.1）：该行的向量，连同该行的仿射映射。
+- **7 个整数**，顺序为 m,kg,s,A,K,mol,cd：该向量，不带仿射映射。
+- 省略或为 `null`：零向量。
 
 - 其他任何取值都是 `ENGINE_INVALID_DIMENSION`：不指名任何行的字符串（信息会列出全部名称）、长度不对的数组，或含非整数分量的数组。
 - 对 `num`、`re`/`im` 与 `mag`/`ang`，仿射映射在存下之前施加：`SI = x*factor + offset`，其中偏移只作用于实部，而虚部仅乘以 factor。数组的裸元素按原样、按该数组的向量存下。`degC` 是表中唯一映射不是恒等的名称（§6.1）。
@@ -209,13 +203,10 @@ args           := [ additive (',' additive)* ]
 
 ### 4.3 数据访问
 
-| 形式 | 读取 |
-|---|---|
-| `@name` | 一个槽位的值 |
-| `@name[index]` | 数组的一个元素；下标是一条 additive 表达式 |
-| `@name.field` | 对象的一个字段；字段名是字面名，不是表达式 |
-| 链式 | `@net.ports[0].z`：下标与字段在同一条路径上链式书写 |
-
+- `@name` 读取一个槽位的值。
+- `@name[index]` 读取数组的一个元素；下标是一条 additive 表达式。
+- `@name.field` 读取对象的一个字段；字段名是字面名，不是表达式。
+- 链式书写：`@net.ports[0].z` 在同一条路径上读取下标与字段。
 - `@name` 只读取；一次调用所写入的槽位由 `eval` 的 `target` 参数给出（§2.1）。任何地方都不存储引用，引用也永不进入值或收据。
 - 不存在的槽位是 `ENGINE_SLOT_NOT_FOUND`。
 - 下标必须求值为带零向量的整数：一个数字，或 `im` 为 0 的复数。其他任何取值，以及落在 `0..len-1` 之外的下标，都是 `ENGINE_INVALID_INDEX`；后者会给出数组长度。
@@ -436,14 +427,15 @@ args           := [ additive (',' additive)* ]
 | `ok` | `true`；被拒的调用为 `false` |
 | `content` | 该工具所存的内容 |
 
-| 工具 | `content` |
-|---|---|
-| `set` | `{ name, value }`：存下的值，其 `dim` 为 7 个整数；删除是 `{ name, value: null }` |
-| `get` | `{ name, value }`：按收据渲染出的值。请求的 `form`、`digits` 与 `dim` 不存 |
-| `eval` | `{ formula, target, rev, vars, result }`：写下的原文、写入的槽位、它的新版本号、公式实际读到的每个槽位及其当时存下的值，以及结果 |
-| `record_start` | `{ title, record }`：标题与分配到的标识符 |
-| `record_message` | `{ text }`，或 `{ text, hide: true }` |
-| `record_end` | `{ record }`；给出封闭文本时为 `{ text, record }` |
+`content` 按工具：
+
+- `set`：`{ name, value }`，存下的值，其 `dim` 为 7 个整数；删除是 `{ name, value: null }`。
+- `get`：`{ name, value }`，按收据渲染出的值。请求的 `form`、`digits` 与 `dim` 不存。
+- `eval`：`{ formula, target, rev, vars, result }`，写下的原文、写入的槽位、它的新版本号、公式读到的每个槽位及其当时的存储值，以及结果。
+- `record_start`：`{ title, record }`。
+- `record_message`：`{ text }`，或 `{ text, hide: true }`。
+- `record_end`：`{ record }`，给出封闭文本时为 `{ text, record }`。
+- `search`：`{ question, tier, outcome, candidates, used, policy, synthesis?, error?, durationMs }`（§12.5）。
 | `search` | `{ question, tier, outcome, candidates, used, policy, synthesis?, error?, durationMs }`：该次检索自身的事实（12.5 节） |
 | 被拒的调用 | `{ code, error }` |
 
@@ -463,11 +455,9 @@ args           := [ additive (',' additive)* ]
 
 启动时引擎先清空槽位表，然后读取未封闭文件。未通过版本闸门、或起始行既无标题也无标识符的文件会被丢弃。否则该记录从它的起始行恢复，序号取最后一行的 `seq`，并按顺序重放它的各行：
 
-| 行 | 重放时的动作 |
-|---|---|
-| `set`，ok | 写入存下的值；其值为 `null` 时删除该槽位 |
-| `eval`，ok | 把存下的结果写入它的 target，不重新求值 |
-| `search`、`get` 与其他任何行 | 跳过 |
+- `set` 行且 ok：写入存下的值；其值为 `null` 时删除该槽位。
+- `eval` 行且 ok：把存下的结果写入它的 target，不重新求值。
+- `search` 行、`get` 行与其他任何行：跳过。
 
 - 存下的结果被当作事实使用：不重算、不取数、不重新检索、不含随机。
 - 不再能解析的行被跳过，因此恢复过程永远不会妨碍插件挂载。
@@ -641,9 +631,7 @@ args           := [ additive (',' additive)* ]
 
 ### 12.1 工具契约
 
-| 参数 | 含义 |
-|---|---|
-| `question` | 调用方需要的那个事实，用一句话作为问题提出。它必填，并原样转发 |
+`question` 是调用方需要的那个事实，用一句话作为问题提出。它必填，并原样转发。
 
 ```
 success: { ok: true, answer, origin }
@@ -656,9 +644,7 @@ failure: { ok: false, code, error }
 
 ### 12.2 模型看到与看不到的东西
 
-| 模型收到 | 记录保存 |
-|---|---|
-| 答案，以及它来自允许列表、开放网络还是 GitHub | 问题、层级、结局、提供方返回的每一个候选出处、策略允许的出处、抽取步骤的路由与提示词版本，以及答案 |
+模型收到答案，以及它来自允许列表、开放网络还是 GitHub。记录保存问题、层级、结局、提供方返回的每一个候选出处、策略允许的出处、抽取步骤的路由与提示词版本，以及答案。
 
 - 提供方自身的检索对我们完全不可见。我们原样送出问题，从不自己规划查询词；提供方那一侧的模型检索了什么、读了哪些页面，是它自己的一轮调用，不会回报给我们。因此记录保存的是问题与提供方引用的出处，而不是查询词。
 - 策略在取数之后才运行：它决定抽取步骤可以读什么，而不是已经读过了什么。事实之所以同时保留候选集合，原因就在这里。
@@ -684,15 +670,17 @@ failure: { ok: false, code, error }
 
 | 键 | 代码默认值 | 含义 |
 |---|---|---|
-| `tier` | `strict` | `strict` 只保留允许列表上的主机；`open` 保留提供方返回的每一个出处 |
-| `allowedHosts` | 12 个参考资料主机 | 严格检索接受的主机后缀。主机与模式相同、或是它的子域时才算匹配，仅仅以同样的字母结尾不算。显式给空列表是一个决定：此时严格检索什么也答不出 |
+| `tier` | `strict` | `strict` 只保留允许列表上的主机；`open` 保留每一个出处 |
+| `allowedHosts` | 12 个参考资料主机 | 严格检索接受的主机后缀，按模式本身或子域匹配，仅字母后缀相同不算 |
 | `maxResults` | `12` | 一次提供方调用返回的出处数量上限 |
 | `maxSearchesPerRecord` | `4` | 一条记录最多可以带几次检索 |
-| `answerMaxChars` | `1200` | 交给模型的答案长度上限；被截断的只有模型收到的答案与合成中留存的那一份 |
-| `enrich.pages` | `0` | 抓取多少个被允许的页面以取正文。`0` 让抽取步骤只用提供方自己的引用摘要片段 |
+| `answerMaxChars` | `1200` | 交给模型的答案长度上限 |
+| `enrich.pages` | `0` | 抓取多少个被允许页面以取正文；`0` 只用引用摘要片段 |
 | `enrich.charsPerPage` | `4000` | 每个被抓取页面的多少正文进入抽取步骤 |
-| `synthesis.provider`、`synthesis.model` | 未设置 | 抽取步骤所跑的路由；未设置表示部署的默认模型 |
+| `synthesis.provider`、`synthesis.model` | 未设置 | 抽取步骤所跑的路由；未设置表示部署默认模型 |
 | `synthesis.maxTokens` | `800` | 抽取调用的 token 上限 |
+
+显式给空 `allowedHosts` 是一个决定：此时严格检索什么也答不出。被截断的只有模型收到的答案与合成中留存的那一份。
 
 默认允许列表是计算可以引用的参考资料：`wikipedia.org`、`github.com`、`githubusercontent.com`、`stackoverflow.com`、`stackexchange.com`、`developer.mozilla.org`、`docs.python.org`、`nist.gov`、`iso.org`、`ietf.org`、`rfc-editor.org` 与 `arxiv.org`。
 
@@ -700,17 +688,15 @@ failure: { ok: false, code, error }
 
 无论答出了什么，每次调用都恰好写入一行，该行的工具名是 `search`。
 
-| 字段 | 内容 |
-|---|---|
-| `question` | 给出的问题原文 |
-| `tier` | `strict` 或 `open`，本次调用所处的层级 |
-| `outcome` | `answered`、`insufficient`、`refused` 或 `failed` |
-| `candidates` | 提供方返回的每一个出处，保持其顺序，各带 `url`，以及提供方给出时的 `title`、`snippet` 与 `publishedAt` |
-| `used` | 策略允许的出处：`candidates` 中保持原顺序的一个子集；什么都没允许时为空列表 |
-| `policy` | 本次调用所处的策略：`tier`、`allowedHosts`、`maxResults`、`maxSearchesPerRecord`、`answerMaxChars`、`enrichPages` 与 `enrichCharsPerPage` |
-| `synthesis` | 调用在任何合成之前就结束时缺失；否则给出提供方、模型、提示词版本、答案，以及答案所依据的材料条目 |
-| `error` | 一句自足的话，在调用没有答出任何东西时给出 |
-| `durationMs` | 该次调用耗时 |
+- **`question`**：给出的问题原文。
+- **`tier`**：`strict` 或 `open`，本次调用所处的层级。
+- **`outcome`**：`answered`、`insufficient`、`refused` 或 `failed`。
+- **`candidates`**：提供方返回的每一个出处，保持其顺序，各带 `url`，以及提供方给出时的 `title`、`snippet` 与 `publishedAt`。
+- **`used`**：策略允许的出处，`candidates` 中保持原顺序的一个子集；什么都没允许时为空列表。
+- **`policy`**：本次调用所处的 `tier`、`allowedHosts`、`maxResults`、`maxSearchesPerRecord`、`answerMaxChars`、`enrichPages` 与 `enrichCharsPerPage`。
+- **`synthesis`**：调用在任何合成之前就结束时缺失；否则给出提供方、模型、提示词版本、答案，以及答案所依据的材料条目。
+- **`error`**：一句自足的话，在调用没有答出任何东西时给出。
+- **`durationMs`**：该次调用耗时。
 
 - 该行由工具写入，模型从不写它；它与 `get` 行一样是事实：恢复过程不会把它重算一遍（7.4 节）。
 - `synthesis.used` 存的是该行自身 `used` 列表的下标——那是交给抽取步骤的材料——因此一个答案可以追溯到它所依据的出处。
