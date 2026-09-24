@@ -20,6 +20,7 @@ import {
 } from '../engine/search.ts'
 import type { AgentDefaultModelLike, LlmLike, LlmRoute } from '../llm-call.ts'
 import type { SearchConfig } from './config.ts'
+import { policySnapshot } from './config.ts'
 import { allowedSources, originOf } from './policy.ts'
 import { SEARCH_PROMPT_VERSION, type SearchMaterial } from './prompt.ts'
 import { synthesize } from './synthesize.ts'
@@ -142,9 +143,12 @@ export async function lookup(host: SearchHost, config: SearchConfig, request: Lo
   const startedAt = Date.now()
   const question = request.question
   const strict = config.tier === SearchTier.Strict
+  // The policy travels into every row: a policy that can be re-tuned while the host runs must still
+  // leave behind what this particular call was allowed to do.
+  const policy = policySnapshot(config)
 
-  const record = (fact: Omit<SearchFact, 'question' | 'tier' | 'durationMs'>): void => {
-    const full: SearchFact = { question, tier: config.tier, durationMs: Date.now() - startedAt, ...fact }
+  const record = (fact: Omit<SearchFact, 'question' | 'tier' | 'durationMs' | 'policy'>): void => {
+    const full: SearchFact = { question, tier: config.tier, durationMs: Date.now() - startedAt, policy, ...fact }
     const receipt: Receipt = host.engine.recordSearch(full)
     if (receipt['ok'] !== true) host.warn('search fact was not recorded', { receipt })
   }

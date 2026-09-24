@@ -11,9 +11,9 @@ import { t, useAppLocale, type LocaleKey } from './locales.ts'
 import { Dialog, GhostButton, PrimaryButton } from './ui.tsx'
 import { IconArrowUp, IconFile, IconFolder, IconMinus } from './icons.tsx'
 import { useGenState, startGenerate, cancelGenerate, clearProgress, setMinimized, type GenProgress } from './generation.ts'
+import { SETTINGS_ENDPOINT, putSettings, readGenerationFormat } from './settings.tsx'
 import { ArticleFormat, ArticleLanguage, GenerationPhase } from '../generate.ts'
 
-const GENERATE_DIR_ENDPOINT = '/api/dsh-reckoner/generate-dir'
 const GENERATE_CAPABILITY_ENDPOINT = '/api/dsh-reckoner/generate-capability'
 
 /** What the host can compile with, mirrored from the capability endpoint (LaTeX setup only). */
@@ -132,24 +132,26 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
   const [dirSnapshot, setDirSnapshot] = useState<{ dir: string; file: string } | null>(null)
   const treeListRef = useRef<HTMLDivElement>(null)
 
-  // Auto-fill the remembered generation settings whenever the dialog opens.
+  // Auto-fill the remembered generation settings whenever the dialog opens. They are this
+  // format's own section of the settings view, which the Settings tab shows and edits.
   useEffect(() => {
     if (!open) return
     let alive = true
     setSettingsLoaded(false)
-    fetch(GENERATE_DIR_ENDPOINT)
-      .then((r) => r.json() as Promise<{ directory?: string; language?: string; compile?: boolean }>)
+    fetch(SETTINGS_ENDPOINT)
+      .then((r) => r.json() as Promise<unknown>)
       .then((body) => {
         if (!alive) return
-        if (body.directory !== undefined && body.directory !== '') setGenDir(body.directory)
-        const language = parseArticleLanguage(body.language)
+        const remembered = readGenerationFormat(body, format)
+        if (remembered.directory !== '') setGenDir(remembered.directory)
+        const language = parseArticleLanguage(remembered.language)
         if (language !== undefined) setGenLanguage(language)
-        if (typeof body.compile === 'boolean') setGenCompile(body.compile)
+        setGenCompile(remembered.compile)
       })
       .catch(() => {})
       .finally(() => { if (alive) setSettingsLoaded(true) })
     return () => { alive = false }
-  }, [open])
+  }, [open, format])
 
   /**
    * What this machine can compile with (LaTeX only): the host probes for a driver and for the
@@ -180,14 +182,19 @@ export function GenerationSetupDialog({ open, format, recordId, onClose }: {
       : capability.engine.ok ? '' : capability.engine.detail ?? ''
   const missingPackages = genCompile && capability !== null && capability.ready ? capability.missingPackages : []
 
-  /** Persist the directory and language, and — LaTeX only — the PDF-compile toggle. */
+  /**
+   * Persist this format's directory and language, and — LaTeX only — the PDF-compile toggle.
+   * One format's section is written, so the other format's remembered values are never touched.
+   */
   const saveGenState = (): void => {
-    const dir = genDir.trim()
-    const params = new URLSearchParams()
-    if (dir.length > 0) params.set('dir', dir)
-    params.set('language', genLanguage)
-    if (format === ArticleFormat.Latex) params.set('compile', String(genCompile))
-    void fetch(`${GENERATE_DIR_ENDPOINT}?${params.toString()}`, { method: 'PUT' }).catch(() => {})
+    void putSettings({
+      generation: {
+        format,
+        directory: genDir.trim(),
+        language: genLanguage,
+        ...(format === ArticleFormat.Latex ? { compile: genCompile } : {}),
+      },
+    })
   }
 
   const closeDialog = (): void => {

@@ -1,13 +1,14 @@
 /**
  * The record endpoints the panel reads: the list, one record's body, and the
  * delete route. These pin the wire contract the client depends on - the list's
- * `{rows, open, unknownIds}`, the body's identity fields and the trace rows'
- * `content`.
+ * `{rows, open, unknownIds, restartRequired}`, the body's identity fields and the
+ * trace rows' `content`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { clearRestartRequired, markRestartRequired, restartRequired } from '../src/state.ts'
 
 interface Route {
   kind: 'exact' | 'prefix'
@@ -27,6 +28,7 @@ interface IndexBody {
   rows: Array<Record<string, unknown>>
   open: { id: string; title: string; openedAt: number } | null
   unknownIds: string[]
+  restartRequired: boolean
 }
 
 interface RecordBody {
@@ -40,6 +42,7 @@ interface RecordBody {
 
 const INDEX = '/api/dsh-reckoner/records-index'
 const BODY = '/api/dsh-reckoner/records'
+const SETTINGS = '/api/dsh-reckoner/settings'
 
 let home: string
 let routes: Route[]
@@ -47,7 +50,7 @@ let tools: Array<{ name?: string }>
 let published: Record<string, unknown>
 let web: typeof import('../src/index.ts')
 
-function call(route: Route, method: string, url: string): { status: number; json: unknown; text: string } {
+async function call(route: Route, method: string, url: string, body?: unknown): Promise<{ status: number; json: unknown; text: string }> {
   const res: FakeResponse = {
     headers: {},
     body: '',
@@ -58,14 +61,27 @@ function call(route: Route, method: string, url: string): { status: number; json
       this.body = body
     },
   }
-  route.handler({ method, url }, res)
-  let json: unknown
+  // A body request mimics the node stream the host hands a route: the settings endpoint reads it.
+  const req = body === undefined
+    ? { method, url }
+    : {
+        method,
+        url,
+        async *[Symbol.asyncIterator]() {
+          yield Buffer.from(JSON.stringify(body), 'utf8')
+        },
+      }
+  await route.handler(req, res)
+  return { status: res.statusCode ?? 200, json: parseJson(res.body), text: res.body }
+}
+
+/** The response body as JSON, or undefined when it is not JSON. */
+function parseJson(text: string): unknown {
   try {
-    json = JSON.parse(res.body)
+    return JSON.parse(text)
   } catch {
-    json = undefined
+    return undefined
   }
-  return { status: res.statusCode ?? 200, json, text: res.body }
 }
 
 function routeFor(path: string): Route {
@@ -74,12 +90,12 @@ function routeFor(path: string): Route {
   return found
 }
 
-function index(): IndexBody {
-  return call(routeFor(INDEX), 'GET', INDEX).json as IndexBody
+async function index(): Promise<IndexBody> {
+  return (await call(routeFor(INDEX), 'GET', INDEX)).json as IndexBody
 }
 
-function body(id: string): { status: number; json: RecordBody } {
-  const answer = call(routeFor(BODY), 'GET', `${BODY}/${id}`)
+async function body(id: string): Promise<{ status: number; json: RecordBody }> {
+  const answer = await call(routeFor(BODY), 'GET', `${BODY}/${id}`)
   return { status: answer.status, json: answer.json as RecordBody }
 }
 
@@ -106,6 +122,8 @@ beforeAll(async () => {
     },
   }
   web = await import('../src/index.ts')
+  // A mount consumes the pending-restart flag: the restart it describes is this one.
+  markRestartRequired(home)
   web.apply(ctx as never)
 
   web.engine.markerStart('What is the current?')
@@ -120,7 +138,7 @@ afterAll(() => {
 })
 
 describe('the records endpoints', () => {
-  it('registers the tool surface, the record routes and the generation routes', () => {
+  it('registers the tool surface, the record routes, the settings route and the generation routes', async () => {
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       'eval',
       'get',
@@ -131,22 +149,70 @@ describe('the records endpoints', () => {
     ])
     expect(routes.some((route) => route.path === INDEX)).toBe(true)
     expect(routes.some((route) => route.path === BODY)).toBe(true)
+    expect(routes.some((route) => route.path === SETTINGS)).toBe(true)
     expect(routes.some((route) => route.path === '/api/dsh-reckoner/generate')).toBe(true)
   })
 
-  it('publishes the lookup seam the search row resolves, and keeps search out of the tool surface', () => {
+  it('publishes the lookup seam the search row resolves, and keeps search out of the tool surface', async () => {
     // The host half owns the lookup; the `dsh-reckoner/search` row of the
     // `reckoner-with-search` preset owns the model-facing tool. Mounting the
     // plugin alone must therefore publish the service and register no `search`
     // tool of its own.
-    expect(typeof (published['reckonerSearch'] as { lookup?: unknown } | undefined)?.lookup).toBe('function')
+    const service = published['reckonerSearch'] as { lookup?: unknown; resolvePolicy?: unknown } | undefined
+    expect(typeof service?.lookup).toBe('function')
+    expect(typeof service?.resolvePolicy).toBe('function')
     expect(tools.map((tool) => tool.name)).not.toContain('search')
   })
 
-  it('lists the closed records with the open one apart and the unknown count', () => {
-    const { status, json } = call(routeFor(INDEX), 'GET', INDEX)
+  it('consumes the pending-restart flag at mount and reports the current one on the index', async () => {
+    // The flag was marked before apply: this mount is the restart it described.
+    expect(restartRequired(home)).toBe(false)
+    expect(((await call(routeFor(INDEX), 'GET', INDEX)).json as IndexBody).restartRequired).toBe(false)
+    // Marking it is what a writer does; the polled index then reports it as it stands.
+    markRestartRequired(home)
+    expect(((await call(routeFor(INDEX), 'GET', INDEX)).json as IndexBody).restartRequired).toBe(true)
+    clearRestartRequired(home)
+  })
+
+  it('serves the settings view and writes it back from a JSON body', async () => {
+    const route = routeFor(SETTINGS)
+    const before = (await call(route, 'GET', SETTINGS)).json as {
+      generation: { latex: { directory: string; compile: boolean }; markdown: { directory: string } }
+      search: { defaults: { tier: string }; override: Record<string, unknown>; effective: { maxResults: number } }
+      panel: { showAll: boolean }
+      restartRequired: boolean
+    }
+    expect(before.generation.latex).toEqual({ directory: '', language: 'auto', compile: false } as never)
+    expect(before.panel.showAll).toBe(false)
+    expect(before.restartRequired).toBe(false)
+
+    const written = await call(route, 'PUT', SETTINGS, {
+      generation: { format: 'latex', directory: 'D:/tex', language: 'zh-CN', compile: true },
+      search: { maxResults: 21, enrich: { pages: 2 } },
+      panel: { showAll: true },
+    })
+    expect(written.status).toBe(200)
+    const saved = written.json as { saved: boolean; settings: typeof before }
+    expect(saved.saved).toBe(true)
+    expect(saved.settings.generation.latex).toMatchObject({ directory: 'D:/tex', language: 'zh-CN', compile: true })
+    expect(saved.settings.search.override).toEqual({ maxResults: 21, enrich: { pages: 2 } })
+    expect(saved.settings.search.effective.maxResults).toBe(21)
+    expect(saved.settings.panel.showAll).toBe(true)
+    // the other format was not touched by a latex write
+    expect(saved.settings.generation.markdown.directory).toBe('')
+
+    const bad = await call(route, 'PUT', SETTINGS, { generation: { directory: 'D:/x' } })
+    expect(bad.status).toBe(400)
+    expect(String((bad.json as { error?: string }).error)).toContain('format')
+
+    const wrongMethod = await call(route, 'POST', SETTINGS, {})
+    expect(wrongMethod.status).toBe(405)
+  })
+
+  it('lists the closed records with the open one apart and the unknown count', async () => {
+    const { status, json } = await call(routeFor(INDEX), 'GET', INDEX)
     expect(status).toBe(200)
-    expect(Object.keys(json as object).sort()).toEqual(['open', 'rows', 'unknownIds'])
+    expect(Object.keys(json as object).sort()).toEqual(['open', 'restartRequired', 'rows', 'unknownIds'])
     const listing = json as IndexBody
     expect(listing.open).toBeNull()
     expect(listing.unknownIds).toEqual([])
@@ -160,9 +226,9 @@ describe('the records endpoints', () => {
     expect(typeof row['endedAt']).toBe('number')
   })
 
-  it('serves one record body with the trace rows the panel renders', () => {
-    const id = String(index().rows[0]?.['id'])
-    const { status, json } = body(id)
+  it('serves one record body with the trace rows the panel renders', async () => {
+    const id = String((await index()).rows[0]?.['id'])
+    const { status, json } = await body(id)
     expect(status).toBe(200)
     expect(Object.keys(json).sort()).toEqual(['endedAt', 'id', 'openedAt', 'rows', 'title', 'version'])
     expect(json.id).toBe(id)
@@ -196,28 +262,28 @@ describe('the records endpoints', () => {
     expect(json.rows[4]?.['content']).toEqual({ text: 'I = 2.439 mA', record: id })
   })
 
-  it('serves the open record with endedAt null and keeps it out of the closed rows', () => {
+  it('serves the open record with endedAt null and keeps it out of the closed rows', async () => {
     web.engine.markerStart('a running record')
     const openId = String(web.engine.openRecordId())
-    const listing = index()
+    const listing = await index()
     expect(listing.open).toEqual({ id: openId, title: 'a running record', openedAt: expect.any(Number) })
     expect(listing.rows.some((row) => row['id'] === openId)).toBe(false)
 
-    const served = body(openId)
+    const served = await body(openId)
     expect(served.status).toBe(200)
     expect(served.json.endedAt).toBeNull()
     expect(served.json.title).toBe('a running record')
     expect(served.json.rows.map((row) => row['tool'])).toEqual(['record_start'])
 
     web.engine.markerEnd('done')
-    const closed = body(openId)
+    const closed = await body(openId)
     expect(typeof closed.json.endedAt).toBe('number')
-    expect(index().rows.some((row) => row['id'] === openId)).toBe(true)
+    expect((await index()).rows.some((row) => row['id'] === openId)).toBe(true)
     // Undo: the later tests count the closed rows.
-    call(routeFor(BODY), 'DELETE', `${BODY}/${openId}`)
+    await call(routeFor(BODY), 'DELETE', `${BODY}/${openId}`)
   })
 
-  it('counts a record of an unknown version and refuses to serve it', () => {
+  it('counts a record of an unknown version and refuses to serve it', async () => {
     mkdirSync(join(home, 'records'), { recursive: true })
     writeFileSync(
       join(home, 'records', '999.jsonl'),
@@ -228,30 +294,30 @@ describe('the records endpoints', () => {
       'utf8',
     )
 
-    const listing = index()
+    const listing = await index()
     expect(listing.unknownIds).toHaveLength(1)
     expect(listing.rows.some((row) => row['id'] === '999')).toBe(false)
-    expect(body('999').status).toBe(404)
+    expect((await body('999')).status).toBe(404)
   })
 
-  it('answers 404 for an unknown record and 405 for a wrong method', () => {
-    expect(body('none').status).toBe(404)
-    expect(call(routeFor(BODY), 'GET', `${BODY}/`).status).toBe(400)
-    expect(call(routeFor(INDEX), 'POST', INDEX).status).toBe(405)
+  it('answers 404 for an unknown record and 405 for a wrong method', async () => {
+    expect((await body('none')).status).toBe(404)
+    expect((await call(routeFor(BODY), 'GET', `${BODY}/`)).status).toBe(400)
+    expect((await call(routeFor(INDEX), 'POST', INDEX)).status).toBe(405)
   })
 
-  it('deletes a settled record and refuses to delete the open one', () => {
+  it('deletes a settled record and refuses to delete the open one', async () => {
     const route = routeFor(BODY)
     web.engine.markerStart('a second question')
     const openId = String(web.engine.openRecordId())
-    expect(call(route, 'DELETE', `${BODY}/${openId}`).status).toBe(409)
-    expect(body(openId).status).toBe(200)
+    expect((await call(route, 'DELETE', `${BODY}/${openId}`)).status).toBe(409)
+    expect((await body(openId)).status).toBe(200)
 
     const closedId = String(web.engine.listRecords().rows[0]?.id)
-    expect(call(route, 'DELETE', `${BODY}/${closedId}`).json).toEqual({ deleted: true })
+    expect((await call(route, 'DELETE', `${BODY}/${closedId}`)).json).toEqual({ deleted: true })
     expect(web.engine.listRecords().rows.some((row) => row['id'] === closedId)).toBe(false)
-    expect(body(closedId).status).toBe(404)
-    expect(call(route, 'DELETE', `${BODY}/${closedId}`).status).toBe(404)
+    expect((await body(closedId)).status).toBe(404)
+    expect((await call(route, 'DELETE', `${BODY}/${closedId}`)).status).toBe(404)
     web.engine.markerEnd('done')
   })
 })

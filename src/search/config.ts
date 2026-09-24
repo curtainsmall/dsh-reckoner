@@ -68,6 +68,69 @@ export function normalizeHostPattern(value: string): string {
 }
 
 /**
+ * Layer the user's override over a resolved policy.
+ *
+ * The override is the `search` subtree of the plugin state: a field-by-field layer, never a whole
+ * policy, so a preset that ships an allow-list keeps it until the user names another one. A field
+ * left out - or stored as `null` - keeps the value below it, and every surviving value goes through
+ * the same validation as a preset's config.
+ *
+ * @param base - the policy resolved from the preset row (already defaulted).
+ * @param override - the raw `search` subtree, or anything else (which layers nothing).
+ * @returns the effective policy.
+ */
+export function layerSearchConfig(base: SearchConfig, override: unknown): SearchConfig {
+  if (typeof override !== 'object' || override === null || Array.isArray(override)) return base
+  const raw: Record<string, unknown> = {
+    tier: base.tier,
+    allowedHosts: [...base.allowedHosts],
+    maxResults: base.maxResults,
+    maxSearchesPerRecord: base.maxSearchesPerRecord,
+    answerMaxChars: base.answerMaxChars,
+    enrich: { ...base.enrich },
+    synthesis: { ...base.synthesis },
+  }
+  for (const [key, value] of Object.entries(override as Record<string, unknown>)) {
+    if (value === undefined || value === null) continue
+    if (key === 'enrich' || key === 'synthesis') {
+      const layer = typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+      const merged: Record<string, unknown> = { ...(raw[key] as Record<string, unknown>) }
+      for (const [field, fieldValue] of Object.entries(layer)) {
+        if (fieldValue === undefined || fieldValue === null) continue
+        merged[field] = fieldValue
+      }
+      raw[key] = merged
+      continue
+    }
+    raw[key] = value
+  }
+  return resolveSearchConfig(raw).config
+}
+
+/** The policy as a record writes it down: flat, small, and enough to re-derive what a lookup was allowed to do. */
+export interface SearchPolicySnapshot {
+  readonly tier: string
+  readonly allowedHosts: readonly string[]
+  readonly maxResults: number
+  readonly maxSearchesPerRecord: number
+  readonly answerMaxChars: number
+  readonly enrichPages: number
+  readonly enrichCharsPerPage: number
+}
+
+/** Project one effective policy into the snapshot a search row carries. */
+export function policySnapshot(config: SearchConfig): SearchPolicySnapshot {
+  return {
+    tier: config.tier,
+    allowedHosts: [...config.allowedHosts],
+    maxResults: config.maxResults,
+    maxSearchesPerRecord: config.maxSearchesPerRecord,
+    answerMaxChars: config.answerMaxChars,
+    enrichPages: config.enrich.pages,
+    enrichCharsPerPage: config.enrich.charsPerPage,
+  }
+}
+/**
  * Resolve one row's raw config into a usable policy.
  * @param input - the raw config object from the preset row (any shape).
  * @returns the resolved policy plus one sentence per value that was replaced.

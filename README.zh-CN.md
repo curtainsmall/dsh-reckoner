@@ -62,7 +62,7 @@ dsh plugin --profile <profile> add dsh-reckoner
 
 没有记录时 `set`、`get`、`eval` 一律被拒绝；封闭记录会清空槽表，因此槽表非空恰好等价于存在一条未封闭的记录。开启期间其行写在 `<home>/open-record.jsonl`；封闭时该文件被重命名为 `<home>/records/<id>.jsonl`，故封闭是原子操作，`records/` 下的文件总是完整记录。记录文件的首行是 `{seq: 0, version: 1}`；无此行或版本更旧者计为未知记录，不会列出、提供或用于生成。这里没有索引文件。
 
-**Reckoner** 面板即同名侧边栏入口（钢笔与直尺图标）；它读取 `/api/dsh-reckoner/` 下的十一条 HTTP 路径（记录两条、生成九条），每 5 秒刷新一次。列表给出已封闭的记录、置顶的未封闭记录，以及一行红色的 `N 条未知记录`（点击即可删除这些文件）；选中项以行的边框标示。打开记录即进入其时间线：标记卡片，每个 `eval` 步骤一张卡片（含公式与代入的槽值）；隐藏的说明仅在 **显示全部** 下显示。
+**Reckoner** 面板即同名侧边栏入口（钢笔与直尺图标）；它读取 `/api/dsh-reckoner/` 下的十一条 HTTP 路径（记录两条、生成八条、设置一条），每 5 秒刷新一次。它有两个标签页。**记录** 给出已封闭的记录、置顶的未封闭记录，以及一行红色的 `N 条未知记录`（点击即可删除这些文件）；选中项以行的边框标示。打开记录即进入其时间线：标记卡片，每个 `eval` 步骤一张卡片（含公式与代入的槽值）；隐藏的说明仅在 **显示全部** 下显示，该开关的初值就是 **设置** 保存的偏好。**设置** 给出每种文章格式的生成默认值、检索策略与上述显示偏好，并在有改动等待宿主重启时显示一行。
 
 ## 文章生成
 
@@ -73,7 +73,7 @@ dsh plugin --profile <profile> add dsh-reckoner
 | Markdown | 平铺的 `.md` 文件，从不编译 |
 | LaTeX | `.tex` 源文件写入以文件名命名的目录，按需编译为 PDF |
 
-设置对话框会记住文章语言、输出目录，LaTeX 还会记住是否编译；文件名默认由记录标识符预填。PDF 编译交由 latexmk 或 MiKTeX 的 texify 完成，并需要 `xelatex` 引擎；勾选编译而没有可用驱动或引擎时，「生成」按钮禁用，对话框指明缺少的部分。
+每种格式各自记住自己的输出目录与语言，LaTeX 还会记住是否编译：设置对话框以该格式记住的值打开，设置标签页编辑的是同一批值。文件名默认由记录标识符预填。PDF 编译交由 latexmk 或 MiKTeX 的 texify 完成，并需要 `xelatex` 引擎；勾选编译而没有可用驱动或引擎时，「生成」按钮禁用，对话框指明缺少的部分。
 
 ## 配置
 
@@ -82,7 +82,7 @@ dsh plugin --profile <profile> add dsh-reckoner
 | `DSH_RECKONER_HOME` | 插件主目录，默认 `~/.dsh-reckoner` |
 | `DSH_RECKONER_LOG_LEVEL` | `debug`、`info`、`warn`、`error` 或 `off`；默认 `info` |
 
-主目录存放未封闭的记录（`open-record.jsonl`）、已封闭的记录（`records/<id>.jsonl`）、插件状态（`state.json`，保存被记住的生成设置）与日志（`logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`，每次插件挂载一个文件）。
+主目录存放未封闭的记录（`open-record.jsonl`）、已封闭的记录（`records/<id>.jsonl`）、插件状态（`state.json`，一棵树：每个会记忆设置的模块一个子树，外加扁平的 `restartRequired` 标记）与日志（`logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`，每次插件挂载一个文件）。
 
 ## 文档
 

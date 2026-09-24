@@ -15,6 +15,9 @@ import { recordFacts, type GenerationFacts } from './generate.ts'
 import { registerGenerateEndpoints } from './generate-server.ts'
 import { registerSkills } from './skill.ts'
 import { installPresets } from './preset.ts'
+import { registerSettingsEndpoint } from './settings.ts'
+import { resolveEffectiveSearchPolicy } from './search/effective.ts'
+import { clearRestartRequired, migrateStateFile, reckonerHome, restartRequired } from './state.ts'
 import { lookup } from './search/lookup.ts'
 import type { ReckonerSearchService } from './search/service.ts'
 import { attachConsoleSink, attachFileSink, log, resolveLevel, setLevel } from './log.ts'
@@ -74,8 +77,8 @@ interface RequestLike {
   url?: string
 }
 
-/** The records home: records/ (closed records) and open-record.jsonl live here. */
-const recordsHome = process.env.DSH_RECKONER_HOME ?? join(homedir(), '.dsh-reckoner')
+/** The records home: records/, the state file and the logs live here; `state.ts` owns how it is found. */
+const recordsHome = reckonerHome()
 
 /** Global single engine: one engine per process; any session's markers act on it. */
 export const engine = new Engine(recordsHome)
@@ -128,12 +131,35 @@ export function apply(ctx: Context): void {
 
   ctx.effect(() => registerSkills(ctx), 'dsh-reckoner: skills')
 
+  // The settings surface of the panel's Settings tab: one subtree per module, written through the
+  // state module so a request can only reach the section it names.
+  ctx.effect(() => registerSettingsEndpoint(ctx.webServer as never, recordsHome), 'dsh-reckoner: settings')
+
+  // A host restart is the event the pending-restart flag describes, so every mount
+  // consumes it - unconditionally, and after the capabilities it stands for are in
+  // place (the engine above has started and its tools are registered). Nothing marks
+  // it yet: the writers that will are the ones changing something a running host only
+  // reads at mount. A state file that cannot be written must never keep the plugin
+  // from mounting, so the failure is reported and swallowed.
+  try {
+    clearRestartRequired(recordsHome)
+  } catch (error) {
+    log.warn('restart flag not cleared', { home: recordsHome, error })
+  }
+  // A file an older build wrote is rewritten once here, so it converges without every reader writing.
+  try {
+    if (migrateStateFile(recordsHome)) log.info('state migrated', { home: recordsHome })
+  } catch (error) {
+    log.warn('state migration failed', { home: recordsHome, error })
+  }
+
   // The lookup seam: the `search` row of the `reckoner-with-search` preset owns
   // the model-facing tool and the policy; everything the call actually does -
   // provider, extractive step, record - happens here, against this engine, so a
   // lookup lands in the same record as the calculation it belongs to.
   ctx.effect(() => {
     const service: ReckonerSearchService = {
+      resolvePolicy: (rowConfig) => resolveEffectiveSearchPolicy(recordsHome, rowConfig),
       lookup: (request, config) =>
         lookup(
           {
@@ -169,7 +195,9 @@ export function apply(ctx: Context): void {
           return
         }
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify(engine.listRecords()))
+        // The pending-restart flag travels with the index because the panel already
+        // polls it: a surface reads it here instead of opening a second endpoint.
+        res.end(JSON.stringify({ ...engine.listRecords(), restartRequired: restartRequired(recordsHome) }))
       }),
     }))
 

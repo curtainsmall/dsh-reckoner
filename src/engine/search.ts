@@ -70,6 +70,17 @@ export interface SearchSynthesis {
   readonly used: readonly number[]
 }
 
+/** The effective lookup policy of one call: the fields a reader needs to re-derive its behaviour. */
+export interface SearchPolicyRecord {
+  readonly tier: string
+  readonly allowedHosts: readonly string[]
+  readonly maxResults: number
+  readonly maxSearchesPerRecord: number
+  readonly answerMaxChars: number
+  readonly enrichPages: number
+  readonly enrichCharsPerPage: number
+}
+
 /** One search call, as the record stores it. */
 export interface SearchFact {
   /** What the model asked, verbatim. */
@@ -80,6 +91,8 @@ export interface SearchFact {
   readonly candidates: readonly SearchSource[]
   /** The sources the tier policy allowed the synthesis to read. */
   readonly used: readonly SearchSource[]
+  /** The policy in force for this call, so a reader can see what it was allowed to do. */
+  readonly policy?: SearchPolicyRecord
   /** Absent when the call ended before any synthesis ran. */
   readonly synthesis?: SearchSynthesis
   /** One self-sufficient sentence when the call answered nothing. */
@@ -145,6 +158,7 @@ export function parseSearchFact(input: unknown): SearchFact {
     outcome: SearchOutcome
     candidates: SearchSource[]
     used: SearchSource[]
+    policy?: SearchPolicyRecord
     synthesis?: SearchSynthesis
     error?: string
     durationMs: number
@@ -158,6 +172,8 @@ export function parseSearchFact(input: unknown): SearchFact {
   }
   const error = bag['error']
   if (typeof error === 'string' && error.length > 0) fact.error = error
+  const policy = bag['policy']
+  if (policy !== undefined && policy !== null) fact.policy = parsePolicy(policy)
   const synthesis = bag['synthesis']
   if (synthesis !== undefined && synthesis !== null) {
     fact.synthesis = parseSynthesis(synthesis)
@@ -166,6 +182,35 @@ export function parseSearchFact(input: unknown): SearchFact {
     fail(EngineErrorCode.InvalidArgs, 'an answered search fact needs the synthesis that produced the answer.')
   }
   return fact
+}
+
+/** Validate the policy snapshot one row carries; every field it names must be usable as recorded. */
+function parsePolicy(input: unknown): SearchPolicyRecord {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    fail(EngineErrorCode.InvalidArgs, `the search policy must be an object; got ${describe(input)}.`)
+  }
+  const bag = input as Record<string, unknown>
+  const tier = bag['tier']
+  if (typeof tier !== 'string' || tier.length === 0) {
+    fail(EngineErrorCode.InvalidArgs, `the search policy needs a non-empty tier; got ${describe(tier)}.`)
+  }
+  const hosts = bag['allowedHosts']
+  const allowedHosts = Array.isArray(hosts) ? hosts.filter((entry): entry is string => typeof entry === 'string') : []
+  const numbers: Record<'maxResults' | 'maxSearchesPerRecord' | 'answerMaxChars' | 'enrichPages' | 'enrichCharsPerPage', number> = {
+    maxResults: 0,
+    maxSearchesPerRecord: 0,
+    answerMaxChars: 0,
+    enrichPages: 0,
+    enrichCharsPerPage: 0,
+  }
+  for (const field of ['maxResults', 'maxSearchesPerRecord', 'answerMaxChars', 'enrichPages', 'enrichCharsPerPage'] as const) {
+    const value = bag[field]
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      fail(EngineErrorCode.InvalidArgs, `the search policy needs a non-negative ${field} number; got ${describe(value)}.`)
+    }
+    numbers[field] = value
+  }
+  return { tier, allowedHosts, ...numbers }
 }
 
 function parseSynthesis(input: unknown): SearchSynthesis {
@@ -211,6 +256,9 @@ export function searchFactContent(fact: SearchFact): Record<string, unknown> {
     candidates: fact.candidates.map((source) => ({ ...source })),
     used: fact.used.map((source) => ({ ...source })),
     durationMs: fact.durationMs,
+  }
+  if (fact.policy !== undefined) {
+    content['policy'] = { ...fact.policy, allowedHosts: [...fact.policy.allowedHosts] }
   }
   if (fact.synthesis !== undefined) {
     content['synthesis'] = { ...fact.synthesis, used: [...fact.synthesis.used] }

@@ -62,7 +62,7 @@ A record is the process of one calculation: its title, conditions, explanations,
 
 `set`, `get` and `eval` are refused while no record is open, and closing a record clears the slot table, so the table is non-empty exactly while a record is open. The rows live in `<home>/open-record.jsonl`; closing renames that file into `<home>/records/<id>.jsonl`, which makes closing atomic and a closed record always complete. The first line is `{seq: 0, version: 1}`; a file without it, or with an older version, is counted as unknown and is never listed, served or used for generation. There is no index file.
 
-The **Reckoner** panel is the sidebar entry of the same name (a pen-ruler glyph); it reads eleven HTTP paths under `/api/dsh-reckoner/` - two for records, nine for generation - refreshed every 5 s. Its list holds the closed records, the unclosed record pinned above them and a red `X unknown records` line that offers to delete those files; selection is marked by the row's border, since there are no checkboxes. A record opens as its timeline: the markers, one card per `eval` step with its formula and the slots it substituted; hidden messages appear only under **Display all**.
+The **Reckoner** panel is the sidebar entry of the same name (a pen-ruler glyph); it reads eleven HTTP paths under `/api/dsh-reckoner/` - two for records, eight for generation and one for settings - refreshed every 5 s. It has two tabs. **Records** holds the closed records, the unclosed record pinned above them and a red `X unknown records` line that offers to delete those files; selection is marked by the row's border, since there are no checkboxes. A record opens as its timeline: the markers, one card per `eval` step with its formula and the slots it substituted; hidden messages appear only under **Display all**, whose default is the preference **Settings** keeps. **Settings** holds the generation defaults of each article format, the search policy and that display-all preference, and shows a line while a change is waiting for a host restart.
 
 ## Article generation
 
@@ -73,7 +73,7 @@ Every closed record can be written up as a standalone article. A host-side LLM c
 | Markdown | a flat `.md` file, never compiled |
 | LaTeX | a `.tex` source in a folder named after the file, compiled to PDF when requested |
 
-The setup dialog remembers the article language, the output directory and, for LaTeX, whether to compile; the file name is prefilled from the record identifier. PDF compilation is delegated to latexmk or MiKTeX's texify and needs the `xelatex` engine; with compilation requested and no usable driver or engine, Generate is disabled and the dialog names what is missing.
+Each format remembers its own output directory and language, and LaTeX remembers whether to compile: the setup dialog opens with what its format remembers, and the Settings tab edits the same values. The file name is prefilled from the record identifier. PDF compilation is delegated to latexmk or MiKTeX's texify and needs the `xelatex` engine; with compilation requested and no usable driver or engine, Generate is disabled and the dialog names what is missing.
 
 ## Configuration
 
@@ -82,7 +82,7 @@ The setup dialog remembers the article language, the output directory and, for L
 | `DSH_RECKONER_HOME` | the plugin home, `~/.dsh-reckoner` by default |
 | `DSH_RECKONER_LOG_LEVEL` | `debug`, `info`, `warn`, `error` or `off`; the default is `info` |
 
-The home holds the unclosed record (`open-record.jsonl`), the closed records (`records/<id>.jsonl`), the plugin state (`state.json`, which keeps the remembered generation settings) and the logs (`logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, one per plugin mount).
+The home holds the unclosed record (`open-record.jsonl`), the closed records (`records/<id>.jsonl`), the plugin state (`state.json`, a tree with one subtree per module that remembers settings, plus the flat `restartRequired` marker) and the logs (`logs/<YYYY-MM-DD_HH-mm-ss.SSS>.log`, one per plugin mount).
 
 ## Documentation
 

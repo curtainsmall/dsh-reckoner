@@ -1,13 +1,101 @@
 /**
- * Reckoner record list page.
+ * Reckoner panel body: the tab strip (Records / Settings) and the records list
+ * page behind the first tab.
  * The list reads the host's /records-index: the closed records, the one
  * unclosed record (pinned above the list) and a count of unknown records;
- * clicking a row opens the record's trace timeline (record-detail.tsx).
+ * clicking a row opens the record's trace timeline (record-detail.tsx). The
+ * Settings tab is settings.tsx.
  */
 import { useEffect, useState } from 'react'
 import { t, useAppLocale } from './locales.ts'
 import { Dialog, GhostButton, PrimaryButton } from './ui.tsx'
 import { RecordDetail } from './record-detail.tsx'
+import { SettingsTab, ensureSettingsLoaded } from './settings.tsx'
+
+/* ── panel body: tab strip + one tab ───────────────────────────────────────── */
+
+/** One control height for the whole panel: every toolbar button and every tab is boxed to it,
+ *  so switching a mode or a tab cannot shift the page. */
+const TOOLBAR_CONTROL_HEIGHT = 24
+
+/** The two tabs of the panel body, in strip order. */
+type PanelTab = 'records' | 'settings'
+
+/** Tab-strip button: the toolbar's control box, drawn as an underlined tab. */
+const tabButtonStyle: React.CSSProperties = {
+  boxSizing: 'border-box',
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: TOOLBAR_CONTROL_HEIGHT,
+  padding: '0 10px',
+  border: 'none',
+  borderBottom: '2px solid transparent',
+  background: 'none',
+  color: 'var(--dsw-alias-label-secondary)',
+  cursor: 'pointer',
+  fontSize: 12.5,
+  fontWeight: 600,
+  whiteSpace: 'nowrap',
+}
+
+/** The selected tab: the accent underline plus the accent text. */
+const activeTabButtonStyle: React.CSSProperties = {
+  ...tabButtonStyle,
+  color: 'var(--dsw-alias-state-business-primary)',
+  borderBottomColor: 'var(--dsw-alias-state-business-primary)',
+}
+
+/** The strip keeps one control height in both tabs, so switching never moves the content below it. */
+const tabStripStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: 2,
+  flex: 'none',
+  minHeight: TOOLBAR_CONTROL_HEIGHT,
+  borderBottom: '1px solid var(--dsw-alias-border-l1)',
+}
+
+/**
+ * The panel body: the tab strip on top, then the two panes. Records is the default. Both panes
+ * stay mounted and only one is displayed, so the records list keeps its mode, its selection and
+ * its polling while the settings page is open; the settings page re-reads on the way in, because
+ * the generation dialog and the detail's "Display all" toggle both write settings behind it.
+ */
+export function RecordsTab(): React.JSX.Element {
+  useAppLocale()
+  const [tab, setTab] = useState<PanelTab>('records')
+
+  useEffect(() => {
+    ensureSettingsLoaded()
+  }, [])
+
+  const tabButton = (value: PanelTab, label: string): React.JSX.Element => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={tab === value}
+      style={tab === value ? activeTabButtonStyle : tabButtonStyle}
+      onClick={() => setTab(value)}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={tabStripStyle} role="tablist">
+        {tabButton('records', t('tabRecords'))}
+        {tabButton('settings', t('tabSettings'))}
+      </div>
+      {/* `contents` keeps the panes' boxes exactly where they were before the strip existed. */}
+      <div role="tabpanel" style={{ display: tab === 'records' ? 'contents' : 'none' }}>
+        <RecordsList />
+      </div>
+      <div role="tabpanel" style={{ display: tab === 'settings' ? 'contents' : 'none' }}>
+        <SettingsTab active={tab === 'settings'} />
+      </div>
+    </div>
+  )
+}
 
 /* ── record list ─────────────────────────────────────────────────────────── */
 
@@ -52,9 +140,6 @@ const unknownLineStyle: React.CSSProperties = {
 const INDEX_ENDPOINT = '/api/dsh-reckoner/records-index'
 const RECORD_ENDPOINT = '/api/dsh-reckoner/records/'
 const POLL_MS = 5000
-
-/** One toolbar control height: every button in the toolbar is boxed to it, so switching modes cannot shift the page. */
-const TOOLBAR_CONTROL_HEIGHT = 24
 
 const rowStyle: React.CSSProperties = {
   padding: '10px 12px',
@@ -177,7 +262,7 @@ function UnknownRecordsLine({ ids, count, onDelete }: { ids: string[]; count: nu
 }
 
 /** Record list page: render from the index (title = the record's title); the open record is pinned above the list; polls every 5s. */
-export function RecordsTab(): React.JSX.Element {
+function RecordsList(): React.JSX.Element {
   useAppLocale()
   const [rows, setRows] = useState<IndexRow[] | null>(null)
   const [open, setOpen] = useState<OpenRow | null>(null)

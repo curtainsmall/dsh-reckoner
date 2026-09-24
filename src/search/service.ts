@@ -18,6 +18,13 @@ export interface SearchLookupRequest {
 
 /** The host half's search surface. */
 export interface ReckonerSearchService {
+  /**
+   * The policy a call may run under: the row's own config, layered under the user's override from
+   * the plugin state. It is resolved per call, so a settings write reaches the next lookup without
+   * a restart and without a new session.
+   * @param rowConfig - the raw `config` of the calling preset row.
+   */
+  resolvePolicy(rowConfig: unknown): SearchConfig
   lookup(request: SearchLookupRequest, config: SearchConfig): Promise<LookupReceipt>
 }
 

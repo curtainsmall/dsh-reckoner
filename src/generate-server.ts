@@ -11,7 +11,7 @@ import { dirname, join, basename } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { readState, updateState } from './state.ts'
+import { readSection, updateSection } from './state.ts'
 import { log } from './log.ts'
 import {
   ArticleFormat,
@@ -76,19 +76,10 @@ export const REVEAL_PATH = '/api/dsh-reckoner/reveal'
 export const LIST_DIRS_PATH = '/api/dsh-reckoner/list-dirs'
 export const LIST_ROOTS_PATH = '/api/dsh-reckoner/list-roots'
 export const DIRECTORY_TREE_CSS_PATH = '/api/dsh-reckoner/directory-tree.css'
-export const GENERATE_DIR_PATH = '/api/dsh-reckoner/generate-dir'
 export const GENERATE_CAPABILITY_PATH = '/api/dsh-reckoner/generate-capability'
 
-/** Legacy plain-text location of the remembered directory (migrated on read). */
+/** Legacy plain-text location of the remembered directory (migrated on read, removed on write). */
 const LEGACY_GENERATE_DIR_FILE = 'generate-dir.txt'
-
-/** Remembered generation state: output directory, article language, format and PDF-compile toggle. */
-interface GenerateState {
-  generateDir?: string
-  generateLanguage?: string
-  generateFormat?: string
-  generateCompile?: boolean
-}
 
 /** Membership guards for query-string enum values. */
 function isArticleFormat(value: unknown): value is ArticleFormat {
@@ -99,38 +90,75 @@ function isArticleLanguage(value: unknown): value is ArticleLanguage {
   return value === ArticleLanguage.Auto || value === ArticleLanguage.ZhCN || value === ArticleLanguage.En
 }
 
-/** The remembered generation state, with a one-time migration from the legacy plain-text file. */
-function readGenerateState(home: string): GenerateState {
-  const stored = readState(home)
-  const state: GenerateState = {
-    generateDir: typeof stored.generateDir === 'string' && stored.generateDir.trim().length > 0 ? stored.generateDir.trim() : undefined,
-    generateLanguage: typeof stored.generateLanguage === 'string' && stored.generateLanguage.length > 0 ? stored.generateLanguage : undefined,
-    generateFormat: isArticleFormat(stored.generateFormat) ? stored.generateFormat : undefined,
-    generateCompile: typeof stored.generateCompile === 'boolean' ? stored.generateCompile : undefined,
-  }
-  if (state.generateDir === undefined) {
-    try {
-      const legacy = readFileSync(join(home, LEGACY_GENERATE_DIR_FILE), 'utf8').trim()
-      if (legacy.length > 0) state.generateDir = legacy
-    } catch {
-      // no legacy file — nothing to migrate
-    }
-  }
-  return state
+/** The state key each format remembers its values under. */
+const FORMAT_KEY: Record<ArticleFormat, 'markdown' | 'latex'> = {
+  [ArticleFormat.Markdown]: 'markdown',
+  [ArticleFormat.Latex]: 'latex',
 }
 
-/** Persist the generation settings into the shared state file; undefined fields keep their stored values. */
-function writeGenerateState(home: string, state: GenerateState): void {
-  updateState(home, (stored) => {
-    for (const [key, value] of Object.entries(state)) {
-      if (value !== undefined) stored[key] = value
+/** One format's remembered values with the defaults applied - what a dialog opens with. */
+export interface FormatSettings {
+  /** The output directory, empty when nothing was chosen yet. */
+  readonly directory: string
+  readonly language: ArticleLanguage
+  /** PDF compilation: only LaTeX can mean anything by it. */
+  readonly compile: boolean
+}
+
+/** The legacy plain-text directory, if that older file is still around. */
+function legacyDirectory(home: string): string | undefined {
+  try {
+    const text = readFileSync(join(home, LEGACY_GENERATE_DIR_FILE), 'utf8').trim()
+    return text.length > 0 ? text : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One format's remembered settings, with defaults applied. Each format owns its subtree, so the
+ * directory and language one format remembers never leak into the other; `compile` is read for
+ * LaTeX only, because Markdown has no PDF step to remember.
+ */
+export function readFormatSettings(home: string, format: ArticleFormat): FormatSettings {
+  const stored = readSection(home, 'generation')[FORMAT_KEY[format]] ?? {}
+  const directory = typeof stored.directory === 'string' && stored.directory.trim().length > 0
+    ? stored.directory.trim()
+    : (legacyDirectory(home) ?? '')
+  return {
+    directory,
+    language: isArticleLanguage(stored.language) ? stored.language : ArticleLanguage.Auto,
+    compile: format === ArticleFormat.Latex && stored.compile === true,
+  }
+}
+
+/**
+ * Remember one format's values. A field left out keeps what is stored; `undefined` never erases
+ * anything, while an empty directory or an unknown language drops the key so the default applies
+ * again. Writes touch this format's subtree only.
+ */
+export function writeFormatSettings(
+  home: string,
+  format: ArticleFormat,
+  values: { directory?: string; language?: string; compile?: boolean },
+): void {
+  const key = FORMAT_KEY[format]
+  updateSection(home, 'generation', (generation) => {
+    const current = { ...(generation[key] ?? {}) }
+    if (values.directory !== undefined) {
+      const directory = values.directory.trim()
+      if (directory.length === 0) delete current.directory
+      else current.directory = directory
     }
-    // Drop anything empty or invalid rather than keeping a key no reader would trust.
-    if (typeof stored.generateDir !== 'string' || stored.generateDir.trim().length === 0) delete stored.generateDir
-    if (typeof stored.generateLanguage !== 'string' || stored.generateLanguage.length === 0) delete stored.generateLanguage
-    if (!isArticleFormat(stored.generateFormat)) delete stored.generateFormat
-    if (typeof stored.generateCompile !== 'boolean') delete stored.generateCompile
+    if (values.language !== undefined) {
+      if (isArticleLanguage(values.language)) current.language = values.language
+      else delete current.language
+    }
+    if (values.compile !== undefined && format === ArticleFormat.Latex) current.compile = values.compile
+    if (Object.keys(current).length === 0) delete generation[key]
+    else generation[key] = current
   })
+  // The legacy file has been superseded by the tree; remove it once something was written.
   try {
     rmSync(join(home, LEGACY_GENERATE_DIR_FILE), { force: true })
   } catch {
@@ -844,45 +872,6 @@ export function registerGenerateEndpoints(ctx: GenerateContext, deps: GenerateDe
         ...(job.pdfPath === undefined ? {} : { pdfPath: job.pdfPath }),
         ...(job.compileError === undefined ? {} : { compileError: job.compileError }),
         ...(job.error === undefined ? {} : { error: job.error }),
-      }))
-    },
-  }))
-
-  // Remembered generation state (directory/language/format/compile): GET reads, PUT saves.
-  disposers.push(ctx.webServer.register({
-    kind: 'exact',
-    path: GENERATE_DIR_PATH,
-    handler: (req, res) => {
-      const request = req as RequestLike
-      const method = request.method ?? 'GET'
-      if (method === 'PUT') {
-        const url = new URL(request.url ?? '', 'http://dsh.local')
-        const dir = url.searchParams.get('dir')
-        const language = url.searchParams.get('language')
-        const format = url.searchParams.get('format')
-        const compileParam = url.searchParams.get('compile')
-        const state: GenerateState = {}
-        if (dir !== null) state.generateDir = dir
-        if (language !== null) state.generateLanguage = language
-        if (format !== null) state.generateFormat = format
-        if (compileParam === 'true' || compileParam === 'false') state.generateCompile = compileParam === 'true'
-        writeGenerateState(deps.home, state)
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ saved: true }))
-        return
-      }
-      if (method !== 'GET') {
-        res.statusCode = 405
-        res.end('method not allowed')
-        return
-      }
-      const state = readGenerateState(deps.home)
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({
-        directory: state.generateDir ?? '',
-        language: state.generateLanguage ?? 'auto',
-        format: state.generateFormat ?? 'markdown',
-        compile: state.generateCompile ?? false,
       }))
     },
   }))

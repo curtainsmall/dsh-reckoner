@@ -59,7 +59,7 @@ function unavailable(): LookupReceipt {
  * @param config - the raw config of this row in the preset.
  */
 export function apply(ctx: Context, config?: unknown): void {
-  const { config: policy, problems } = resolveSearchConfig(config)
+  const { problems } = resolveSearchConfig(config)
   for (const problem of problems) {
     ctx.logger?.warn?.(`dsh-reckoner search: ${problem}`)
   }
@@ -79,9 +79,12 @@ export function apply(ctx: Context, config?: unknown): void {
       const service = ctx.get('reckonerSearch') as ReckonerSearchService | undefined
       if (service === undefined) return unavailable() as unknown as JsonValue
       const question = typeof args.question === 'string' ? args.question : ''
+      // The host resolves the policy for every call - this row's config is the bottom layer, the
+      // user's override in the plugin state sits above it - so a settings write reaches the next
+      // lookup without a restart and without a new session.
       const receipt = await service.lookup(
         { question, ...(exec.signal === undefined ? {} : { signal: exec.signal }) },
-        policy,
+        service.resolvePolicy(config),
       )
       return receipt as unknown as JsonValue
     },

@@ -433,7 +433,7 @@ Every call appends at most one row to the open record, inputs and outputs alike.
 | `record_start` | `{ title, record }`: the title and the allocated identifier |
 | `record_message` | `{ text }`, or `{ text, hide: true }` |
 | `record_end` | `{ record }`, or `{ text, record }` when a closing text was given |
-| `search` | `{ question, tier, outcome, candidates, used, synthesis?, error?, durationMs }`: the lookup's own fact (Section 12.5) |
+| `search` | `{ question, tier, outcome, candidates, used, policy, synthesis?, error?, durationMs }`: the lookup's own fact (Section 12.5) |
 | a refused call | `{ code, error }` |
 
 - `vars` holds exactly the slots the formula read, in first-use order, each with the value the slot held at that moment. A bound variable never enters the trace.
@@ -521,8 +521,30 @@ The plugin home is `~/.dsh-reckoner`, and `DSH_RECKONER_HOME` moves it.
 |---|---|
 | `open-record.jsonl` | the unclosed record, rewritten from its header on `record_start` and renamed on `record_end` |
 | `records/<id>.jsonl` | a closed record: the header line and one trace row per call |
-| `state.json` | the remembered generation settings (`generateDir`, `generateLanguage`, `generateFormat`, `generateCompile`). It is replaced atomically, and a missing, corrupt or non-object file reads as `{}` |
+| `state.json` | the remembered settings, as the tree below: one subtree per module that remembers settings, plus the flat `restartRequired` marker. It is replaced atomically, and a missing, corrupt or non-object file reads as `{}` |
 | `logs/` | the run logs below |
+
+`state.json` is a tree. Absence means "use the default", so only a value someone chose is stored; a writer touches only its own subtree, and every other key - including one a newer build wrote - survives verbatim.
+
+```jsonc
+{
+  "schema": 1,
+  "generation": {
+    "markdown": { "directory": "C:/out", "language": "auto" },
+    "latex": { "directory": "D:/tex", "language": "zh-CN", "compile": false }
+  },
+  "search": { "maxResults": 20, "enrich": { "pages": 2 } },
+  "panel": { "showAll": true },
+  "restartRequired": true
+}
+```
+
+- `generation` holds one subtree per article format, because the two formats remember different things: `directory` and `language` for both, `compile` for LaTeX alone (Section 10).
+- `search` is the user's override over the search policy: a field-by-field layer above what the preset row ships, never a complete policy (Section 12.4).
+- `panel` holds the panel's own preferences; `showAll` is the display-all default of the record detail (Section 11.2).
+- `restartRequired` stays flat, and is not a setting: it is a fact about this host run, set by whatever changed something the running host reads only at its next mount. It is absent while nothing is pending, because absent and `false` are the same fact.
+- `schema` is the structure version of the file; this build writes `1`. A file with no number or an older one is stamped with it on the next write; a file a newer build wrote keeps its higher number, and every key this build does not know survives verbatim in either case - a reader never downgrades what it did not write.
+- A file an older build wrote is migrated once, at mount: the flat `generateDir` and `generateLanguage` are copied into both formats, since nothing said which one they meant; `generateCompile` goes to LaTeX alone; and `generateFormat` is dropped, because it was written but never read. The older plain-text `generate-dir.txt` is still honoured as the directory until the first write, which removes it.
 
 ### 9.2 Logs
 
@@ -556,28 +578,35 @@ A closed record can be written up as a standalone solution article. The host red
 - PDF compilation is LaTeX-only and optional. It runs a driver, `latexmk` preferred and `texify` as the fallback, which in turn runs `xelatex`; the article is written to disk either way, and a compile failure is reported without discarding it.
 - The file name is forced to the format's extension and defaults to `reckoner-<first 8 characters of the record identifier>`.
 - The article is written as the author's own solution: the prompt forbids mentioning Reckoner, the harness, formulas, derivation steps, records or the generation process, and forbids inventing or recomputing a number.
+- **Remembered settings.** Each format remembers its own output `directory`, its `language` and - LaTeX alone - whether to `compile`, in its own subtree of the state file (Section 9.1). The setup dialog opens with what its format remembers and writes back through the settings endpoint, so nothing one format remembers reaches the other.
+- The settings endpoint serves that view and writes it: `GET /api/dsh-reckoner/settings` answers the generation defaults of both formats with the defaults applied, and `PUT` takes `{generation: {format, directory?, language?, compile?}}` and answers with the whole view (Section 11.3).
 
 ## 11. The panel
 
-The records panel is a **Reckoner** entry in the sidebar that opens over the conversation column. It has two views: the records list and one record's detail.
+The records panel is a **Reckoner** entry in the sidebar that opens over the conversation column. Its body is a tab strip with two tabs: **Records** - the list of records and one record's detail - and **Settings**, which holds the plugin's remembered settings.
 
-### 11.1 Records list
+### 11.1 The Records tab
 
-- Reads `GET /api/dsh-reckoner/records-index` and polls it every 5 seconds; it never reads a trace body.
+- The list reads `GET /api/dsh-reckoner/records-index` and polls it every 5 seconds; it never reads a trace body.
 - The open record is pinned above the list with an incomplete badge. The closed records follow, newest first, each showing its title (or its identifier when the title is empty) and its open and end times.
 - **Select** mode turns the rows into a selection with **Select all** and **Delete selected**, guarded by a confirmation dialog. Deleting removes a closed record's file; the open record never joins the selection, because the endpoint refuses it.
 - A line reports the identifiers no build can read and offers to delete them, since nothing else can reach them.
-
-### 11.2 Record detail
-
-- Fetched from `GET /api/dsh-reckoner/records/<id>` and polled every 5 seconds, so a running solve appears live.
+- Opening a record replaces the list with that record's timeline, fetched from `GET /api/dsh-reckoner/records/<id>` and polled every 5 seconds, so a running solve appears live.
 - A header card with the record identifier, the count of visible rows, the count of failed rows among them, and either the end time or an incomplete badge.
-- **Display all** off keeps refused rows and messages marked `hide: true` out of the timeline: they are the engine's account and the writer's notes, not part of the solution. The failed count is therefore zero until it is on.
+- **Display all** off keeps refused rows and messages marked `hide: true` out of the timeline: they are the engine's account and the writer's notes, not part of the solution. The failed count is therefore zero until it is on. The toggle opens at the panel's own preference and writes it back (Section 11.2).
 - Rows are grouped into the narrative: consecutive accepted `set` rows collapse into one **Writes ({n})** card (one line per slot, with its revision), consecutive accepted `get` rows into a **Reads ({n})** card, and consecutive failures into a red **Failed attempts ({n})** card showing the sequence number, the tool, the formula when there is one, the `code` and the `error` text.
 - Every accepted `eval` gets its own card: the formula, the written slot with its revision, one row per slot the formula read with the value it held, chips that jump to the `set` row of each of those slots, and the result as a tree.
 - Marker rows render as accent-striped cards: the record start, a message, the record end, a refused `record_start` and a refused `record_end`.
 - A lookup gets its own card: the question, the answer it received, and, behind a collapsible **Sources ({n})** header, the sources the record kept. A refused or unanswered lookup shows its one sentence in the warning or error accent instead.
 - The right-hand column holds the two article buttons, **Generate Markdown** and **Generate LaTeX**, which open the generation setup dialog.
+
+### 11.2 The Settings tab
+
+- **Generation**: one block per article format, holding the `directory`, the `language` and - LaTeX alone - the `compile` toggle. A block saves on its own, so writing one format never touches the other.
+- **Search policy**: the three layers a lookup resolves (Section 12.4), with the effective value as the placeholder of every field. An empty field is written as `null` and clears that override, so the layer below applies again; **Reset all overrides** clears the whole subtree.
+- **Panel**: whether the record detail shows hidden rows by default, the preference its **Display all** toggle also writes.
+- A line reports a pending change that needs a host restart, shown while the flat `restartRequired` marker is set (Section 9.1).
+- Everything here is read and written through one endpoint pair, `GET` and `PUT /api/dsh-reckoner/settings` (Section 11.3); a failed load or save stays a line of text rather than an empty tab.
 
 ### 11.3 Host endpoints
 
@@ -592,7 +621,7 @@ The records panel is a **Reckoner** entry in the sidebar that opens over the con
 | `GET /api/dsh-reckoner/generate-capability` | the LaTeX toolchain and document-shell probe behind the setup dialog |
 | `GET /api/dsh-reckoner/list-roots`, `GET /api/dsh-reckoner/list-dirs` | the output-directory browser |
 | `GET /api/dsh-reckoner/directory-tree.css` | the vendored stylesheet the panel injects |
-| `GET` / `PUT /api/dsh-reckoner/generate-dir` | the remembered generation directory, language, format and compile toggle |
+| `GET` / `PUT /api/dsh-reckoner/settings` | the whole settings view; `PUT` writes only the sections its body names and answers `{saved, settings}`, `400 {error}` for an unusable body, `405` for another method |
 | `POST /api/dsh-reckoner/reveal` | opens a generated file or its folder in the host's file manager |
 
 ## 12. The outside lookup
@@ -640,7 +669,9 @@ failure: { ok: false, code, error }
 
 Every key is optional and every key has a default, so a preset names only what it wants to change. An unusable value is reported and replaced rather than refusing the row: a wrong number must not cost a session its calculator.
 
-| key | default | meaning |
+The policy is resolved per call from three layers: the code defaults of the table below, the preset row's own `config`, and the user's override in the `search` subtree of the state file (Section 9.1). A field the override leaves out falls back to the row, and a field the row leaves out falls back to the defaults; the Settings tab shows all three beside the effective value (Section 11.2). Resolution happens per call rather than at mount, so a settings write reaches the very next lookup - no host restart and no new session.
+
+| key | code default | meaning |
 |---|---|---|
 | `tier` | `strict` | `strict` keeps only hosts on the allow-list; `open` keeps every source the provider returned |
 | `allowedHosts` | the 12 reference hosts | host suffixes a strict lookup accepts. A host matches when it is the pattern or a subdomain of it, never when it merely ends with the same letters. An explicitly empty list is a decision: a strict lookup then answers nothing |
@@ -665,6 +696,7 @@ Every call writes exactly one row, whatever it answered, and the row's tool is `
 | `outcome` | `answered`, `insufficient`, `refused` or `failed` |
 | `candidates` | every source the provider returned, in its order, each with its `url` and, when the provider supplied them, its `title`, `snippet` and `publishedAt` |
 | `used` | the sources the policy allowed: a subset of `candidates` in the same order, and an empty list when nothing was allowed |
+| `policy` | the policy this call ran under: `tier`, `allowedHosts`, `maxResults`, `maxSearchesPerRecord`, `answerMaxChars`, `enrichPages` and `enrichCharsPerPage` |
 | `synthesis` | absent when the call ended before any synthesis ran; otherwise the provider, the model, the prompt version, the answer and the material items the answer relied on |
 | `error` | one self-sufficient sentence, present when the call answered nothing |
 | `durationMs` | how long the call took |
@@ -673,6 +705,7 @@ Every call writes exactly one row, whatever it answered, and the row's tool is `
 - `synthesis.used` holds indices into the row's own `used` list, which is the material the extractive step was given, so an answer can be traced to the sources it relied on.
 - The three outcomes that answer nothing are recorded too: `refused` when the record had spent its budget, `insufficient` when no allowed source held the fact, and `failed` when the provider, the network or the extractive step could not run. A record is the account of what happened, so a lookup that produced nothing is part of it.
 - `candidates` is kept because the policy runs after the retrieval: the record shows what the provider found and which part of it the answer was allowed to use.
+- The policy is resolved per call and can be re-tuned while the host runs, so the row carries the policy it actually ran under: a reader re-derives what that call was allowed to do from the row alone, whatever the settings say now. A row an older build wrote carries none, and the reader then has the `tier` alone.
 
 ### 12.6 The failure codes the caller sees
 
@@ -690,7 +723,7 @@ Every call writes exactly one row, whatever it answered, and the row's tool is `
 - `SEARCH_INSUFFICIENT` means the quantity is missing: say which relation cannot be evaluated and stop, instead of estimating the value.
 - `SEARCH_BUDGET_EXCEEDED` means the record has no lookup left: continue with what the record holds, or say what is missing.
 - The record's `search` rows feed the article: the facts render the question, the answer verbatim - not cut to four decimal places, because it carries the number as its source wrote it - and the sources, so the article can credit them, and an open-tier lookup is marked as web-derived and unverified (Section 10).
-- The panel draws a lookup as its own card: the question, the answer, and a collapsible source list; a refused or unanswered lookup shows its one sentence in the warning or error accent (Section 11.2).
+- The panel draws a lookup as its own card: the question, the answer, and a collapsible source list; a refused or unanswered lookup shows its one sentence in the warning or error accent (Section 11.1).
 
 ### 12.8 The limits, as measured
 

@@ -160,6 +160,17 @@ describe('the lookup', () => {
     // The answer relied on material item 1, which the record resolves back to its URL.
     expect(fact?.synthesis?.used).toEqual([0])
     expect(fact?.durationMs).toBeGreaterThanOrEqual(0)
+    // The row carries the policy in force, so a policy that can be re-tuned while the host runs
+    // still leaves behind what this call was allowed to do.
+    expect(fact?.policy).toEqual({
+      tier: SearchTier.Strict,
+      allowedHosts: [...strictConfig().allowedHosts],
+      maxResults: strictConfig().maxResults,
+      maxSearchesPerRecord: strictConfig().maxSearchesPerRecord,
+      answerMaxChars: strictConfig().answerMaxChars,
+      enrichPages: strictConfig().enrich.pages,
+      enrichCharsPerPage: strictConfig().enrich.charsPerPage,
+    })
   })
 
   it('sends the question verbatim and asks the provider for the configured bound', async () => {
@@ -359,20 +370,27 @@ describe('the search tool row', () => {
     expect(tools.map((tool) => tool.name)).toEqual([TraceTool.Search])
   })
 
-  it('forwards the question and its own policy to the host half', async () => {
+  it('hands its own config to the host resolver and forwards the policy it answers with', async () => {
     const calls: Array<{ question: string; tier: SearchTier }> = []
+    const resolvedWith: unknown[] = []
     const { tools } = mount({
       service: {
+        // The row owns the tool; the host owns the policy layers, so the row passes its config on.
+        resolvePolicy: (rowConfig: unknown) => {
+          resolvedWith.push(rowConfig)
+          return resolveSearchConfig({ tier: 'open' }).config
+        },
         lookup: async (request: { question: string }, config: SearchConfig) => {
           calls.push({ question: request.question, tier: config.tier })
-          return { ok: true, answer: 'Copper conducts 401 W/(m*K).', origin: 'allowlist' }
+          return { ok: true, answer: 'Copper conducts 401 W/(m*K).', origin: 'web' }
         },
       },
       config: { tier: 'strict', maxSearchesPerRecord: 2 },
     })
     const receipt = await tools[0]!.execute({ question: 'thermal conductivity of copper' }, {})
-    expect(receipt).toEqual({ ok: true, answer: 'Copper conducts 401 W/(m*K).', origin: 'allowlist' })
-    expect(calls).toEqual([{ question: 'thermal conductivity of copper', tier: SearchTier.Strict }])
+    expect(receipt).toEqual({ ok: true, answer: 'Copper conducts 401 W/(m*K).', origin: 'web' })
+    expect(resolvedWith).toEqual([{ tier: 'strict', maxSearchesPerRecord: 2 }])
+    expect(calls).toEqual([{ question: 'thermal conductivity of copper', tier: SearchTier.Open }])
   })
 
   it('names the missing host half, and the host to look at, instead of throwing', async () => {

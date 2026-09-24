@@ -17,6 +17,7 @@ import { ValueTag } from '../engine/value.ts'
 import { ArticleFormat } from '../generate.ts'
 import { useGenState } from './generation.ts'
 import { GenerationSetupDialog } from './generation-ui.tsx'
+import { usePanelShowAll } from './settings.tsx'
 
 const BODY_ENDPOINT = '/api/dsh-reckoner/records/'
 const POLL_MS = 5000
@@ -359,7 +360,9 @@ export function RecordDetail({ id, onBack }: { id: string; onBack: () => void })
   const [record, setRecord] = useState<RecordBody | null>(null)
   const [failed, setFailed] = useState(false)
   const [backHover, setBackHover] = useState(false)
-  const [showAll, setShowAll] = useState(false)
+  // "Display all" is the panel's remembered preference: it starts from the settings and every
+  // toggle writes the new value back, so the detail opens the way the user left it.
+  const { showAll, setShowAll } = usePanelShowAll()
 
   useEffect(() => {
     let alive = true
