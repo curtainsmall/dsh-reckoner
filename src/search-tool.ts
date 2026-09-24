@@ -37,12 +37,19 @@ export const SEARCH_DESCRIPTION =
   'answers that no allowed source holds the fact, that quantity is missing - say which relation cannot be ' +
   'evaluated and stop. A record allows only a few lookups, and every one of them is written into it with its sources.'
 
-/** Guard for the published service: an absent host half is a receipt, never a throw. */
+/**
+ * Guard for the published service: an absent host half is a receipt, never a
+ * throw. The process id is in the sentence because the two halves can be mounted
+ * in different hosts or different builds - this row alone cannot serve a lookup,
+ * and the reader needs to know which host to look at.
+ */
 function unavailable(): LookupReceipt {
   return {
     ok: false,
     code: 'SEARCH_UNAVAILABLE',
-    error: 'the host half of dsh-reckoner is not mounted, so no lookup can run',
+    error:
+      `the host half of dsh-reckoner is not mounted in this host (pid ${process.pid}), so no lookup can run: ` +
+      'the plugin row is missing or failed to mount here. Restart the host and check its log for the row.',
   }
 }
 

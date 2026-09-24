@@ -145,7 +145,12 @@ export function apply(ctx: Context): void {
           request,
         ),
     }
-    return ctx.provide('reckonerSearch', service)
+    const dispose = ctx.provide('reckonerSearch', service)
+    // Logged because the preset row can be mounted without this half: the row's
+    // own receipt then reports the service as missing, and this line is how a log
+    // tells "never published" from "published in another process".
+    log.info('search service published', { pid: process.pid })
+    return dispose
   }, 'dsh-reckoner: search service')
 
   ctx.effect(() => {

@@ -375,10 +375,12 @@ describe('the search tool row', () => {
     expect(calls).toEqual([{ question: 'thermal conductivity of copper', tier: SearchTier.Strict }])
   })
 
-  it('names the missing host half instead of throwing', async () => {
+  it('names the missing host half, and the host to look at, instead of throwing', async () => {
     const { tools } = mount()
-    const receipt = await tools[0]!.execute({ question: 'copper' }, {})
+    const receipt = (await tools[0]!.execute({ question: 'copper' }, {})) as { ok: boolean; code?: string; error?: string }
     expect(receipt).toMatchObject({ ok: false, code: SearchErrorCode.Unavailable })
+    expect(receipt.error).toContain(`pid ${process.pid}`)
+    expect(receipt.error).toContain('failed to mount here')
   })
 
   it('reports an unusable policy value without failing the row', () => {
