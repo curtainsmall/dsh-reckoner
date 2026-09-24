@@ -2,7 +2,7 @@
 
 A deterministic calculation engine for the DeepSeek Harness: the model writes every formula, the engine owns the numerical rules.
 
-[Simplified Chinese](README.zh-CN.md)
+[简体中文](README.zh-CN.md)
 
 - **Origin**: [dsh-electro-lab](https://github.com/curtainsmall/dsh-electro-lab) v0.13.0, MIT, Copyright (c) curtainsmall
 - **Relation**: this project continues that engine work under a new name
@@ -154,9 +154,9 @@ The home holds the unclosed record (`open-record.jsonl`), the closed records (`r
 
 | document | content |
 |---|---|
-| [Engine manual](docs/engine.md) ([Chinese](docs/engine.zh-CN.md)) | the long-form engine reference |
+| [Engine manual](docs/engine.md) ([简体中文](docs/engine.zh-CN.md)) | the long-form engine reference |
 | [reckoner-interface](skills/reckoner-interface.md), [reckoner-template](skills/reckoner-template.md) | the manual the agent reads in Reckoner Mode |
-| [Contributing](.github/CONTRIBUTING.md) ([Chinese](docs/CONTRIBUTING.zh-CN.md)) | setup, commit conventions, release process |
+| [Contributing](.github/CONTRIBUTING.md) ([简体中文](docs/CONTRIBUTING.zh-CN.md)) | setup, commit conventions, release process |
 
 ## License
 
