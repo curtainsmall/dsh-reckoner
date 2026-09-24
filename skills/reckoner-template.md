@@ -10,6 +10,8 @@ whenToUse: Load before starting a reckoner workflow, so the record is opened, wr
 
 A record is one calculation: its title, the conditions it was solved from, the explanations written while working, the evaluation steps and the closing text. It is written by three markers; `set`, `get` and `eval` are refused until `record_start` has opened one.
 
+Every question gets a record. The markers are unconditional - `record_start` first, `record_end` last, whatever the question is. `set` and `eval` are not: a question that needs no numbers carries its answer in `record_message` alone, while one that needs numbers carries them in `set` and `eval` between the markers.
+
 1. `record_start {title}` - FIRST, before any other tool call. `title` is short, about the length of an article title, never a paragraph: it names the record in the list and titles the article written from it later.
 2. `set` - one call per quantity the user gave, transcribed into SI with its `dim`. This is not a place to calculate: no value enters the record that the user did not give.
 3. `record_message {text, hide?}` and `eval` - interleaved, in whatever order the work actually goes:

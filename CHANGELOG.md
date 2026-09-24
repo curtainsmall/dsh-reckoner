@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The record is unconditional and the calculation is not. Every question now opens and closes a record, `set` and `eval` carry only the parts that need numbers, and a question that needs none is answered through the record's own messages - stated once up front instead of leaving the model to infer it per case. Every rule used to assume a calculation, so a question that was not one left the model without instruction: it opened records it never computed in, loaded the manual, and worked the same answer over several passes. The persona also keeps one discipline line: a result already in hand is written once, and arithmetic belongs in `set` and `eval` rather than in the model's head.
 - A generation call that fails on its first attempt reports the provider's own reason. The stream's `finish` chunk carries `{kind, failure}`; the loop compared that object with the string `'aborted'`, so the abort check never fired and an `error` or `max-tokens` finish was discarded, leaving every failure as `the model produced no article text`. The reason is now read and reported, an unknown kind still falls through, and the fallback message names the finish reason it saw.
 - Entering selection mode in the records list no longer shifts the list: every toolbar control is boxed to one height and the toolbar never wraps.
 

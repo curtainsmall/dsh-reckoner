@@ -34,7 +34,7 @@ The package ships two agent presets. A session picks one when it is created: the
 | **Reckoner** (`reckoner`) | six plugin tools, no network | none |
 | **Reckoner with search** (`reckoner-with-search`) | the same six tools plus `search` | one fact at a time, written into the record with its sources |
 
-A session in the pure preset exposes the six plugin tools and nothing else - no shell, file system, network or subagents - so every number in an answer is a value transcribed by `set` or produced by `eval`, and a missing quantity makes the persona stop and name it. The search preset adds exactly one tool, `search`, and nothing else: the generic `web_search` and `web_fetch` tools are mounted by neither preset, so the model can never search or fetch on its own.
+A session in the pure preset exposes the six plugin tools and nothing else - no shell, file system, network or subagents - so every number in an answer is a value transcribed by `set` or produced by `eval`, and a missing quantity makes the persona stop and name it. Every question is carried by a record, while the engine inside it is optional: `set` and `eval` carry the parts that need numbers, and a question that needs none is answered through the record's own messages. The search preset adds exactly one tool, `search`, and nothing else: the generic `web_search` and `web_fetch` tools are mounted by neither preset, so the model can never search or fetch on its own.
 
 Each plugin mount copies both preset directories into `$DSH_HOME/.agent-presets/`, and each preset contributes the persona only, because the plugin itself is mounted globally by the bundle patch.
 

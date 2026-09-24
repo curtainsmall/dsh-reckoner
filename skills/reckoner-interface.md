@@ -77,6 +77,7 @@ A decibel value and an angle are both dimensionless numbers: `{"num": 3}` is `3`
 
 ## Discipline
 
+- The record carries every question; the engine carries only its numbers. A question that needs no calculation still opens and closes a record, with its answer written in `record_message`.
 - The gate comes first: store each quantity the user gave, one `set` per quantity, and stop if one is missing.
 - Never hard-code a measurement in a formula; reference the slot as `@name`. Constants you derive yourself (unit conversions, 273.15, 10 or 20) are written into the formula.
 - A quantity you cannot know and cannot write yourself goes through `search`; everything else still comes from the user. Its answer is not a result, and its sources are the record's business, not yours.

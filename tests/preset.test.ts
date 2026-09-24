@@ -56,6 +56,28 @@ describe('the packaged presets', () => {
     expect(cordis).toContain('allowedHosts:')
     expect(cordis).toContain('maxTokens: 800')
   })
+
+  /**
+   * The persona is the whole system prompt (`complete: true`), so the two levels
+   * have to be stated there: the record is unconditional, the engine inside it
+   * is not. Stating them once beats describing which kind of question gets a
+   * record - that is the case-by-case wording this guard replaced.
+   */
+  it('states the two levels: the record is unconditional, the calculation is not', () => {
+    for (const id of ['reckoner', 'reckoner-with-search']) {
+      const persona = read(`presets/${id}/agent.cordis.yml`)
+      expect(persona).toContain('Every question is carried by one record')
+      expect(persona).toContain('open it with record_start before any other call and close it with record_end')
+      expect(persona).toContain('The record is unconditional; the engine inside it is not')
+      expect(persona).toContain('set and eval carry the parts that need numbers')
+      expect(persona).toContain('close the record there - do not attempt the calculation')
+      expect(persona).toContain('write it once and stop')
+      // No case list: the routing is structural, not per question kind.
+      expect(persona).not.toContain('needs no calculation')
+    }
+    expect(read('skills/reckoner-interface.md')).toContain('The record carries every question')
+    expect(read('skills/reckoner-template.md')).toContain('Every question gets a record')
+  })
 })
 
 describe('the packaged preset', () => {
