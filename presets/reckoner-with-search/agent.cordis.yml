@@ -1,21 +1,15 @@
 # The `reckoner-with-search` agent preset: the calculation sandbox plus one
 # outside lookup.
 #
-# It is the `reckoner` preset plus the `search` row below - rules 1 to 7 and the
-# skill paragraph are byte-identical to that preset's persona, and a test
-# asserts it, so the two can only drift on purpose. The pure preset stays the
-# default: a session that never needs an external constant still runs with six
-# tools and no network at all.
-#
-# The plugin itself is NOT mounted here (a preset row for it would mount the
-# engine a second time); the row this preset adds is the `dsh-reckoner/search`
-# subpath, which only registers the `search` tool and forwards to the globally
-# mounted host half. The generic web tools - `web_search`, `web_fetch` - are
-# never mounted, so the model cannot search or fetch on its own: the pages, the
-# queries and the sources stay in the record.
-#
-# The persona carries the seven standing rules, three search rules, and the
-# skill pointer; a skill can be skipped, the persona cannot.
+# | item | value |
+# |---|---|
+# | composition | the `reckoner` preset plus the `search` row below |
+# | rules 1 to 7 and the skill paragraph | byte-identical to that preset's persona, asserted by a test, so the two can only drift on purpose |
+# | why the pure preset stays the default | a session that never needs an external constant runs with six tools and no network at all |
+# | the row this preset adds | the `dsh-reckoner/search` subpath: it registers the `search` tool and forwards to the globally mounted host half |
+# | the plugin row | never mounted here: it would mount the engine a second time |
+# | generic web tools | `web_search` and `web_fetch` are never mounted, so pages, queries and sources stay in the record |
+# | persona contents | the seven standing rules, three search rules, the skill pointer |
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'

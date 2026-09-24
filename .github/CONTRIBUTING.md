@@ -22,21 +22,24 @@ Thanks for your interest in contributing to **DeepSeek Harness Reckoner**.
 
 ## Commit messages
 
-Conventional Commits: `type(scope): subject`, for example `feat(expression): …`.
+Conventional Commits.
 
-| part | rule |
+| item | rule |
 |---|---|
+| form | `type(scope): subject`, for example `feat(expression): …` |
 | type | `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`, `revert` |
 | subject | English, imperative mood, lowercase |
-
-A body is welcome whenever a change needs its reason stated, and it reads as prose rather than as a list of touched files.
+| body | welcome whenever a change needs its reason stated; prose, not a list of touched files |
 
 ## Development setup
 
 | item | value |
 |---|---|
-| toolchain | pnpm 11 and Node ≥ 20; CI runs Node 24 |
+| pnpm | 11 |
+| Node | ≥ 20; CI runs 24 |
 | build | TypeScript, tsdown, vitest |
+| tests | `tests/`, one `*.test.ts` per unit, mirroring `src/` |
+| `lib/` | gitignored; built fresh on publish |
 
 ```sh
 pnpm install
@@ -45,25 +48,32 @@ pnpm test
 pnpm build
 ```
 
-Tests live in `tests/`, mirroring the `src/` layout with one `*.test.ts` per unit. `pnpm build` regenerates `lib/`, which is gitignored and built fresh on publish.
-
 ## Release
 
-Reserved to the owner. One release is one tag:
+| item | value |
+|---|---|
+| who | reserved to the owner |
+| unit | one release is one tag |
 
-1. Bump `package.json` and `dsh.plugin.json`, and add the matching `CHANGELOG.md` entry. The newest versioned entry must equal the new version.
-2. Push `develop` and open a pull request to `main`; merge it once the `build` workflow passes.
-3. Tag `vX.Y.Z` on `main` and push the tag. The release workflow checks the tag against the branch and both version files, then publishes to npm and creates a GitHub Release.
-4. A prerelease version `x.y.z-*` publishes under the `beta` dist-tag and is marked prerelease on GitHub.
+| step | action |
+|---|---|
+| 1 | bump `package.json` and `dsh.plugin.json`, and add the matching `CHANGELOG.md` entry |
+| 2 | push `develop`, open a pull request to `main`, merge it |
+| 3 | tag `vX.Y.Z` on `main` and push the tag |
+| 4 | nothing to do for a prerelease; it publishes itself |
+
+The newest versioned changelog entry must equal the new version. Step 2 waits for the `build` workflow. Step 3 starts the release workflow, which checks the tag against the branch and both version files, publishes to npm and creates a GitHub Release. A prerelease version `x.y.z-*` publishes under the `beta` dist-tag and is marked prerelease on GitHub.
 
 ## Documentation
 
 | rule | detail |
 |---|---|
 | scope | the README documents implemented features only |
-| languages | every document exists in en-US at its canonical path and in Simplified Chinese beside it as `xxx.zh-CN.md`; the changelog is English-only |
-| terms | write 分贝 for the decibel in Simplified Chinese; unit symbols such as `dBm`, `dBu`, `dBµV` and `dBW` stay unchanged |
+| languages | en-US at the canonical path, Simplified Chinese beside it as `xxx.zh-CN.md` |
+| changelog | English only |
+| terms | 分贝 for the decibel; `dBm`, `dBu`, `dBµV`, `dBW` stay unchanged |
 | roadmap | plan items stay out of the repository until they become real work |
+| structure | prose only where a sentence is the clearest form; facts in tables and lists |
 
 ## License
 

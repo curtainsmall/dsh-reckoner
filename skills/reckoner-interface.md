@@ -10,77 +10,248 @@ The engine is a calculator with no domain knowledge: you write the formula, it p
 
 ## Values
 
-A slot holds one of four value types: `number` (a JSON number), `complex` (stored rectangular as `re`/`im`), `array` (elements sharing one SI vector) and `object` (one vector per field). A quantity is a number plus a 7-integer SI vector; the vector is the whole identity, the name is only how it is written.
+| type | shape | note |
+|---|---|---|
+| `number` | a JSON number | |
+| `complex` | `re` / `im` | stored rectangular |
+| `array` | elements | one vector for the whole array |
+| `object` | named fields | one vector per field |
+
+A quantity is a number plus a 7-integer SI vector. The vector is the whole identity; the name is only how it is written.
 
 `set` takes a tagged object with exactly one tag:
 
-- `{"num": 4.7e3, "dim": "ohm"}` - a real
-- `{"re": 3, "im": 4, "dim": "ohm"}` - a complex in rectangular form
-- `{"mag": 5, "ang": 0.927295218, "dim": "ohm"}` - a complex in polar form (radians); it is converted to rectangular on the way in
-- `{"array": [1, 2, 3], "dim": "volt"}` - an array; its elements are bare numbers, `{re,im}` or nested arrays, and they share the array's `dim`
-- `{"object": {"v": {"num": 12, "dim": "volt"}}}` - named fields, each a full value with its own `dim`; an object takes no `dim` of its own
+| tag | example | note |
+|---|---|---|
+| `num` | `{"num": 4.7e3, "dim": "ohm"}` | a real |
+| `re` / `im` | `{"re": 3, "im": 4, "dim": "ohm"}` | rectangular |
+| `mag` / `ang` | `{"mag": 5, "ang": 0.927295218, "dim": "ohm"}` | radians; converted on the way in |
+| `array` | `{"array": [1, 2, 3], "dim": "volt"}` | elements share the array's `dim` |
+| `object` | `{"object": {"v": {"num": 12, "dim": "volt"}}}` | one `dim` per field; the object has none |
 
-`dim` is a name from the SI table or 7 integers in the order `m,kg,s,A,K,mol,cd`; omitted it is the zero vector. `value: null` deletes the slot, idempotently. Only whole SI vectors can be stored: a fractional vector (from `$sqrt` or a fractional power) is refused when it lands in a slot.
+| `dim` | meaning |
+|---|---|
+| a table name | the vector, with the name's affine map |
+| 7 integers, `m,kg,s,A,K,mol,cd` | the vector, with no affine map |
+| omitted | the zero vector |
+
+| rule | effect |
+|---|---|
+| `value: null` | deletes the slot, idempotently |
+| a storable vector | whole exponents only |
+| a fractional vector | refused at the slot |
+
+Array elements are bare numbers, `{re,im}` or nested arrays. A fractional vector comes from `$sqrt` or a fractional power.
 
 ## Tools
 
-- `set {name, value}` - write one slot. The receipt echoes what was stored: `dim` always as 7 integers, a complex always as `re`/`im`, an array with one `dim`, an object field by field.
-- `get {name, form?, digits?, dim?}` - read one slot.
-  - `form`: `"rect"` for `{re,im}`, `"polar"` for `{mag,ang}` in radians. A real is widened to a complex (`rect`: `{re:x, im:0}`; `polar`: `{mag:|x|, ang:0}`, and `pi` for a negative real). Omitted keeps the stored form.
-  - `digits`: round to at most that many significant digits (4700 has 4), never padding.
-  - `dim`: convert into that spelling, or - given 7 integers - check the vector without converting. A mismatch is refused.
-  - The `value` of a `get` receipt can be fed straight back into `set`.
-- `eval {formula, target}` - evaluate ONE expression and write the result into `target` (a required slot name). The receipt is `{ok, target, rev}`; `eval` does not return the value, so read it with `get`.
-- `search {question}` - look one fact up outside the calculation. It exists only in the `reckoner-with-search` preset; in the pure preset it is not part of the surface, so never call it there. Ask for the fact the way you would ask a colleague ("thermal conductivity of copper at 300 K"). The receipt is `{ok, answer, origin}` or `{ok: false, code, error}`: you get the answer as words, never the pages, the queries or the sources - those go into the record, with the route and the prompt version that produced them. Four rules:
-  - The answer is an INPUT, not a result: transcribe it with `set`, copying the number with the unit exactly as written, and let the engine convert.
-  - Never ask it to compute, convert, round or derive anything, and never ask for something the record already holds.
-  - `SEARCH_INSUFFICIENT` means no allowed source holds the fact: that quantity is missing, so say which relation cannot be evaluated and stop.
-  - `SEARCH_BUDGET_EXCEEDED` means the record has spent its lookups: continue with what the record holds, or state what is missing. `SEARCH_UNAVAILABLE` is a technical failure and changes nothing.
+### `set {name, value}`
+
+Writes one slot. The receipt echoes what was stored: `dim` as 7 integers, a complex as `re`/`im`, an array with one `dim`, an object field by field.
+
+### `get {name, form?, digits?, dim?}`
+
+Reads one slot. Its `value` can be fed straight back into `set`.
+
+| parameter | value | effect |
+|---|---|---|
+| `form` | `"rect"` | `{re,im}` |
+| | `"polar"` | `{mag,ang}`, radians |
+| | omitted | the stored form |
+| `digits` | an integer | at most that many significant digits (4700 has 4), never padding |
+| `dim` | a name | convert into that spelling |
+| | 7 integers | check the vector, no conversion |
+
+A real is widened to a complex on request: `rect` gives `{re:x, im:0}`, `polar` gives `{mag:|x|, ang:0}` and `pi` for a negative real. A `dim` that is 7 integers refuses a mismatch.
+
+### `eval {formula, target}`
+
+Evaluates ONE expression and writes the result into `target`, a required slot name.
+
+| item | value |
+|---|---|
+| receipt | `{ok, target, rev}` |
+| the value | not returned; read it with `get` |
+
+### `search {question}`
+
+Looks one fact up outside the calculation. It exists only in the `reckoner-with-search` preset; in the pure preset it is not part of the surface, so never call it there. Ask for the fact the way you would ask a colleague ("thermal conductivity of copper at 300 K").
+
+| item | value |
+|---|---|
+| receipt | `{ok, answer, origin}` or `{ok: false, code, error}` |
+| received | the answer as words |
+| never received | the pages, the queries, the sources |
+| destination of those | the record, with the route and prompt version |
+
+| rule | detail |
+|---|---|
+| the answer is an INPUT | transcribe it with `set`, copying the number with its unit as written |
+| never ask it to | compute, convert, round or derive |
+| never ask for | something the record already holds |
+| `SEARCH_INSUFFICIENT` | no allowed source holds the fact |
+| `SEARCH_BUDGET_EXCEEDED` | the record has spent its lookups |
+| `SEARCH_UNAVAILABLE` | a technical failure; it changes nothing |
+
+`SEARCH_INSUFFICIENT` means that quantity is missing: say which relation cannot be evaluated and stop. `SEARCH_BUDGET_EXCEEDED` means continue with what the record holds, or state what is missing.
 
 ## Receipts and errors
 
-Every call answers `{ok: true, ...}` or `{ok: false, code, error}`. A failure writes nothing: no slot changes, and the trace records the failure row. `error` is written for you - it carries the concrete value, the boundary or the expectation, and the fix. `code` is a stable identifier, useful in logs and tests.
+| field | meaning |
+|---|---|
+| `ok` | `true`, or `false` with a `code` and an `error` |
+| `error` | the concrete value, the boundary or the expectation, and the fix |
+| `code` | a stable identifier, useful in logs and tests |
 
-The codes: `ENGINE_INVALID_FORMULA`, `ENGINE_INVALID_NUMBER`, `ENGINE_INVALID_IDENTIFIER`, `ENGINE_INVALID_DIMENSION`, `ENGINE_INVALID_NOTATION`, `ENGINE_INVALID_ARITY`, `ENGINE_SLOT_NOT_FOUND`, `ENGINE_NAME_NOT_BOUND`, `ENGINE_INCOMPATIBLE_DIMENSION`, `ENGINE_UNSUPPORTED_OPERATION`, `ENGINE_INVALID_INDEX`, `ENGINE_UNDEFINED_RESULT`, `ENGINE_UNSUPPORTED_INDEX`, `ENGINE_FIELD_NOT_FOUND`, `ENGINE_UNSUPPORTED_SYMBOL`, `ENGINE_INVALID_ARGS`, `ENGINE_OPEN_RECORD_NOT_FOUND`, `ENGINE_OPEN_RECORD_FOUND`, `ENGINE_UNKNOWN_ERROR`.
+On failure nothing changes: no slot is written, and the failure row is recorded.
+
+| code | cause |
+|---|---|
+| `ENGINE_INVALID_FORMULA` | the formula does not parse |
+| `ENGINE_INVALID_NUMBER` | a malformed number literal |
+| `ENGINE_INVALID_IDENTIFIER` | a name outside the table used as a slot |
+| `ENGINE_INVALID_DIMENSION` | `dim` is neither a table name nor 7 integers |
+| `ENGINE_INVALID_NOTATION` | the `$` notation is written wrongly |
+| `ENGINE_INVALID_ARITY` | a notation with the wrong number of arguments |
+| `ENGINE_SLOT_NOT_FOUND` | `@name` names no slot |
+| `ENGINE_NAME_NOT_BOUND` | a bare name has no binding |
+| `ENGINE_INCOMPATIBLE_DIMENSION` | two vectors must match, or an argument must be dimensionless |
+| `ENGINE_UNSUPPORTED_OPERATION` | the operation does not exist between these operands |
+| `ENGINE_INVALID_INDEX` | an index is not an integer with the zero vector |
+| `ENGINE_UNDEFINED_RESULT` | the result is undefined here |
+| `ENGINE_UNSUPPORTED_INDEX` | the index form is not supported |
+| `ENGINE_FIELD_NOT_FOUND` | the object has no such field |
+| `ENGINE_UNSUPPORTED_SYMBOL` | the notation is writable but not evaluable |
+| `ENGINE_INVALID_ARGS` | a tool's arguments are invalid |
+| `ENGINE_OPEN_RECORD_NOT_FOUND` | no record is open |
+| `ENGINE_OPEN_RECORD_FOUND` | a record is already open |
+| `ENGINE_UNKNOWN_ERROR` | no more specific code applies |
 
 ## Record markers
 
-`record_start {title}` opens a record; it fails while a record is open (`ENGINE_OPEN_RECORD_FOUND`). `record_message {text, hide?}` writes one explanation - as many as the work needs, in any order relative to `eval`; `hide: true` keeps it out of the record view but still gives it to the article writer. `record_end {text?}` closes the record and writes it to disk; it fails when no record is open (`ENGINE_OPEN_RECORD_NOT_FOUND`). `set`, `get` and `eval` are refused while no record is open. Closing clears the slot table, so a new record starts empty. Each marker answers `{ok}`.
+| marker | effect | failure |
+|---|---|---|
+| `record_start {title}` | opens a record | a record is open |
+| `record_message {text, hide?}` | one explanation, any number, any order | none |
+| `record_end {text?}` | closes the record and writes it to disk | no record is open |
+
+| rule | effect |
+|---|---|
+| `hide: true` | out of the record view, still given to the writer |
+| `set`, `get`, `eval` | refused while no record is open |
+| closing | clears the slot table, so a new record starts empty |
+| each marker | answers `{ok}` |
+
+A failure carries `ENGINE_OPEN_RECORD_FOUND` or `ENGINE_OPEN_RECORD_NOT_FOUND` as the table above says.
 
 ## Notation
 
-Constants: `$pi` `$e` `$inf` `$i` `$j`.
+| constants |
+|---|
+| `$pi` `$e` `$inf` `$i` `$j` |
 
-Unary functions: `$abs` `$sqrt` `$exp` `$ln` `$log` `$sin` `$cos` `$tan` `$asin` `$acos` `$atan` `$floor` `$ceil` `$sign` `$re` `$im` `$arg` `$conj` `$transpose` `$len`.
+| unary functions | | | | |
+|---|---|---|---|---|
+| `$abs` | `$sqrt` | `$exp` | `$ln` | `$log` |
+| `$sin` | `$cos` | `$tan` | `$asin` | `$acos` |
+| `$atan` | `$floor` | `$ceil` | `$sign` | `$re` |
+| `$im` | `$arg` | `$conj` | `$transpose` | `$len` |
 
-Two-argument functions: `$atan2` `$min` `$max` `$mod`.
+| two-argument functions | | | |
+|---|---|---|---|
+| `$atan2` | `$min` | `$max` | `$mod` |
 
-Bounded forms: `$sum_{k=a}^{b}(body)`, `$prod_{k=a}^{b}(body)`, `$seq_{k=a}^{b}(body)`. Both bounds are required, they are integers with the zero vector, they are inclusive, and they are evaluated once before the body. `$seq` builds an array; nested `$seq` builds a row-major two-dimensional array. `$transpose(M)` takes a two-dimensional array and leaves the vector unchanged; `$len(array)` counts elements and is itself a usable bound.
+| bounded form | writes | evaluable |
+|---|---|---|
+| `$sum_{k=a}^{b}(body)` | a sum over `k` | yes |
+| `$prod_{k=a}^{b}(body)` | a product over `k` | yes |
+| `$seq_{k=a}^{b}(body)` | an array | yes |
+| `$integral_{a}^{b}(body, x)` | an integral | no |
+| `$limit_{x->a}(body)` | a limit | no |
+| `$diff(body, x)` | a derivative | no |
 
-Writable but not evaluable: `$integral_{a}^{b}(body, x)` or `$integral(body, x)`, `$limit_{x->a}(body)`, `$diff(body, x)` or `$diff(body, x, n)`. Evaluating one is refused.
+| bounded-form rule | detail |
+|---|---|
+| bounds | both required, integers with the zero vector, inclusive |
+| evaluation order | once, before the body |
+| `$integral` | also writable as `$integral(body, x)` |
+| `$diff` | also writable as `$diff(body, x, n)` |
+| `$transpose(M)` | a two-dimensional array; the vector is unchanged |
+| `$len(array)` | counts elements, and is a usable bound |
+| nested `$seq` | a row-major two-dimensional array |
 
-A position is the brace directly after the notation name: `_{k=a}`, `^{N}`. Every other `^` is a power, so `$e^(2)` and `$pi^2` are powers while `$pi^{2}` is not accepted. A bound expression holds no loop variable: `^{N-1}` is an unbound name, write `^{@N-1}`.
+| position | meaning |
+|---|---|
+| `_{k=a}`, `^{N}` | the brace directly after the notation name |
+| every other `^` | a power: `$e^(2)` and `$pi^2` are powers, `$pi^{2}` is refused |
+| a bound expression | no loop variable: `^{N-1}` is unbound, write `^{@N-1}` |
 
-Slots are read as `@name`, an array element as `@name[index]` (the index is an expression, an integer with the zero vector), an object field as `@name.field`, and these chain: `@net.ports[0].z`. A bare name is a bound variable only.
+| access | reads |
+|---|---|
+| `@name` | a slot |
+| `@name[index]` | an element; the index is an integer with the zero vector |
+| `@name.field` | a field |
+| chaining | `@net.ports[0].z` |
+| a bare name | a bound variable only |
 
-Operators: `+ - * / ^` with brackets. Precedence: additive, multiplicative, unary, power, postfix, primary; `^` is right-associative and `-2^2` is `-4`. Multiplication must be written: `2*@R`, never `2@R`. A formula is one expression - no assignment, no comparison, no logic, no statement sequence.
+| operator rule | detail |
+|---|---|
+| operators | `+ - * / ^` with brackets |
+| precedence | additive, multiplicative, unary, power, postfix, primary |
+| associativity | `^` right-associative, and `-2^2` is `-4` |
+| multiplication | written `2*@R`, never `2@R` |
+| a formula | one expression |
+
+A formula has no assignment, no comparison, no logic and no statement sequence.
 
 ## Dimensions
 
-A real exponent scales the SI vector (`@V^2`); a complex exponent needs a dimensionless base (`$e^(-$j*$pi/6)`, `2^(2j)`, `$j^$j`). `0^0` is 1; zero raised to a negative or complex power is refused. An exponent always has the zero vector.
+| exponent | rule |
+|---|---|
+| a real exponent | scales the vector: `@V^2` |
+| a complex exponent | needs a dimensionless base |
+| `0^0` | is 1 |
+| zero to a negative or complex power | refused |
+| any exponent | has the zero vector |
 
-Two sides of `+` and `-` must carry the same SI vector, so a dimensionless `5` added to a voltage is refused - write the quantity. A dimensionless factor multiplies without changing the vector (`2*@R`, `@theta*@R`); a pure ratio of two equal vectors is dimensionless.
+| context | rule |
+|---|---|
+| `+` and `-` | both sides carry the same vector |
+| a dimensionless factor | multiplies without changing the vector |
+| a ratio of two equal vectors | dimensionless |
+| `$min`, `$max`, `$mod`, `$atan2` | both arguments on the same vector |
 
-`$min`, `$max`, `$mod` and `$atan2` need both arguments on the same vector. `$sin` `$cos` `$tan` `$asin` `$acos` `$atan` `$ln` `$log` `$exp` `$floor` `$ceil` `$sign` take a dimensionless argument; `$asin` `$acos` `$atan` `$arg` return radians, and `$arg` accepts any vector (`$arg(0)` is 0, `$atan2(0,0)` is 0). `$abs` `$re` `$im` `$conj` keep the vector, `$sqrt` halves it. `$ln(-1)`, a division by zero, `$mod` by zero and `$asin(2)` are refused.
+A plain count is not a quantity: a dimensionless `5` added to a voltage is refused, so write the quantity. Complex examples: `$e^(-$j*$pi/6)`, `2^(2j)`, `$j^$j`.
 
-A decibel value and an angle are both dimensionless numbers: `{"num": 3}` is `3`. Turning one into a ratio is a formula you write - whether the factor is 10 or 20 follows the power or amplitude convention of the case.
+| function class | functions |
+|---|---|
+| dimensionless argument | `$sin` `$cos` `$tan` `$asin` `$acos` `$atan` `$ln` `$log` `$exp` `$floor` `$ceil` `$sign` |
+| returns radians | `$asin` `$acos` `$atan` `$arg` |
+| any vector accepted | `$arg` |
+| vector kept | `$abs` `$re` `$im` `$conj` |
+| vector halved | `$sqrt` |
+| refused | `$ln(-1)`, a division by zero, `$mod` by zero, `$asin(2)` |
+
+`$arg(0)` is 0, and `$atan2(0,0)` is 0.
+
+| case | rule |
+|---|---|
+| a decibel value | a dimensionless number: `{"num": 3}` is `3` |
+| an angle | a dimensionless number |
+| a ratio from one | a formula you write: the factor is 10 or 20 by convention |
 
 ## Discipline
 
-- The record carries every question; the engine carries only its numbers. A question that needs no calculation still opens and closes a record, with its answer written in `record_message`.
-- The gate comes first: store each quantity the user gave, one `set` per quantity, and stop if one is missing.
-- Never hard-code a measurement in a formula; reference the slot as `@name`. Constants you derive yourself (unit conversions, 273.15, 10 or 20) are written into the formula.
-- A quantity you cannot know and cannot write yourself goes through `search`; everything else still comes from the user. Its answer is not a result, and its sources are the record's business, not yours.
-- `set` is transcription into SI: convert the user's unit yourself and let `dim` name the result. A looked-up value keeps the unit its source wrote; `set` it that way and let the engine convert.
-- Check every receipt; read values only through `get`.
-- Split a long derivation: one intermediate per `eval`, read back with `@name`.
+The record carries every question; the engine carries only its numbers. A question that needs no calculation still opens and closes a record, with its answer written in `record_message`.
+
+| rule | detail |
+|---|---|
+| the gate | one `set` per quantity the user gave; stop if one is missing |
+| measurements | never hard-coded; reference the slot as `@name` |
+| constants you derive | unit conversions, 273.15, 10 or 20: written into the formula |
+| what you cannot know | goes through `search`; the rest comes from the user |
+| a looked-up answer | not a result; its sources are the record's business |
+| `set` | transcription into SI: convert the unit, let `dim` name the result |
+| a looked-up value | keeps the unit its source wrote; the engine converts it |
+| receipts | check every one; read values only through `get` |
+| a long derivation | one intermediate per `eval`, read back with `@name` |

@@ -2,11 +2,22 @@
 
 [简体中文](engine.zh-CN.md)
 
-Every calculation in the Reckoner plugin happens inside one deterministic **engine**. Its whole scope is four steps: parse one formula, derive the SI vector of every intermediate value, evaluate the arithmetic, and record the call. It holds no domain knowledge, no solver and no table of named formulas, and the only conversion it performs is the affine map carried by the names of its own SI table (Section 6.1).
+Every calculation in the Reckoner plugin happens inside one deterministic **engine**.
 
-One engine runs per host process. The markers of any session act on it, and at most one record is open at a time.
+| the engine's whole scope | in order |
+|---|---|
+| parse | one formula |
+| derive | the SI vector of every intermediate value |
+| evaluate | the arithmetic |
+| record | the call |
 
-The same material in model-facing form is carried by the `reckoner-interface` and `reckoner-template` skills, which the plugin registers.
+| it holds | it does not hold |
+|---|---|
+| the SI name table and its affine map (Section 6.1) | domain knowledge |
+| the slot table of the open record | a solver |
+| the trace of every call | a table of named formulas |
+
+It performs no conversion other than the affine map carried by the names of its own SI table (Section 6.1). One engine runs per host process: the markers of any session act on it, and at most one record is open at a time. The same material in model-facing form is carried by the `reckoner-interface` and `reckoner-template` skills, which the plugin registers.
 
 ## Contents
 

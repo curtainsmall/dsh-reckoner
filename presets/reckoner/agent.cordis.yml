@@ -1,18 +1,13 @@
 # The `reckoner` agent preset: a calculation sandbox.
 #
-# The persona is the complete system prompt: the model may ONLY use the tools
-# this session exposes (the dsh-reckoner plugin) - no shell, no file system,
-# no network, no subagents. Runtime context snapshots are suppressed.
-#
-# The plugin itself is NOT mounted here: it is a global bundle plugin (the
-# package's cordis.patch.yml inserts it into the profile roster). A preset row
-# for the same plugin would mount it a second time and duplicate the tool
-# registry, so a session joining this preset uses the globally mounted plugin
-# and the preset contributes only the persona.
-#
-# The persona carries the standing rules; a skill can be skipped, the persona
-# cannot. The engine manual (reckoner-interface) and the record protocol
-# (reckoner-template) live in the skills.
+# | item | value |
+# |---|---|
+# | persona | the complete system prompt |
+# | tool surface | only the tools this session exposes (the dsh-reckoner plugin) |
+# | excluded | shell, file system, network, subagents |
+# | runtime context | suppressed; a preset row for the same plugin would mount it a second time and duplicate the tool registry, so a session joining this preset uses the globally mounted plugin |
+# | why the persona carries the rules | a skill can be skipped, the persona cannot |
+# | skills it points at | reckoner-interface (engine manual), reckoner-template (record protocol) |
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'
