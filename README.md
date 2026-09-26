@@ -26,7 +26,7 @@ A calculation engine for the DeepSeek Harness, to force LLM to use deterministic
 dsh plugin --profile <profile> add dsh-reckoner
 ```
 
-## Reckoner Mode
+## Reckoner Preset
 
 The package ships two agent presets:
 | preset | id | tools| external sources |
