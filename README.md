@@ -1,6 +1,6 @@
 # DeepSeek Harness Reckoner
 
-A calculation engine for the DeepSeek Harness, to force LLM to use deterministic programe for evaluations rather than text generations.
+A calculation engine for the DeepSeek Harness, to force LLM to use deterministic program for evaluations rather than text generations.
 
 [简体中文](README.zh-CN.md)
 
@@ -9,12 +9,10 @@ A calculation engine for the DeepSeek Harness, to force LLM to use deterministic
 - [DeepSeek Harness Reckoner](#deepseek-harness-reckoner)
   - [Contents](#contents)
   - [Install](#install)
-  - [Reckoner Mode](#reckoner-mode)
-    - [Preset: Reckoner](#preset-reckoner)
-    - [Preset: Reckoner with search](#preset-reckoner-with-search)
+  - [Reckoner Preset](#reckoner-preset)
   - [The engine](#the-engine)
-  - [Records](#records)
-    - [The panel](#the-panel)
+    - [Basics](#basics)
+    - [Records](#records)
   - [Article generation](#article-generation)
   - [Configuration](#configuration)
   - [Documentation](#documentation)
@@ -35,11 +33,9 @@ The package ships two agent presets:
 | **Reckoner with search** | `reckoner-with-search` | same tools as 'Reckoner' preset, plus web search tools| includes web search results |
 
 
-The session gets the plugin tools and nothing else: no shell, no file system, no network, no subagents. Every number in an evaluation is therefore either a value the LLM sets with `set` or a result produced from `eval`.
- When
-conditions given are not enough for solving, the LLM shall stop and point out.
+The session gets the plugin tools and nothing else: no shell, no file system, no network, no subagents. Every number in an evaluation is therefore either a value the LLM sets with `set` or a result produced from `eval`. When conditions given are not enough for solving, the LLM shall stop and point out.
 
-For **Reckoner with search** preset, search tools are give for the LLM to search on web for external knowledges.
+For **Reckoner with search** preset, search tools are given for the LLM to search on the web for external knowledge.
 
 ## The engine
 

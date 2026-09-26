@@ -3,6 +3,7 @@
 [简体中文](engine.zh-CN.md)
 
 Every calculation in the Reckoner plugin happens inside one deterministic **engine**.
+
 ## Contents
 
 - [1. What the engine is](#1-what-the-engine-is)
@@ -15,16 +16,15 @@ Every calculation in the Reckoner plugin happens inside one deterministic **engi
 - [8. Errors](#8-errors)
 - [9. Storage and logs](#9-storage-and-logs)
 - [10. Article generation](#10-article-generation)
-- [11. The panel](#11-the-panel)
+- [11. Host endpoints](#11-host-endpoints)
 - [12. The outside lookup](#12-the-outside-lookup)
 
 ## 1. What the engine is
 
-The **Engine** is a state machine that do evaluations:
+The **engine** is a state machine that performs evaluations:
 
-- **No domain knowledge.** The engine knows nothing about any specific domain the LLM about to solve in, it only do mathmatical evaluation with the form given.
-- **No internal solvers.** The engine has no internal algorithm, nor embeded solutions. It is the caller's duty to decide what to calculation.
-
+- **No domain knowledge.** The engine knows nothing about the specific domain the LLM is about to solve in, it only does mathematical evaluation with the formula given.
+- **No internal solvers.** The engine has no internal algorithm, nor embedded solutions. It is the caller's duty to decide what to calculate.
 - **Numbers come from slots or from the formula's own literals.** The engine keeps no memory between calls other than the slot table, so every quantity in a derivation is a stored value or a constant written into the formula.
 - **Deterministic.** The same slot table and the same formula produce the same value: no randomness, no clock in the arithmetic, no network.
 
