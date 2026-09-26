@@ -23,7 +23,7 @@ Every calculation in the Reckoner plugin happens inside one deterministic **engi
 The **Engine** is a state machine that do evaluations:
 
 - **No domain knowledge.** The engine knows nothing about any specific domain the LLM about to solve in, it only do mathmatical evaluation with the form given.
--  **No internal solvers.** The engine has no internal algorithm, nor embeded solutions. It is the caller's duty to decide what to calculation.
+- **No internal solvers.** The engine has no internal algorithm, nor embeded solutions. It is the caller's duty to decide what to calculation.
 
 - **Numbers come from slots or from the formula's own literals.** The engine keeps no memory between calls other than the slot table, so every quantity in a derivation is a stored value or a constant written into the formula.
 - **Deterministic.** The same slot table and the same formula produce the same value: no randomness, no clock in the arithmetic, no network.
@@ -80,7 +80,7 @@ failure:      -> { ok:false, code, error }
 | `array` | each a number, a complex or a nested array | SI dimension; shared by every element |
 | `object` | each a full value | one SI dimension per field; the object carries none of its own |
 
-- SI dimension vector: SI dimension are represented as 7 integer exponents in ISO 80000-1 order (m, kg, s, A, K, mol, cd). Two values with the same SI dimension vector are the same quantity however they are spelled, and the kind label of Section 6.1 is a name for humans: it is never stored and never decides anything.
+- SI dimension vector: SI dimensions are represented as 7 integer exponents in ISO 80000-1 order (m, kg, s, A, K, mol, cd). Two values with the same SI dimension vector are the same quantity however they are spelled, and the kind label of Section 6.1 is a name for humans: it is never stored and never decides anything.
 - A numeric position holds a JSON number only, that is, a finite double. A string, a boolean or `null` in a numeric position is `ENGINE_INVALID_ARGS`.
 - Only whole vectors reach a slot: a vector with a fractional exponent is refused before anything is written (Section 6.4).
 
@@ -186,7 +186,7 @@ args           := [ additive (',' additive)* ]
 - Chaining: `@net.ports[0].z` reads indices and fields in one path.
 - `@name` only ever reads; the slot a call writes is `eval`'s `target` parameter (Section 2.1). Nothing stores a reference, and no reference ever appears in a value or a receipt.
 - A slot that does not exist is `ENGINE_SLOT_NOT_FOUND`.
-- An index must evaluate to an integerr: a number, or a complex with `im` 0. Anything else, and an index outside `0..len-1`, is `ENGINE_INVALID_INDEX`; the second names the length.
+- An index must evaluate to an integer: a number, or a complex with `im` 0. Anything else, and an index outside `0..len-1`, is `ENGINE_INVALID_INDEX`; the second names the length.
 - `[ ]` on a value that is not an array, and `.` on a value that is not an object, are `ENGINE_UNSUPPORTED_INDEX`. A field the object does not have is `ENGINE_FIELD_NOT_FOUND`, and the message lists the fields it has.
 - A bare name is a bound variable (Section 5.4); any other bare name is `ENGINE_NAME_NOT_BOUND`, whose message gives the rewrite `@name`.
 
@@ -533,9 +533,6 @@ A closed record can be written up as a standalone solution article. The host red
 - The prompt forbids mentioning Reckoner, the harness, formulas, derivation steps, records or the generation process, and forbids inventing or recomputing a number.
 - **Remembered settings.** Each format remembers its own output `directory`, its `language` and - LaTeX alone - whether to `compile` (Section 9.1).
 - The settings endpoint serves that view: `GET /api/dsh-reckoner/settings`, and `PUT` takes `{generation: {format, directory?, language?, compile?}}` (Section 11.3).
-
-
-
 
 ## 11. Host endpoints
 
