@@ -1,6 +1,6 @@
 {
   "name": "dsh-reckoner",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH plugin: a deterministic calculation engine - values, formulas, dimensional analysis and a step-by-step record",
   "repository": {
     "type": "git",

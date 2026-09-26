@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-25
+
+A documentation release. The engine, the tools, the record format and the presets are unchanged from `0.1.0`; what changed is how the project explains itself.
+
+### Documentation
+
+- Both READMEs were rewritten in a plainer voice: what the engine is, what the two presets mount, what each tool does, how a record is stored, and what the article writer receives. The install section keeps the one command, and the packaging details it used to explain moved to the manual. The English table of contents is rebuilt so every entry leads to a heading that exists, and a run-on sentence and a spelling mistake in the opening lines are fixed.
+- The engine manual was restructured around the order a calculation actually runs in, instead of opening with summary tables. Section 1 is now the state machine itself - no domain knowledge, no built-in solver, numbers that come from slots or from the formula's own literals, and a deterministic result. Section 6.4 is titled "Integer dimension only" and Section 8.2 "Error codes", so a heading says what it constrains rather than what it lists. The panel no longer has a section of its own: its HTTP surface is documented as "Host endpoints", and the outside lookup is the last section, split into basics, configurations and failure codes. Every link between the two manuals resolves again.
+- The Chinese manual is regenerated from the English one, so the two carry the same sections, the same tables and the same order, and differ only in language.
+
 ## [0.1.0]
 
 The first release: a deterministic calculation engine, six tools, a versioned record and an agent preset that can look one fact up.
